@@ -26,6 +26,7 @@ Read this first and open documents based on their summaries. One line per docume
 |---|---|---|---|
 | [ADR-0001](adr/ADR-0001-credentials-stay-in-provider-settings.md) | accepted | Keep provider credentials and gateway tokens in the providers' own settings | The app and its remote host components never hold provider API keys or gateway tokens; gateways are configured in each provider's own settings, rather than stored in the Keychain or dropped |
 | [ADR-0002](adr/ADR-0002-desktop-app-stack.md) | accepted | Build the desktop app with Electron and TypeScript | Electron with TypeScript, because it keeps every provider integration, the Claude Agent SDK included, in one process and one language and reuses the most code; a SwiftUI app with a TypeScript provider process, an all-Swift app and Tauri were rejected |
+| [ADR-0003](adr/ADR-0003-provider-protocols.md) | accepted | Drive Codex through app-server and Grok Build through ACP agent mode | Codex runs as `codex app-server` and Grok Build as `grok agent stdio`, because only these interfaces let the app answer approvals and questions while a turn runs; the Codex SDK, `codex exec`, `codex mcp-server`, Grok Build's headless mode and third-party ACP adapters were rejected |
 
 ## Lessons
 
