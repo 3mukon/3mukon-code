@@ -2,7 +2,7 @@
 
 A macOS desktop app for working with coding agents (Claude Code, Codex and Grok Build): start and follow agent sessions, answer their questions and approvals, and review what they changed, all in one place.
 
-The name and this description are working versions until the first publication.
+This description is a working version.
 
 ## Status
 
@@ -22,4 +22,4 @@ Start at [docs/INDEX.md](docs/INDEX.md). The hard base is [docs/architecture.md]
 
 ## Licence
 
-No licence has been chosen yet.
+3mukon-code is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Commercial use requires a separate licence, negotiated with the maintainer and approved by them in advance.
