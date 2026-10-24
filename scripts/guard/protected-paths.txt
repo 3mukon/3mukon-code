@@ -1,0 +1,15 @@
+# Protected files for the Codex protected-path guard: globs relative to the repository root, one per line.
+# This list enforces docs/architecture.md (Protected files); the maintainer updates both together.
+AGENTS.md
+CLAUDE.md
+LICENSE
+docs/architecture.md
+.github/workflows/*
+.github/CODEOWNERS
+.gitleaks.toml
+.claude/*
+.codex/*
+scripts/check.sh
+scripts/checks/*
+scripts/guard/*
+.git/hooks/*

@@ -1,0 +1,10 @@
+# Secrets never live in the repository directory; real values come from the environment
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# Per-user agent settings
+.claude/settings.local.json
