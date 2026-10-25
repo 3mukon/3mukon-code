@@ -6,11 +6,29 @@ This description is a working version.
 
 ## Status
 
-Foundation only. The architecture, conventions and guardrails are in place; there is no application code yet.
+Scaffold: the app opens an empty window. Sessions and providers are not built yet.
 
 ## Quick start
 
-There is nothing to run yet. To run every check on the repository:
+Requires macOS on Apple silicon and Node.js with Corepack, in the versions `package.json` gives. Install the dependencies:
+
+```bash
+corepack pnpm install --frozen-lockfile
+```
+
+Run the app in development mode, with hot reload:
+
+```bash
+corepack pnpm run dev
+```
+
+Build the app and its disk image into `dist/`:
+
+```bash
+corepack pnpm run package
+```
+
+Run every check:
 
 ```bash
 sh scripts/check.sh

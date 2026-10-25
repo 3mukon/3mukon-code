@@ -62,16 +62,20 @@ type is one of feat, fix, refactor, docs, test, chore. Technical reasons only; `
 
 | Check | When it runs | What it covers | How to run it by hand |
 |---|---|---|---|
-| Check command | Before calling work done; CI on every push and pull request | `scripts/checks/docs.sh` (core fields, visibility, INDEX rows), `scripts/guard/test-guards.sh` (guard self-tests), `scripts/checks/code.sh` (code checks; skipped visibly until application code exists) | `sh scripts/check.sh` |
+| Check command | Before calling work done; CI on every push and pull request | `scripts/checks/docs.sh` (core fields, visibility, INDEX rows), `scripts/guard/test-guards.sh` (guard self-tests), and the invariant 8, invariant 9, catalog and code checks below | `sh scripts/check.sh` |
+| Invariant 8 check | Inside the check command | electron-builder is configured in `electron-builder.yml` only, with no target for another platform; `package.json` scripts and `scripts/*.sh` request no other platform; code under `src/` never detects the platform, for example with `process.platform` | `sh scripts/checks/macos-only.sh` |
+| Invariant 9 check | Inside the check command | Code under `src/` names no API key or token, as a setting or as an environment variable; matches are reported by file and line only | `sh scripts/checks/no-provider-keys.sh` |
+| Catalog parity | Inside the check command | Every folder under `src/` with a UI string catalog holds `en.json` and `zh-Hans.json` with the same keys, plural forms folded, and only non-empty string values | `sh scripts/checks/catalogs.sh` |
+| Code checks | Inside the check command, through `scripts/checks/code.sh` | TypeScript (`tsc -b`); ESLint with typescript-eslint's strict type-checked rules and the React hooks rules; the module rules in `.dependency-cruiser.js`; Prettier; vitest unit tests, run on Electron's own Node.js; a Playwright smoke test that builds the app, launches it and checks its window | `corepack pnpm run` with `typecheck`, `lint`, `lint:modules`, `format:check`, `test` or `test:smoke` |
 | Secret scanning | The maintainer's local hooks: staged changes at commit, outgoing commits at push. CI: full history on every push and pull request | Secrets in content, using gitleaks' default rules | `gitleaks git --redact --no-banner -v .` |
 | Publishability check | The maintainer's local hooks, at commit and at push | Private references, local paths and sensitive terms in content, file names, commit messages and pushed ref names | Runs only in the maintainer's hooks |
 | Identity check | The maintainer's local hooks, at commit and at push | Every author and committer matches the repository's public commit identity | Runs only in the maintainer's hooks |
 | Bypass guard | Agent sessions, before every shell command | Blocks commands that contain `--no-verify`, `-n` on `git commit`, `core.hooksPath` or `.git/hooks`. Matching is plain text, so read-only mentions are blocked too; read those files with the agent's file tools | `sh scripts/guard/test-guards.sh` |
 | Protected-path guard | Codex sessions, before every patch | Refuses patches to the protected files listed in `scripts/guard/protected-paths.txt` | `sh scripts/guard/test-guards.sh` |
 
-- Tools: POSIX `sh`, git and the BSD userland of macOS for every script; gitleaks 8.30.1 (CI pins it and verifies its checksum; locally `brew install gitleaks`).
+- Tools: POSIX `sh`, git and the userland of macOS, jq included, for every script; gitleaks 8.30.1 (CI pins it and verifies its checksum; locally `brew install gitleaks`).
+- The app's toolchain: Node.js in the range `engines` in `package.json` gives, with its bundled Corepack, which runs the pnpm version `packageManager` pins; commands start with `corepack pnpm`. The code checks need the dependencies installed with `corepack pnpm install --frozen-lockfile` and fail with that instruction otherwise.
 - CI runs on GitHub Actions macOS runners, so the scripts are tested on the same userland they are written for. The code host is GitHub. CI and server-side gates are not live until the remote exists.
-- Before the first application code, the code checks print `SKIP` and pass. As soon as code exists without checks wired into `scripts/checks/code.sh`, they fail.
 
 ## Agent tools
 

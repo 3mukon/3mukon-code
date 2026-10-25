@@ -33,8 +33,9 @@ A summary of `docs/architecture.md`, which wins on conflict; the maintainer upda
 
 ## Commands
 
+- Install the dependencies first: `corepack pnpm install --frozen-lockfile`
 - Check, run before calling work done: `sh scripts/check.sh`
-- Test: none yet, because there is no application code. The change that adds the first code adds the stack's test command here and wires it into `scripts/checks/code.sh`.
+- Test: `corepack pnpm run test` (unit tests) and `corepack pnpm run test:smoke` (builds and launches the app); the check command runs both.
 - Commit-time, push-time and CI checks: see `docs/conventions.md` (Checks), column When it runs.
 
 ## Workflow

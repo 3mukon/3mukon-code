@@ -24,8 +24,8 @@ This file is part of this repository's hard base, together with the files listed
 
 | Layer | Where it lives here |
 |---|---|
-| Code | Feature module directories, each with a README from `docs/templates/module-readme.md` and listed in `docs/INDEX.md` (Modules). None yet: the first module arrives with the first code. |
-| Verification | `sh scripts/check.sh` runs every fast check. Code checks skip visibly while there is no application code and fail when code exists without checks wired into `scripts/checks/code.sh`. |
+| Code | Feature module directories under `src/`, each with a README from `docs/templates/module-readme.md` and listed in `docs/INDEX.md` (Modules). |
+| Verification | `sh scripts/check.sh` runs every fast check: the docs check, the guard self-tests, the invariant 8 and 9 checks, catalog parity and the code checks; `docs/conventions.md` (Checks) says what each covers. |
 | Knowledge | `docs/`: this file, `conventions.md`, `glossary.md`, ADRs, lessons and current-state docs, indexed in `docs/INDEX.md`. |
 | Agent access | `AGENTS.md` is the single entry; `CLAUDE.md` only imports it. Agent settings: `.claude/settings.json` (Claude Code) and `.codex/hooks.json` (Codex). |
 | Governance | The maintainer's local hooks (secret scanning, publishability check, identity check, at commit and at push); CI in `.github/workflows/checks.yml` (secret scanning and the check command); agent settings and the guards in `scripts/guard/`. |
@@ -34,7 +34,8 @@ This file is part of this repository's hard base, together with the files listed
 
 - Slice by feature (a capability of the app), and layer inside a module. A task should need one module plus the public interfaces of its neighbours.
 - Each module has a README that states its responsibilities, non-responsibilities, public interface and allowed dependencies. Other modules use only that interface.
-- Dependency directions are declared in the module READMEs. Enforcement is planned: the change that adds the first code chooses a tool for the stack and wires it into `scripts/checks/code.sh`.
+- Dependency directions are declared in the module READMEs and enforced by the rules in `.dependency-cruiser.js`, which `scripts/checks/code.sh` runs; a new module adds its rules there in the same change as its README.
+- Inside a module, main-process code lives in `main/` and UI code in `renderer/`. Renderer code never imports main-process code, Node.js built-ins or Electron, and reaches the main process only through the app module's preload bridge; main-process code never imports renderer code.
 - Code that runs on remote hosts lives in modules separate from desktop app modules, so that invariant 8 can be checked per module.
 - The module that new code imitates is named only in `docs/conventions.md` (Exemplars).
 
@@ -49,8 +50,8 @@ This file is part of this repository's hard base, together with the files listed
 | 5 | Each fact has one authoritative home; current-state docs change in the same change as the code | Stale documentation is worse than none, because agents believe it | None; review |
 | 6 | Nothing is declared done without `sh scripts/check.sh` passing, and checks are never weakened to pass | A blocked agent takes detours: editing tests, adding skips, bypassing hooks | CI runs the check command; it becomes a required status check once the remote exists (not live yet). The bypass guard blocks hook bypasses |
 | 7 | Only the maintainer changes the hard base and the guardrails | The constrained party cannot rewrite its own rules | Claude Code asks before protected files are edited; the Codex hook refuses patches to them |
-| 8 | The desktop app supports macOS only: no Windows or Linux desktop builds, packaging targets or platform branches in desktop app code. Components that run on remote hosts may run on Linux | Dropping the other desktop platforms removes platform branches and lets the app use macOS facilities directly | Planned: the change that adds the first desktop app code adds a check that rejects non-macOS packaging targets and Windows or Linux platform branches in desktop modules |
-| 9 | The app and its remote host components never read, store or transmit provider API keys or tokens; providers and third-party gateways are signed in and configured through the providers' own tools and settings (ADR-0001) | Keys the app never holds cannot leak through it | Planned: the change that adds the first provider integration adds a check that rejects API-key settings and key environment variables in app and remote component code. Until then, secret scanning catches committed keys |
+| 8 | The desktop app supports macOS only: no Windows or Linux desktop builds, packaging targets or platform branches in desktop app code. Components that run on remote hosts may run on Linux | Dropping the other desktop platforms removes platform branches and lets the app use macOS facilities directly | `scripts/checks/macos-only.sh`: electron-builder targets macOS only, and desktop app code (all of `src/` until remote host modules exist) never detects the platform |
+| 9 | The app and its remote host components never read, store or transmit provider API keys or tokens; providers and third-party gateways are signed in and configured through the providers' own tools and settings (ADR-0001) | Keys the app never holds cannot leak through it | `scripts/checks/no-provider-keys.sh` rejects API-key and token names, as settings or environment variables, in app code under `src/`; secret scanning catches committed keys |
 
 ## Protected files
 
@@ -62,6 +63,7 @@ This file is part of this repository's hard base, together with the files listed
 - `.github/CODEOWNERS`, once added
 - `scripts/check.sh` and `scripts/checks/` (the check command's scripts)
 - `.gitleaks.toml` (scanning configuration), once added
+- `pnpm-workspace.yaml` (which dependency build scripts may run)
 - `.claude/settings.json` and `.codex/` (agent settings)
 - `scripts/guard/` (guardrail scripts, their path list and their tests)
 - `.git/hooks/` (the maintainer's local hook wrappers, which are not versioned)

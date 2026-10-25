@@ -7,6 +7,7 @@ docs/architecture.md
 .github/workflows/*
 .github/CODEOWNERS
 .gitleaks.toml
+pnpm-workspace.yaml
 .claude/*
 .codex/*
 scripts/check.sh

@@ -1,0 +1,9 @@
+# Prettier also skips what .gitignore lists.
+# Documents follow docs/conventions.md, not Prettier.
+*.md
+# Protected configuration: it changes only with the maintainer's approval.
+.github/
+.claude/
+.codex/
+# Written by pnpm.
+pnpm-lock.yaml

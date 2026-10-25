@@ -1,22 +1,21 @@
 #!/bin/sh
-# Code checks. While the repository has no application code they skip visibly. Once code exists they fail
-# until the stack's typecheck, lint and test commands are wired in below, because until then nothing can
-# tell whether the code is sound.
+# Code checks: typecheck, lint, module rules, formatting, unit tests, and the smoke test on the built app.
+# Each runs as a package.json script through the pnpm version that package.json pins; every check runs
+# even when an earlier one fails, and each failure is named.
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 
-manifest=$(find . \( -name .git -o -name node_modules \) -prune -o \
-  \( -name package.json -o -name Package.swift -o -name '*.xcodeproj' -o -name '*.xcworkspace' \
-     -o -name go.mod -o -name Cargo.toml -o -name pyproject.toml \) -print | head -n 1)
-source=$(find . \( -name .git -o -name node_modules \) -prune -o -type f \
-  \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.swift' \
-     -o -name '*.m' -o -name '*.go' -o -name '*.rs' -o -name '*.py' \) -print | head -n 1)
-
-if [ -z "$manifest" ] && [ -z "$source" ]; then
-  echo "SKIP code checks: no application code yet"
-  exit 0
+if [ ! -d node_modules ]; then
+  echo "code checks: dependencies are not installed; run: corepack pnpm install --frozen-lockfile" >&2
+  exit 1
 fi
 
-echo "code checks: application code exists, but no checks are wired into scripts/checks/code.sh;" \
-  "add the stack's typecheck, lint and test commands here" >&2
-exit 1
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+status=0
+for script in typecheck lint lint:modules format:check test test:smoke; do
+  if ! corepack pnpm run "$script"; then
+    echo "code checks: $script failed" >&2
+    status=1
+  fi
+done
+exit "$status"

@@ -18,6 +18,9 @@ run() {
 
 run "docs: core fields and INDEX rows" sh scripts/checks/docs.sh
 run "guards: self-tests" sh scripts/guard/test-guards.sh
+run "invariant 8: macOS only" sh scripts/checks/macos-only.sh
+run "invariant 9: no provider keys" sh scripts/checks/no-provider-keys.sh
+run "catalogs: en and zh-Hans hold the same keys" sh scripts/checks/catalogs.sh
 run "code checks" sh scripts/checks/code.sh
 
 if [ "$status" -eq 0 ]; then

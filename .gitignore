@@ -3,6 +3,13 @@
 .env.*
 !.env.example
 
+# Dependencies, build output (out/ from electron-vite, dist/ from electron-builder) and test output
+node_modules/
+out/
+dist/
+test-results/
+playwright-report/
+
 # macOS
 .DS_Store
 

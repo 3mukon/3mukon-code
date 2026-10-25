@@ -1,0 +1,9 @@
+# pnpm settings for this single-package repository.
+
+# Scripts refuse to run when node_modules does not match the lockfile, instead of running stale code.
+verifyDepsBeforeRun: error
+
+# pnpm runs a dependency's build script only when it is allowed here. electron-winstaller comes with
+# electron-builder and its script prepares Windows installers, which this app never builds.
+allowBuilds:
+  electron-winstaller: false

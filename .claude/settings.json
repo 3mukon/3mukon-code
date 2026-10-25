@@ -8,6 +8,7 @@
       "Edit(/.github/workflows/**)",
       "Edit(/.github/CODEOWNERS)",
       "Edit(/.gitleaks.toml)",
+      "Edit(/pnpm-workspace.yaml)",
       "Edit(/.claude/**)",
       "Edit(/.codex/**)",
       "Edit(/scripts/check.sh)",

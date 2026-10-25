@@ -19,6 +19,7 @@ Read this first and open documents based on their summaries. One line per docume
 
 | ID | Status | Title | Summary |
 |---|---|---|---|
+| [DOC-mod-app](../src/app/README.md) | current | app module | The Electron entry point, which starts the desktop app, opens its main window and keeps that window on the app's own page |
 
 ## Architecture decisions
 

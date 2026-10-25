@@ -1,0 +1,19 @@
+# macOS arm64 only (invariant 8): an app folder and a disk image, ad-hoc signed for local use (ADR-0004).
+appId: io.github.3mukon.3mukon-code
+files:
+  - out/**
+npmRebuild: false
+mac:
+  target:
+    - target: dir
+      arch: arm64
+    - target: dmg
+      arch: arm64
+  category: public.app-category.developer-tools
+  identity: '-'
+  # Hardened runtime would make library validation reject the ad-hoc signed Electron framework; it
+  # only matters for notarization, which a local build skips.
+  hardenedRuntime: false
+  notarize: false
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
