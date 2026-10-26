@@ -6,6 +6,7 @@ import type {
   PermissionMode,
   QuestionRequest,
   ReasoningEffort,
+  SandboxLevel,
   SessionEvent,
   Task,
   ToolKind,
@@ -50,6 +51,7 @@ export interface SessionState {
   gateway?: string | null;
   model?: string | null;
   effort?: ReasoningEffort | null;
+  sandbox?: SandboxLevel;
   // The models the session can switch to, once the provider has listed them.
   models?: ModelOption[];
 }
@@ -157,6 +159,7 @@ export function applyEvent(state: SessionState, event: SessionEvent): SessionSta
         ...(event.gateway === undefined ? {} : { gateway: event.gateway }),
         ...(event.model === undefined ? {} : { model: event.model }),
         ...(event.effort === undefined ? {} : { effort: event.effort }),
+        ...(event.sandbox === undefined ? {} : { sandbox: event.sandbox }),
       };
     case 'models':
       return { ...state, models: event.models };

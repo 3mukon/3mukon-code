@@ -222,18 +222,20 @@ describe('sessionStatus and openRequests', () => {
     expect(state.turnRunning).toBe(false);
   });
 
-  it('keeps the latest gateway, model and effort, and the models the session can use', () => {
+  it('keeps the latest gateway, model, effort and sandbox, and the models the session can use', () => {
     const models = [{ id: 'opus', label: 'Opus', efforts: ['low', 'high'] }];
     const state = fold([
-      { type: 'settings', gateway: null, model: null, effort: null },
+      { type: 'settings', gateway: null, model: null, effort: null, sandbox: 'workspace-write' },
       { type: 'models', models },
       { type: 'settings', model: 'claude-opus-5' },
       { type: 'settings', gateway: 'work', effort: 'high' },
+      { type: 'settings', sandbox: 'read-only' },
     ]);
     expect(state).toMatchObject({
       gateway: 'work',
       model: 'claude-opus-5',
       effort: 'high',
+      sandbox: 'read-only',
       models,
     });
   });

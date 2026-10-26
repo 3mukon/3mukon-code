@@ -11,6 +11,11 @@ export type ProviderId = 'claude-code' | 'codex' | 'grok-build';
 // is asked and every action runs. New sessions start in auto.
 export type PermissionMode = 'auto' | 'yolo';
 
+// How far a session's actions may reach, set independently of the permission mode. In read-only the
+// agent can read and cannot write; in workspace-write it can write in the session's folder and in
+// temporary folders; in full-access it runs without a sandbox. New sessions start in workspace-write.
+export type SandboxLevel = 'read-only' | 'workspace-write' | 'full-access';
+
 // A reasoning effort level as the provider names it; Claude Code's are low, medium, high, xhigh and max.
 export type ReasoningEffort = string;
 
@@ -162,13 +167,14 @@ export type SessionEvent =
   | { type: 'request-resolved'; requestId: string; outcome: 'answered' | 'cancelled' }
   | { type: 'title'; title: string }
   | { type: 'mode'; mode: PermissionMode }
-  // The session's gateway, model and reasoning effort; fields left out keep their value. A null gateway
-  // is the provider's own configuration, a null model or effort the provider's default.
+  // The session's gateway, model, reasoning effort and sandbox; fields left out keep their value. A null
+  // gateway is the provider's own configuration, a null model or effort the provider's default.
   | {
       type: 'settings';
       gateway?: string | null;
       model?: string | null;
       effort?: ReasoningEffort | null;
+      sandbox?: SandboxLevel;
     }
   // The models the session can switch to.
   | { type: 'models'; models: ModelOption[] }

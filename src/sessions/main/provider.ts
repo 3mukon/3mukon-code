@@ -6,6 +6,7 @@ import type {
   ProviderId,
   QuestionAnswer,
   ReasoningEffort,
+  SandboxLevel,
   SessionEvent,
 } from '../shared/events';
 
@@ -23,6 +24,8 @@ export interface StartOptions {
   model?: string;
   // One of the model's effort levels; the model's default when left out.
   effort?: ReasoningEffort;
+  // workspace-write when left out.
+  sandbox?: SandboxLevel;
 }
 
 export interface ResumeOptions extends StartOptions {
@@ -68,6 +71,9 @@ export interface ProviderSession {
   setModel(model: string | null): Promise<void>;
   // Switches the reasoning effort for what follows; null returns to the model's default.
   setEffort(effort: ReasoningEffort | null): Promise<void>;
+  // Switches the sandbox level, independently of the permission mode. Where the provider allows it the
+  // switch happens at once, even during a turn; otherwise it applies from the next turn.
+  setSandbox(sandbox: SandboxLevel): Promise<void>;
   // Switches the gateway; null returns to the provider's own configuration. Between turns the switch
   // happens at once; asked for during a turn, it happens when the turn ends, before the next one. The
   // session keeps its id and its history.

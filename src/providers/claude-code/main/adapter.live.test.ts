@@ -76,7 +76,7 @@ function lastAgentText(state: SessionState): string {
   return last?.type === 'message' ? last.text : '';
 }
 
-it('streams turns in auto mode, writes, answers a question, switches mode, model, effort and gateway, and resumes', async () => {
+it('streams turns in auto mode, writes, answers a question, switches mode, model, effort, gateway and sandbox, and resumes', async () => {
   const provider = createClaudeCodeProvider({ gatewaysDir });
   expect(await provider.listGateways()).toEqual(['plain']);
   // The models come from a probe that starts no session.
@@ -161,6 +161,23 @@ it('streams turns in auto mode, writes, answers a question, switches mode, model
   await live.until((_, events) => turnsEnded(events) === 5);
   expect(lastAgentText(live.state).toLowerCase()).toContain('ready');
   expect(live.events.some((event) => event.type === 'closed')).toBe(false);
+
+  // The sandbox switches in place, in yolo too: read-only stops a command that writes, and back in
+  // workspace-write the Write tool, which read-only denies, works again.
+  expect(live.state.sandbox).toBe('workspace-write');
+  await session.setSandbox('read-only');
+  expect(live.state.sandbox).toBe('read-only');
+  await session.send(
+    `Use the Bash tool to run exactly this command, once, without changing it and without any other tool: touch ${join(cwd, 'blocked.txt')} && echo WROTE. Then reply with one word: done.`,
+  );
+  await live.until((_, events) => turnsEnded(events) === 6);
+  expect(existsSync(join(cwd, 'blocked.txt'))).toBe(false);
+  await session.setSandbox('workspace-write');
+  await session.send(
+    'Use the Write tool, once, to create a file named allowed.txt that contains exactly: hi. Do not use any other tool. Then reply with one word: done.',
+  );
+  await live.until((_, events) => turnsEnded(events) === 7);
+  expect(existsSync(join(cwd, 'allowed.txt'))).toBe(true);
 
   await session.close();
   await live.until((state) => state.closed);

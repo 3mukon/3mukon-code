@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SessionEvent } from '../../../sessions/shared/events';
+import type { SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
 import { createClaudeCodeProvider } from './adapter';
+import { sandboxSettings } from './sandbox';
 
 interface QueryParams {
   prompt: AsyncIterable<unknown>;
@@ -109,7 +110,15 @@ async function waitFor(condition: () => boolean): Promise<void> {
   expect(condition()).toBe(true);
 }
 
-async function startSession(options: { gateway?: string; model?: string; effort?: string } = {}) {
+// The flag settings of a level for the tests' session folder, which does not exist.
+function levelSettings(level: SandboxLevel, leavingReadOnly = false) {
+  const temporary = [...new Set([realpathSync(tmpdir()), realpathSync('/tmp')])];
+  return sandboxSettings(level, { cwd: '/work', temporary }, leavingReadOnly);
+}
+
+async function startSession(
+  options: { gateway?: string; model?: string; effort?: string; sandbox?: SandboxLevel } = {},
+) {
   const events: SessionEvent[] = [];
   const provider = createClaudeCodeProvider({ gatewaysDir });
   const session = await provider.start({ cwd: '/work', ...options }, (event) => {
@@ -144,8 +153,18 @@ describe('the Claude Code provider', () => {
       gateway: 'work',
       model: 'opus',
       effort: 'high',
+      sandbox: 'workspace-write',
     });
     expect(events).toContainEqual({ type: 'models', models: [opus] });
+  });
+
+  it('puts the process on the sandbox level before the first message', async () => {
+    const { session, events } = await startSession({ sandbox: 'read-only' });
+    expect(current().applyFlagSettings).toHaveBeenCalledExactlyOnceWith(levelSettings('read-only'));
+    expect(current().params.options).not.toHaveProperty('sandbox');
+    expect(events).toContainEqual(expect.objectContaining({ sandbox: 'read-only' }));
+    await playTurn(session, events, 'hello');
+    expect(current().applyFlagSettings).toHaveBeenCalledOnce();
   });
 
   it('refuses a gateway that does not exist and an effort Claude Code does not have', async () => {
@@ -182,11 +201,32 @@ describe('a Claude Code session', () => {
     await session.setEffort('low');
     await session.setEffort(null);
     expect(current().setModel).toHaveBeenCalledWith('haiku');
-    expect(current().applyFlagSettings).toHaveBeenNthCalledWith(1, { effortLevel: 'low' });
-    expect(current().applyFlagSettings).toHaveBeenNthCalledWith(2, { effortLevel: null });
+    expect(current().applyFlagSettings).toHaveBeenNthCalledWith(2, { effortLevel: 'low' });
+    expect(current().applyFlagSettings).toHaveBeenNthCalledWith(3, { effortLevel: null });
     await expect(session.setEffort('extreme')).rejects.toThrow('no reasoning effort');
     expect(events).toContainEqual({ type: 'settings', model: 'haiku' });
     expect(events).toContainEqual({ type: 'settings', effort: 'low' });
+    expect(fakes.queries).toHaveLength(1);
+  });
+
+  it('switches the sandbox level in place, during a turn too, and clears the deny rules of read-only', async () => {
+    const { session, events } = await startSession();
+    await session.send('hello');
+    await session.setSandbox('read-only');
+    await session.setSandbox('full-access');
+    await session.setSandbox('workspace-write');
+    const calls = current().applyFlagSettings.mock.calls as unknown[][];
+    expect(calls.map((call) => call[0])).toEqual([
+      levelSettings('workspace-write'),
+      levelSettings('read-only'),
+      levelSettings('full-access', true),
+      levelSettings('workspace-write'),
+    ]);
+    expect(events.filter((event) => event.type === 'settings').slice(1)).toEqual([
+      { type: 'settings', sandbox: 'read-only' },
+      { type: 'settings', sandbox: 'full-access' },
+      { type: 'settings', sandbox: 'workspace-write' },
+    ]);
     expect(fakes.queries).toHaveLength(1);
   });
 
@@ -201,6 +241,9 @@ describe('a Claude Code session', () => {
       resume: session.id,
       settings: join(gatewaysDir, 'work.json'),
     });
+    expect(current().applyFlagSettings).toHaveBeenCalledExactlyOnceWith(
+      levelSettings('workspace-write'),
+    );
     expect(events).toContainEqual({ type: 'settings', gateway: 'work' });
     expect(events.filter((event) => event.type === 'models')).toHaveLength(2);
     expect(events.some((event) => event.type === 'closed')).toBe(false);

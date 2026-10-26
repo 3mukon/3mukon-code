@@ -26,10 +26,12 @@ import type {
   PermissionMode,
   QuestionAnswer,
   ReasoningEffort,
+  SandboxLevel,
   SessionEvent,
 } from '../../../sessions/shared/events';
 import { defaultGatewaysDir, existingGatewayPath, gatewayPath, listGateways } from './gateways';
 import { approvalResult, questionResult, toRequest, type ClaudeRequest } from './requests';
+import { sandboxFolders, sandboxSettings, type SandboxFolders } from './sandbox';
 import { Translator } from './translate';
 
 // Claude Code's own mode behind each of the app's two permission modes: in auto, Claude Code's
@@ -111,6 +113,8 @@ async function sessionSettings(
     gateway: options.gateway ?? null,
     model: options.model ?? null,
     effort: effortLevel(options.effort ?? null),
+    sandbox: options.sandbox ?? 'workspace-write',
+    folders: await sandboxFolders(options.cwd),
   };
 }
 
@@ -161,6 +165,8 @@ interface SessionSettings {
   gateway: string | null;
   model: string | null;
   effort: EffortLevel | null;
+  sandbox: SandboxLevel;
+  folders: SandboxFolders;
 }
 
 // One Claude Code process serving the session; a gateway switch replaces it.
@@ -217,6 +223,7 @@ class ClaudeCodeSession implements ProviderSession {
       gateway: settings.gateway,
       model: settings.model,
       effort: settings.effort,
+      sandbox: settings.sandbox,
     });
     this.connection = this.connect();
   }
@@ -268,22 +275,31 @@ class ClaudeCodeSession implements ProviderSession {
   }
 
   async setMode(mode: PermissionMode): Promise<void> {
-    await this.connection.query.setPermissionMode(nativeModes[mode]);
+    await (await this.process()).setPermissionMode(nativeModes[mode]);
     this.settings.mode = mode;
     this.onEvent({ type: 'mode', mode });
   }
 
   async setModel(model: string | null): Promise<void> {
-    await this.connection.query.setModel(model ?? undefined);
+    await (await this.process()).setModel(model ?? undefined);
     this.settings.model = model;
     this.onEvent({ type: 'settings', model });
   }
 
   async setEffort(effort: ReasoningEffort | null): Promise<void> {
     const level = effortLevel(effort);
-    await this.connection.query.applyFlagSettings({ effortLevel: level });
+    await (await this.process()).applyFlagSettings({ effortLevel: level });
     this.settings.effort = level;
     this.onEvent({ type: 'settings', effort: level });
+  }
+
+  // Claude Code takes the new level at once, during a turn too.
+  async setSandbox(sandbox: SandboxLevel): Promise<void> {
+    const query = await this.process();
+    const leavingReadOnly = this.settings.sandbox === 'read-only';
+    await query.applyFlagSettings(sandboxSettings(sandbox, this.settings.folders, leavingReadOnly));
+    this.settings.sandbox = sandbox;
+    this.onEvent({ type: 'settings', sandbox });
   }
 
   async setGateway(gateway: string | null): Promise<void> {
@@ -337,9 +353,21 @@ class ClaudeCodeSession implements ProviderSession {
     return connection;
   }
 
-  // Waits for Claude Code's initialization, which lists the models the session can use.
+  // The running Claude Code process, once a gateway switch under way has finished with it.
+  private async process(): Promise<Query> {
+    if (this.switching !== null) await this.switching;
+    if (this.closed) throw new Error('The session is closed.');
+    return this.connection.query;
+  }
+
+  // Waits for Claude Code's initialization, which lists the models the session can use, and puts the
+  // process on the session's sandbox level before any message. The level goes in as flag settings,
+  // since the SDK's own sandbox option cannot go beside a gateway's settings file.
   private async initialize(): Promise<void> {
     const init = await this.connection.query.initializationResult();
+    await this.connection.query.applyFlagSettings(
+      sandboxSettings(this.settings.sandbox, this.settings.folders, false),
+    );
     this.onEvent({ type: 'models', models: modelOptions(init.models) });
   }
 
