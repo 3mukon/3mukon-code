@@ -23,7 +23,7 @@ Read this first and open documents based on their summaries. One line per docume
 | [DOC-mod-claude-code](../src/providers/claude-code/README.md) | current | claude-code provider module | The Claude Code adapter, which drives Claude Code through the Claude Agent SDK on the user's own Claude Code sign-in and maps it onto the provider-neutral session model |
 | [DOC-mod-i18n](../src/i18n/README.md) | current | i18n module | The English and Simplified Chinese catalogs and the runtime that shows the UI in the first of them that macOS's preferred languages name |
 | [DOC-mod-sessions](../src/sessions/README.md) | current | sessions module | The provider-neutral session model, made of the interface every provider adapter implements, the events and requests a session produces, and the state the UI folds from them |
-| [DOC-mod-ui](../src/ui/README.md) | current | ui module | The reference design's tokens, as a dark and a matching light theme that follow macOS, and the presentational components other modules build their UI from |
+| [DOC-mod-ui](../src/ui/README.md) | current | ui module | The reference design's tokens, as a dark and a matching light theme that follow macOS, and the presentational components and icons other modules build their UI from |
 
 ## Architecture decisions
 
@@ -35,6 +35,7 @@ Read this first and open documents based on their summaries. One line per docume
 | [ADR-0004](adr/ADR-0004-tooling-and-libraries.md) | accepted | Build on Electron 44 and TypeScript 6 with electron-vite, React, Tailwind and i18next | The app uses Electron 44, TypeScript 6, pnpm 12, electron-vite on Vite 8, electron-builder for macOS arm64, React with zustand, Tailwind, i18next, vitest and Playwright, ESLint and Prettier, and dependency-cruiser, with the provider packages pinned and bundled |
 | [ADR-0005](adr/ADR-0005-provider-neutral-session-model.md) | accepted | Model every session as one provider-neutral event stream | Each provider adapter maps its protocol onto one internal interface, a session that reports serializable events and takes answers to approvals and questions, using ACP's tool vocabulary, unified diffs and per-request approval options; adopting ACP itself as the internal model and building a UI per provider were rejected |
 | [ADR-0006](adr/ADR-0006-two-permission-modes.md) | accepted | Offer two permission modes, automatic approval by default and yolo | Every provider runs in one of two modes, auto, in which the provider's own automatic review approves or denies each action and asks the user only when it cannot decide, and which new sessions start in, or yolo, in which nothing is asked; asking before every action and the providers' other modes are not offered |
+| [ADR-0007](adr/ADR-0007-icons-from-lucide.md) | accepted | Take the app's icons from Lucide, through the ui module | The UI takes its icons from Lucide (`lucide-react`, ISC licence), which the ui module re-exports as decorative components so that no other module imports the set directly; hand-drawn icons and SF Symbols were rejected |
 
 ## Lessons
 

@@ -2,7 +2,6 @@
   "sidebar": {
     "label": "Sidebar",
     "sessions": "Sessions",
-    "noSessions": "No sessions yet",
     "newSession": "New session"
   }
 }

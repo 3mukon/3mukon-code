@@ -5,7 +5,7 @@ title: ui module
 status: current
 visibility: public
 date: 2026-10-25
-summary: The reference design's tokens, as a dark and a matching light theme that follow macOS, and the presentational components other modules build their UI from
+summary: The reference design's tokens, as a dark and a matching light theme that follow macOS, and the presentational components and icons other modules build their UI from
 scope: ["src/ui/**"]
 tags: []
 ---
@@ -18,6 +18,7 @@ tags: []
   - `WaitingIndicator` (`renderer/waiting-indicator.tsx`): the title bar's count of sessions waiting on the user, as a button; it renders nothing at zero.
   - `Pane` (`renderer/pane.tsx`): a pane with a header (status, title, detail) above a scrolling body, dimmed while the other pane has focus.
   - `SplitPanes` (`renderer/split-panes.tsx`): one pane, or two side by side with a divider that the pointer drags or the keyboard moves (arrow keys, Shift for larger steps, Home, End), keeping each pane at least `minPaneWidth` wide (`renderer/split.ts`).
+- Icons (`renderer/icons.tsx`): the Lucide icons the app uses (ADR-0007), as components that draw in the current text colour and are hidden from VoiceOver.
 
 ## Not responsible for
 
@@ -28,14 +29,15 @@ tags: []
 ## Interface
 
 - `renderer/tokens.css`, imported once by the app module's stylesheet.
-- The components above, `clampSplit` and `minPaneWidth`, each imported from its file in `renderer/`.
+- The components above, the icons, `clampSplit` and `minPaneWidth`, each imported from its file in `renderer/`.
 
 ## Dependencies
 
-- Uses React only and imports no other module; the rule `ui-imports-no-module` in `.dependency-cruiser.js` enforces it.
-- Every other module may import it.
+- Uses React and Lucide (`lucide-react`), and imports no other module; the rule `ui-imports-no-module` in `.dependency-cruiser.js` enforces it.
+- Every other module may import it, and takes its icons only from it: the rule `icons-only-through-ui` keeps `lucide-react` inside this module.
 
 ## Invariants
 
 - Colours come only from the tokens; a new colour is a new token in both themes.
 - Every interactive component can be reached and operated from the keyboard and is labelled for VoiceOver; decorative parts such as status dots are hidden from VoiceOver, and their meaning is given in words.
+- Icons come only from Lucide, through `renderer/icons.tsx`; a new icon is a new export there and, like the others, is hidden from VoiceOver, so whatever shows it names it in words.

@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Plus } from '../../ui/renderer/icons';
 
 // The window shell: a full-height sidebar, which ⌘B shows and hides, beside the main area. The top
 // 40px of both form the title bar, which moves the window, shows no title and has no line beneath
@@ -34,20 +35,28 @@ export function App() {
           {/* The sidebar's part of the title bar, where macOS draws the traffic lights; no line
               separates it from the rest of the sidebar. */}
           <div className="h-10 shrink-0 [-webkit-app-region:drag]" />
-          <div className="flex min-h-0 flex-1 flex-col gap-[18px] px-2.5 py-3.5">
-            <div className="truncate px-2 py-1 font-medium">3mukon-code</div>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 px-2.5 pb-3.5">
+            {/* The app's name, bold and compact, just below the title bar. */}
+            <div className="truncate px-2 leading-5 font-bold">3mukon-code</div>
             <section aria-labelledby={sessionsHeading}>
-              <h2 id={sessionsHeading} className="mb-1 px-2 text-[11px] text-faint">
-                {t('sidebar.sessions')}
-              </h2>
-              <p className="px-2 text-muted">{t('sidebar.noSessions')}</p>
+              <div className="flex items-center gap-1 px-2">
+                <h2 id={sessionsHeading} className="text-[11px] text-faint">
+                  {t('sidebar.sessions')}
+                </h2>
+                {/* New session, a plus icon whose name VoiceOver reads and the tooltip shows; the
+                    negative margin keeps the heading's row height. Starting sessions arrives with
+                    the sessions module. */}
+                <button
+                  type="button"
+                  disabled
+                  aria-label={t('sidebar.newSession')}
+                  title={t('sidebar.newSession')}
+                  className="-my-0.5 grid size-5 place-items-center rounded-md text-faint"
+                >
+                  <Plus className="size-4" />
+                </button>
+              </div>
             </section>
-            <div className="flex-1" />
-            {/* Starting sessions arrives with the sessions module. */}
-            <button type="button" disabled className="rounded-md px-2 py-1.5 text-left text-faint">
-              <span aria-hidden="true">+ </span>
-              {t('sidebar.newSession')}
-            </button>
           </div>
         </div>
       </aside>

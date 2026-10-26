@@ -40,6 +40,37 @@ test('Command-B hides the sidebar and shows it again', async () => {
   }
 });
 
+test('New session is a plus icon just after the Sessions heading, on its row', async () => {
+  const electronApp = await electron.launch({ args: ['.'] });
+  try {
+    const window = await electronApp.firstWindow();
+    const heading = await window.getByRole('heading', { name: 'Sessions' }).boundingBox();
+    const button = await window.getByRole('button', { name: 'New session' }).boundingBox();
+    if (!heading || !button) throw new Error('the Sessions heading or New session is not shown');
+    const middle = (box: { y: number; height: number }) => box.y + box.height / 2;
+    expect(Math.abs(middle(button) - middle(heading))).toBeLessThan(2);
+    const gap = button.x - (heading.x + heading.width);
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThan(10);
+  } finally {
+    await electronApp.close();
+  }
+});
+
+test('the sidebar heading is bold and sits just below the title bar', async () => {
+  const electronApp = await electron.launch({ args: ['.'] });
+  try {
+    const window = await electronApp.firstWindow();
+    const heading = window.getByText('3mukon-code');
+    await expect(heading).toHaveCSS('font-weight', '700');
+    const box = await heading.boundingBox();
+    expect(box?.y).toBeGreaterThanOrEqual(40);
+    expect(box?.y).toBeLessThan(48);
+  } finally {
+    await electronApp.close();
+  }
+});
+
 test('the UI is in Simplified Chinese when the app runs in that language', async () => {
   const electronApp = await electron.launch({ args: ['.', '--lang=zh-CN'] });
   try {

@@ -40,6 +40,14 @@ export default {
       to: { path: '^src/', pathNot: '^src/ui/' },
     },
     {
+      name: 'icons-only-through-ui',
+      comment:
+        'Icons come from Lucide through the ui module, so the app keeps one icon set (src/ui/README.md, ADR-0007).',
+      severity: 'error',
+      from: { path: '^src/', pathNot: '^src/ui/' },
+      to: { path: 'node_modules/lucide-react/' },
+    },
+    {
       name: 'i18n-imports-no-module',
       comment:
         'i18n holds the catalogs and the localization runtime; every module may use it, and it uses none (src/i18n/README.md).',

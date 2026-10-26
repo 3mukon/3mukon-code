@@ -13,13 +13,15 @@ describe('App', () => {
     render(<App />);
     const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
     within(sidebar).getByText('3mukon-code');
-    within(sidebar).getByRole('heading', { name: 'Sessions' });
-    within(sidebar).getByText('No sessions yet');
-    expect(within(sidebar).getByRole('button', { name: 'New session' })).toHaveProperty(
-      'disabled',
-      true,
-    );
-    // The workspace label is the only place the name appears.
+    const sessions = within(sidebar).getByRole('region', { name: 'Sessions' });
+    const heading = within(sessions).getByRole('heading', { name: 'Sessions' });
+    // New session sits beside the Sessions heading as a plus icon, and no empty-state text stands in
+    // for the sessions that do not exist yet.
+    const newSession = within(sessions).getByRole('button', { name: 'New session' });
+    expect(heading.parentElement?.contains(newSession)).toBe(true);
+    expect(newSession).toHaveProperty('disabled', true);
+    expect(sessions.textContent).toBe('Sessions');
+    // The sidebar's heading is the only place the name appears.
     expect(screen.getAllByText('3mukon-code')).toHaveLength(1);
     expect(screen.getByRole('main').textContent).toBe('');
   });

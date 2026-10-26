@@ -2,7 +2,6 @@
   "sidebar": {
     "label": "边栏",
     "sessions": "会话",
-    "noSessions": "还没有会话",
     "newSession": "新建会话"
   }
 }
