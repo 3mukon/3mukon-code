@@ -14,6 +14,7 @@ tags: []
 
 - The provider interface (`main/provider.ts`), which each adapter under `src/providers/` implements: `Provider` starts and resumes sessions, with a gateway, a model, a reasoning effort and a sandbox level when chosen, and lists a folder's past sessions, the gateways set up in the provider's own settings and the models a session could use; `ProviderSession` sends the user's messages, interrupts the running turn, answers approvals and questions, switches the permission mode, the model, the reasoning effort, the sandbox level and the gateway, and closes the session. Every provider offers the same two permission modes, `auto` and `yolo`, and sessions start in `auto` (ADR-0006). Every provider also offers the same three sandbox levels on its own sandbox, set independently of the mode: `read-only`, `workspace-write`, in which the agent writes only in the session's folder and in temporary folders, and `full-access`, without a sandbox; sessions start in `workspace-write`.
 - The event model (`shared/events.ts`): the `SessionEvent` union a session reports (turns; streamed messages; tool calls, in the Agent Client Protocol's tool kinds and statuses; the agent's task list; file changes as unified diffs; approvals and questions and their resolution; title, mode, the session's gateway, model, reasoning effort and sandbox level, the models it can switch to, the end of a replay, errors, closing), together with the requests, answers, history entries, permission modes, sandbox levels and model options.
+- The toolset's contract (`main/provider.ts`, ADR-0009): `Toolset`, which the toolset module implements and the app hands to the adapters whose providers lack one of its tools; `ToolsetSession`, through which a call asks the session's user; and `ToolsetAccess`, the address and credential one session's provider process uses.
 - The session state (`shared/session-state.ts`): `applyEvent` folds a session's events into what the UI shows, a timeline in the order things first happened and the current task list; `sessionStatus` derives running, waiting, idle or closed, and `openRequests` lists the approvals and questions still waiting, oldest first.
 
 ## Not responsible for
@@ -25,7 +26,7 @@ tags: []
 
 ## Interface
 
-- From `main/provider.ts`, for adapters and the main process: `Provider`, `ProviderSession`, `StartOptions`, `ResumeOptions` and `SessionEventListener`.
+- From `main/provider.ts`, for adapters, the toolset and the main process: `Provider`, `ProviderSession`, `StartOptions`, `ResumeOptions`, `SessionEventListener`, `Toolset`, `ToolsetSession` and `ToolsetAccess`.
 - For both processes: the types in `shared/events.ts`, and `applyEvent`, `initialSessionState`, `sessionStatus` and `openRequests` from `shared/session-state.ts`.
 - What an adapter must keep to:
   - `start` and `resume` resolve once the provider's session id is known, and the listener receives every event from the first.
@@ -43,7 +44,7 @@ tags: []
 ## Dependencies
 
 - `main/` and `shared/` use nothing outside the module. `shared/` imports no main-process or renderer code, no Node.js built-ins and no Electron, so it runs in both processes; it is type-checked against both the Node.js and the browser configuration.
-- Never imports a provider adapter or the app module. The rules `sessions-not-to-providers`, `app-is-the-entry` and the `shared-not-to-*` rules in `.dependency-cruiser.js` enforce this.
+- Never imports a provider adapter, the toolset or the app module. The rules `sessions-not-to-providers`, `toolset-only-from-app`, `app-is-the-entry` and the `shared-not-to-*` rules in `.dependency-cruiser.js` enforce this.
 
 ## Invariants
 

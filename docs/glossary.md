@@ -21,3 +21,4 @@ One name per concept: naming and search follow the Term column, and Avoid lists 
 | remote host | A machine other than the user's Mac on which agent sessions or their supporting services run; it may run Linux | server (for this meaning), remote machine |
 | session | One conversation with one provider's agent in one working directory | chat, thread, conversation |
 | sandbox level | How far a session's commands may reach, set apart from the permission mode: read-only, workspace-write or full access | sandbox mode, sandbox profile (except as a provider's own terms) |
+| toolset | The app's own MCP tools, named 3mukon-code, which it serves to each session's provider process (ADR-0009) | MCP server (for this meaning), plugin |

@@ -68,11 +68,49 @@ export default {
       comment:
         'A provider adapter uses only the sessions interface and model, never other modules or UI code (src/providers/claude-code/README.md).',
       severity: 'error',
-      from: { path: '^src/providers/' },
+      from: { path: '^src/providers/', pathNot: '\\.live\\.test\\.ts$' },
       to: {
         path: '^src/',
         pathNot: ['^src/providers/', '^src/sessions/main/provider\\.ts$', '^src/sessions/shared/'],
       },
+    },
+    {
+      name: 'provider-live-tests-compose-as-the-app',
+      comment:
+        "An adapter's live test may also start the toolset, as the app module does, and nothing else (src/toolset/README.md).",
+      severity: 'error',
+      from: { path: '^src/providers/.+\\.live\\.test\\.ts$' },
+      to: {
+        path: '^src/',
+        pathNot: [
+          '^src/providers/',
+          '^src/sessions/main/provider\\.ts$',
+          '^src/sessions/shared/',
+          '^src/toolset/main/server\\.ts$',
+        ],
+      },
+    },
+    {
+      name: 'toolset-only-to-sessions-contract',
+      comment:
+        'The toolset uses only the sessions interface and model, never a provider adapter or UI code (src/toolset/README.md).',
+      severity: 'error',
+      from: { path: '^src/toolset/' },
+      to: {
+        path: '^src/',
+        pathNot: ['^src/toolset/', '^src/sessions/main/provider\\.ts$', '^src/sessions/shared/'],
+      },
+    },
+    {
+      name: 'toolset-only-from-app',
+      comment:
+        'The app module starts the toolset and hands it to the adapters through the sessions interface (src/toolset/README.md, ADR-0009).',
+      severity: 'error',
+      from: {
+        path: '^src/',
+        pathNot: ['^src/app/', '^src/toolset/', '^src/providers/.+\\.live\\.test\\.ts$'],
+      },
+      to: { path: '^src/toolset/' },
     },
     {
       name: 'providers-not-to-each-other',
@@ -136,6 +174,12 @@ export default {
   ],
   options: {
     doNotFollow: { path: 'node_modules' },
+    // Packages are resolved through their export maps, as Node.js and the bundler resolve them, so that
+    // subpath imports such as the MCP SDK's resolve.
+    enhancedResolveOptions: {
+      exportsFields: ['exports'],
+      conditionNames: ['import', 'require', 'node', 'default'],
+    },
     // Type-only imports count too: a type from main-process code would pull Node.js types into the page.
     tsPreCompilationDeps: true,
   },

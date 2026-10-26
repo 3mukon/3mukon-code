@@ -4,6 +4,7 @@ import type {
   ModelOption,
   PermissionMode,
   ProviderId,
+  Question,
   QuestionAnswer,
   ReasoningEffort,
   SandboxLevel,
@@ -80,4 +81,32 @@ export interface ProviderSession {
   setGateway(gateway: string | null): Promise<void>;
   // Ends the session and its provider process; a closed event follows.
   close(): Promise<void>;
+}
+
+// The app's own MCP toolset, named 3mukon-code (ADR-0009). The app starts it once and hands it to the
+// adapters whose providers lack one of its tools; an adapter opens it for each session it runs and
+// gives the session's provider process the address and the credential.
+export interface Toolset {
+  // The name providers list it under.
+  readonly name: string;
+  open(session: ToolsetSession): ToolsetAccess;
+}
+
+// What the toolset needs from the session that a call comes from.
+export interface ToolsetSession {
+  // Shows the questions to the user, as a question request of the session, and resolves with the
+  // answer. It resolves as declined when the user declines, the turn is interrupted or the session
+  // closes, and when the signal aborts, as it does when the provider gives up the call.
+  ask(questions: Question[], signal: AbortSignal): Promise<QuestionAnswer>;
+}
+
+// How one session's provider process reaches the toolset.
+export interface ToolsetAccess {
+  // The toolset's address, which only this Mac can reach.
+  readonly url: string;
+  // The session's own credential, which the provider sends as a bearer credential. It is the app's,
+  // opens only the toolset and only for this session, and is never a provider credential.
+  readonly credential: string;
+  // Ends the session's access; calls still running end as cancelled.
+  close(): void;
 }

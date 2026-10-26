@@ -28,6 +28,7 @@ tags: []
 ## Not responsible for
 
 - Signing in: Claude Code signs in through its own `/login` and keeps its credentials itself; this module never reads or passes them (ADR-0008). Without a sign-in, a turn fails with Claude Code's own message.
+- The app's toolset (ADR-0009): Claude Code asks the user through its own AskUserQuestion in every mode, so its sessions do not open the toolset.
 - Subagents' activity and Claude Code's background tasks: not shown in this version.
 - Hosting: the main process runs the adapter. A packaged app opened from the Finder does not inherit the shell's PATH, which Claude Code's commands may need; packaging has to provide it.
 
