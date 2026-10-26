@@ -35,7 +35,7 @@ This file is part of this repository's hard base, together with the files listed
 - Slice by feature (a capability of the app), and layer inside a module. A task should need one module plus the public interfaces of its neighbours.
 - Each module has a README that states its responsibilities, non-responsibilities, public interface and allowed dependencies. Other modules use only that interface.
 - Dependency directions are declared in the module READMEs and enforced by the rules in `.dependency-cruiser.js`, which `scripts/checks/code.sh` runs; a new module adds its rules there in the same change as its README.
-- Inside a module, main-process code lives in `main/` and UI code in `renderer/`. Renderer code never imports main-process code, Node.js built-ins or Electron, and reaches the main process only through the app module's preload bridge; main-process code never imports renderer code.
+- Inside a module, main-process code lives in `main/` and UI code in `renderer/`. Renderer code never imports main-process code, Node.js built-ins or Electron, and reaches the main process only through the app module's preload bridge; main-process code never imports renderer code. Code that both use lives in `shared/`, which imports neither side's code, nor Node.js built-ins, nor Electron.
 - Code that runs on remote hosts lives in modules separate from desktop app modules, so that invariant 8 can be checked per module.
 - The module that new code imitates is named only in `docs/conventions.md` (Exemplars).
 

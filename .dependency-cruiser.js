@@ -48,6 +48,37 @@ export default {
       to: { path: '^src/', pathNot: '^src/i18n/' },
     },
     {
+      name: 'sessions-not-to-providers',
+      comment:
+        'Provider adapters implement the sessions interface; sessions never imports them (src/sessions/README.md).',
+      severity: 'error',
+      from: { path: '^src/sessions/' },
+      to: { path: '^src/providers/' },
+    },
+    {
+      name: 'shared-not-to-process-code',
+      comment:
+        "A module's shared/ code runs in the main process and the renderer alike, so it imports neither side's code.",
+      severity: 'error',
+      from: { path: '^src/.+/shared/' },
+      to: { path: '^src/.+/(main|renderer)/' },
+    },
+    {
+      name: 'shared-not-to-node',
+      comment: 'shared/ code also runs in the sandboxed page, which has no Node.js built-ins.',
+      severity: 'error',
+      from: { path: '^src/.+/shared/' },
+      to: { dependencyTypes: ['core'] },
+    },
+    {
+      name: 'shared-not-to-electron',
+      comment:
+        "shared/ code also runs in the sandboxed page, where Electron's modules do not exist.",
+      severity: 'error',
+      from: { path: '^src/.+/shared/' },
+      to: { path: 'node_modules/electron/' },
+    },
+    {
       name: 'renderer-not-to-main',
       comment:
         'Renderer code runs in the sandboxed page and reaches the main process only through the preload bridge.',
