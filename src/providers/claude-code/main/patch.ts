@@ -22,11 +22,17 @@ export function unifiedDiff(path: string, hunks: readonly Hunk[], added: boolean
   const lines = [added ? '--- /dev/null' : `--- ${label('a', path)}`, `+++ ${label('b', path)}`];
   for (const hunk of hunks) {
     lines.push(
-      `@@ -${String(hunk.oldStart)},${String(hunk.oldLines)} +${String(hunk.newStart)},${String(hunk.newLines)} @@`,
+      `@@ -${range(hunk.oldStart, hunk.oldLines)} +${range(hunk.newStart, hunk.newLines)} @@`,
       ...hunk.lines,
     );
   }
   return `${lines.join('\n')}\n`;
+}
+
+// A hunk's range. An empty range starts at the line before it, as in diff and git: an added file's old
+// range is 0,0.
+function range(start: number, lines: number): string {
+  return `${String(lines === 0 ? Math.max(0, start - 1) : start)},${String(lines)}`;
 }
 
 // A unified diff between two texts, such as an edit's old and new strings. Line numbers count from the

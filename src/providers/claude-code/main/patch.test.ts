@@ -32,4 +32,13 @@ describe('diffTexts', () => {
     expect(diff).toContain('-two');
     expect(diff).toContain('+three');
   });
+
+  it('starts an empty range at the line before it, as diff and git do', () => {
+    expect(diffTexts('n.txt', '', 'hi\n')).toBe(
+      '--- /dev/null\n+++ b/n.txt\n@@ -0,0 +1,1 @@\n+hi\n',
+    );
+    expect(diffTexts('o.txt', 'bye\n', '')).toBe(
+      '--- a/o.txt\n+++ b/o.txt\n@@ -1,1 +0,0 @@\n-bye\n',
+    );
+  });
 });
