@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
@@ -16,8 +23,13 @@ import { createClaudeCodeProvider } from './adapter';
 // it uses a little of the account's usage.
 
 const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'claude-code-live-')));
+// A gateway whose settings file changes nothing, so that switching to it keeps the account's own
+// sign-in and endpoint.
+const gatewaysDir = realpathSync(mkdtempSync(join(tmpdir(), 'claude-code-gateways-')));
+writeFileSync(join(gatewaysDir, 'plain.json'), '{}');
 afterAll(() => {
   rmSync(cwd, { recursive: true, force: true });
+  rmSync(gatewaysDir, { recursive: true, force: true });
 });
 
 // Folds a session's events into its state, so that the test can wait for a condition on it.
@@ -64,8 +76,12 @@ function lastAgentText(state: SessionState): string {
   return last?.type === 'message' ? last.text : '';
 }
 
-it('streams turns in auto mode, writes, answers a question, switches to yolo and resumes', async () => {
-  const provider = createClaudeCodeProvider();
+it('streams turns in auto mode, writes, answers a question, switches mode, model, effort and gateway, and resumes', async () => {
+  const provider = createClaudeCodeProvider({ gatewaysDir });
+  expect(await provider.listGateways()).toEqual(['plain']);
+  // The models come from a probe that starts no session.
+  expect((await provider.listModels(null)).some((model) => model.id === 'haiku')).toBe(true);
+
   const live = recorder();
   // Approvals and questions arrive only after start has resolved, so the listener can use the session.
   const session: ProviderSession = await provider.start({ cwd }, (event) => {
@@ -115,6 +131,26 @@ it('streams turns in auto mode, writes, answers a question, switches to yolo and
 
   await session.setMode('yolo');
   expect(live.state.mode).toBe('yolo');
+  expect(live.state.models?.length).toBeGreaterThan(0);
+
+  // The model and the effort switch in place; the next turn's init names the model now in use.
+  await session.setModel('haiku');
+  await session.setEffort('low');
+  await session.send('Reply with exactly one word: two');
+  await live.until((_, events) => turnsEnded(events) === 4);
+  expect(lastAgentText(live.state).toLowerCase()).toContain('two');
+  expect(live.state.model).toContain('haiku');
+  expect(live.state.effort).toBe('low');
+
+  // The gateway switches between turns, in a new Claude Code process that continues the session.
+  await session.setGateway('plain');
+  expect(live.state.gateway).toBe('plain');
+  await session.send(
+    'What was the one word you replied with first in this conversation? Reply with that word only.',
+  );
+  await live.until((_, events) => turnsEnded(events) === 5);
+  expect(lastAgentText(live.state).toLowerCase()).toContain('ready');
+  expect(live.events.some((event) => event.type === 'closed')).toBe(false);
 
   await session.close();
   await live.until((state) => state.closed);

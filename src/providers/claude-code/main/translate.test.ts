@@ -62,6 +62,20 @@ describe('Translator.live', () => {
     expect(translator.live(init('plan'))).toEqual([]);
   });
 
+  it('reports the model in use from the init message', () => {
+    const translator = new Translator(cwd);
+    const init = {
+      type: 'system',
+      subtype: 'init',
+      permissionMode: 'auto',
+      model: 'claude-opus-5',
+    } as unknown as SDKMessage;
+    expect(translator.live(init)).toEqual([
+      { type: 'mode', mode: 'auto' },
+      { type: 'settings', model: 'claude-opus-5' },
+    ]);
+  });
+
   it('streams text and thinking as deltas, and does not repeat them from the complete message', () => {
     const translator = new Translator(cwd);
     const stream = (event: unknown, parent: string | null = null) =>

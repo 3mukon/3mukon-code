@@ -119,9 +119,14 @@ export class Translator {
   live(message: SDKMessage): SessionEvent[] {
     switch (message.type) {
       case 'system': {
+        // Each turn starts with an init message, which names the mode and the model in use.
         if (message.subtype !== 'init') return [];
         const mode = APP_MODES[message.permissionMode];
-        return mode === undefined ? [] : [{ type: 'mode', mode }];
+        const model = str(message.model);
+        return [
+          ...(mode === undefined ? [] : [{ type: 'mode' as const, mode }]),
+          ...(model === '' ? [] : [{ type: 'settings' as const, model }]),
+        ];
       }
       case 'stream_event':
         return message.parent_tool_use_id === null ? this.stream(message.event) : [];

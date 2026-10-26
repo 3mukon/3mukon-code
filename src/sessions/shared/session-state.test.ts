@@ -222,6 +222,22 @@ describe('sessionStatus and openRequests', () => {
     expect(state.turnRunning).toBe(false);
   });
 
+  it('keeps the latest gateway, model and effort, and the models the session can use', () => {
+    const models = [{ id: 'opus', label: 'Opus', efforts: ['low', 'high'] }];
+    const state = fold([
+      { type: 'settings', gateway: null, model: null, effort: null },
+      { type: 'models', models },
+      { type: 'settings', model: 'claude-opus-5' },
+      { type: 'settings', gateway: 'work', effort: 'high' },
+    ]);
+    expect(state).toMatchObject({
+      gateway: 'work',
+      model: 'claude-opus-5',
+      effort: 'high',
+      models,
+    });
+  });
+
   it('ignores the resolution of a request it never saw', () => {
     const state = initialSessionState();
     expect(

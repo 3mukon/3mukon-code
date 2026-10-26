@@ -1,9 +1,11 @@
 import type {
   ApprovalAnswer,
   HistoryEntry,
+  ModelOption,
   PermissionMode,
   ProviderId,
   QuestionAnswer,
+  ReasoningEffort,
   SessionEvent,
 } from '../shared/events';
 
@@ -15,6 +17,12 @@ export interface StartOptions {
   cwd: string;
   // auto when left out.
   mode?: PermissionMode;
+  // A gateway as listGateways names it; the provider's own configuration when left out.
+  gateway?: string;
+  // A model as listModels names it; the provider's default when left out.
+  model?: string;
+  // One of the model's effort levels; the model's default when left out.
+  effort?: ReasoningEffort;
 }
 
 export interface ResumeOptions extends StartOptions {
@@ -25,7 +33,7 @@ export interface ResumeOptions extends StartOptions {
 // One provider protocol behind the provider-neutral session model; each adapter under src/providers/
 // implements it. Methods reject when the provider refuses or fails; failures that happen later, while
 // a session runs, arrive as error and closed events. Credentials never pass through this interface:
-// providers sign in through their own tools (ADR-0001).
+// providers sign in through their own tools, and gateways go by name (ADR-0008).
 export interface Provider {
   readonly id: ProviderId;
   // Starts a session and resolves once the provider has given it an id. The listener receives every
@@ -36,6 +44,12 @@ export interface Provider {
   resume(options: ResumeOptions, onEvent: SessionEventListener): Promise<ProviderSession>;
   // The folder's past sessions from the provider's own store, newest first, at most limit of them.
   listSessions(cwd: string, limit: number): Promise<HistoryEntry[]>;
+  // The gateways set up in the provider's own settings, by name and in order; empty for a provider
+  // without gateways.
+  listGateways(): Promise<string[]>;
+  // The models a session through this gateway, or through the provider's own configuration when it is
+  // null, could use. Found without starting a session, so nothing appears in the provider's history.
+  listModels(gateway: string | null): Promise<ModelOption[]>;
 }
 
 export interface ProviderSession {
@@ -50,6 +64,14 @@ export interface ProviderSession {
   answerQuestion(requestId: string, answer: QuestionAnswer): Promise<void>;
   // Switches the permission mode for what follows.
   setMode(mode: PermissionMode): Promise<void>;
+  // Switches the model for what follows; null returns to the provider's default.
+  setModel(model: string | null): Promise<void>;
+  // Switches the reasoning effort for what follows; null returns to the model's default.
+  setEffort(effort: ReasoningEffort | null): Promise<void>;
+  // Switches the gateway; null returns to the provider's own configuration. Between turns the switch
+  // happens at once; asked for during a turn, it happens when the turn ends, before the next one. The
+  // session keeps its id and its history.
+  setGateway(gateway: string | null): Promise<void>;
   // Ends the session and its provider process; a closed event follows.
   close(): Promise<void>;
 }

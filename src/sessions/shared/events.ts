@@ -11,6 +11,19 @@ export type ProviderId = 'claude-code' | 'codex' | 'grok-build';
 // is asked and every action runs. New sessions start in auto.
 export type PermissionMode = 'auto' | 'yolo';
 
+// A reasoning effort level as the provider names it; Claude Code's are low, medium, high, xhigh and max.
+export type ReasoningEffort = string;
+
+// A model a session can use.
+export interface ModelOption {
+  // The provider's name for the model, which chooses it.
+  id: string;
+  label: string;
+  description?: string;
+  // The reasoning effort levels the model takes; empty when it takes none.
+  efforts: ReasoningEffort[];
+}
+
 // What a tool call does, in the vocabulary of the Agent Client Protocol.
 export type ToolKind =
   | 'read'
@@ -149,6 +162,16 @@ export type SessionEvent =
   | { type: 'request-resolved'; requestId: string; outcome: 'answered' | 'cancelled' }
   | { type: 'title'; title: string }
   | { type: 'mode'; mode: PermissionMode }
+  // The session's gateway, model and reasoning effort; fields left out keep their value. A null gateway
+  // is the provider's own configuration, a null model or effort the provider's default.
+  | {
+      type: 'settings';
+      gateway?: string | null;
+      model?: string | null;
+      effort?: ReasoningEffort | null;
+    }
+  // The models the session can switch to.
+  | { type: 'models'; models: ModelOption[] }
   // A resumed session has replayed its past events; what follows is live.
   | { type: 'replay-finished' }
   | { type: 'error'; message: string }

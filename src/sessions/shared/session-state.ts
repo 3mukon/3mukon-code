@@ -2,8 +2,10 @@ import type {
   ApprovalRequest,
   FileChange,
   MessageRole,
+  ModelOption,
   PermissionMode,
   QuestionRequest,
+  ReasoningEffort,
   SessionEvent,
   Task,
   ToolKind,
@@ -44,6 +46,12 @@ export interface SessionState {
   loadingHistory: boolean;
   title?: string;
   mode?: PermissionMode;
+  // A null gateway is the provider's own configuration, a null model or effort the provider's default.
+  gateway?: string | null;
+  model?: string | null;
+  effort?: ReasoningEffort | null;
+  // The models the session can switch to, once the provider has listed them.
+  models?: ModelOption[];
 }
 
 export function initialSessionState(loadingHistory = false): SessionState {
@@ -143,6 +151,15 @@ export function applyEvent(state: SessionState, event: SessionEvent): SessionSta
       return { ...state, title: event.title };
     case 'mode':
       return { ...state, mode: event.mode };
+    case 'settings':
+      return {
+        ...state,
+        ...(event.gateway === undefined ? {} : { gateway: event.gateway }),
+        ...(event.model === undefined ? {} : { model: event.model }),
+        ...(event.effort === undefined ? {} : { effort: event.effort }),
+      };
+    case 'models':
+      return { ...state, models: event.models };
     case 'replay-finished':
       return { ...state, loadingHistory: false };
     case 'error':
