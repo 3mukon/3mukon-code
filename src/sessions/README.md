@@ -21,7 +21,7 @@ tags: []
 - Speaking a provider's protocol: each adapter maps its provider onto this model (ADR-0005).
 - Showing sessions: the session list, the panes and the composer arrive with the session UI, in this module's `renderer/`.
 - Hosting the adapters and carrying events to the renderer: the main process does both once the preload bridge exists.
-- Credentials: providers sign in through their own tools, and nothing here reads or carries a key or token (ADR-0001).
+- Credentials: providers sign in through their own tools, and nothing here reads or carries a key or token (ADR-0008).
 
 ## Interface
 

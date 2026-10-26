@@ -18,7 +18,7 @@ A summary of `docs/architecture.md`, which wins on conflict; the maintainer upda
 6. Run the check command before declaring anything done; never weaken checks or bypass hooks.
 7. Never edit a protected file on your own (see Start here): propose the change, and edit only after the maintainer approves it.
 8. The desktop app supports macOS only: no Windows or Linux desktop targets or platform branches in desktop code. Remote host components may run on Linux.
-9. The app and its remote host components never read, store or transmit provider API keys or tokens; providers and gateways are configured in the providers' own tools.
+9. The app and its remote host components never store, log or show provider API keys or tokens, and read or transmit one only to pass a selected Codex gateway file's settings to Codex; providers and gateways are configured in the providers' own tools.
 
 ## Map
 

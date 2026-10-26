@@ -23,7 +23,7 @@ tags: []
 
 ## Not responsible for
 
-- Signing in: Claude Code signs in through its own `/login` and keeps its credentials itself; this module never reads or passes them (ADR-0001). Without a sign-in, a turn fails with Claude Code's own message.
+- Signing in: Claude Code signs in through its own `/login` and keeps its credentials itself; this module never reads or passes them (ADR-0008). Without a sign-in, a turn fails with Claude Code's own message.
 - Subagents' activity, text streamed as it is written, and Claude Code's background tasks: not shown in this version.
 - Hosting: the main process runs the adapter. A packaged app opened from the Finder does not inherit the shell's PATH, which Claude Code's commands may need; packaging has to provide it.
 

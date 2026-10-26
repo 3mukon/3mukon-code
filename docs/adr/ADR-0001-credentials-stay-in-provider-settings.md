@@ -2,14 +2,14 @@
 id: ADR-0001
 type: adr
 title: Keep provider credentials and gateway tokens in the providers' own settings
-status: accepted
+status: superseded
 visibility: public
 date: 2026-10-23
 summary: The app and its remote host components never hold provider API keys or gateway tokens; gateways are configured in each provider's own settings, rather than stored in the Keychain or dropped
 scope: []
 tags: []
 supersedes: []
-superseded_by:
+superseded_by: ADR-0008
 ---
 
 ## Context
