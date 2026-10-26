@@ -95,10 +95,15 @@ it('streams turns in auto mode, writes, answers a question, switches mode, model
       });
     }
     if (event.type === 'question-asked') {
+      // Chooses Tabs or Light, whichever the question offers.
       const question = event.request.questions[0];
+      const choice = question?.options.find((option) => ['Tabs', 'Light'].includes(option.label));
       void session.answerQuestion(event.request.id, {
         decision: 'answer',
-        answers: question === undefined ? {} : { [question.id]: { selected: ['Tabs'] } },
+        answers:
+          question === undefined || choice === undefined
+            ? {}
+            : { [question.id]: { selected: [choice.label] } },
       });
     }
   });
@@ -133,12 +138,17 @@ it('streams turns in auto mode, writes, answers a question, switches mode, model
   expect(live.state.mode).toBe('yolo');
   expect(live.state.models?.length).toBeGreaterThan(0);
 
-  // The model and the effort switch in place; the next turn's init names the model now in use.
+  // The model and the effort switch in place; the next turn's init names the model now in use. In yolo,
+  // Claude's questions still reach the user: Claude Code sends AskUserQuestion to canUseTool even in
+  // bypassPermissions, although the SDK warns that canUseTool is not invoked there.
   await session.setModel('haiku');
   await session.setEffort('low');
-  await session.send('Reply with exactly one word: two');
+  await session.send(
+    'Use the AskUserQuestion tool to ask me one question, whether I prefer a light or a dark theme, with the options Light and Dark. Then reply with one word: the option I chose.',
+  );
   await live.until((_, events) => turnsEnded(events) === 4);
-  expect(lastAgentText(live.state).toLowerCase()).toContain('two');
+  expect(live.events.filter((event) => event.type === 'question-asked')).toHaveLength(2);
+  expect(lastAgentText(live.state).toLowerCase()).toContain('light');
   expect(live.state.model).toContain('haiku');
   expect(live.state.effort).toBe('low');
 
