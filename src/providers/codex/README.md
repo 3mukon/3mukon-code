@@ -1,0 +1,53 @@
+---
+id: DOC-mod-codex
+type: doc
+title: codex provider module
+status: current
+visibility: public
+date: 2026-10-26
+summary: The Codex adapter, which drives Codex through its app-server on the user's own Codex sign-in and maps it onto the provider-neutral session model
+scope: ["src/providers/codex/**"]
+tags: []
+---
+
+## Responsibilities
+
+- `createCodexProvider` (`main/adapter.ts`) implements the sessions module's `Provider` on `codex app-server` (ADR-0003), run from the binary that the pinned `@openai/codex` package brings for macOS on Apple silicon (`main/binary.ts`). Each session has an app-server process of its own, started in the session's folder:
+  - Connection (`main/rpc.ts`): JSON-RPC over standard input and output, one message per line. Codex's log output is drained and never kept.
+  - Start: `thread/start` with the chosen model, the mode's approval settings and the sandbox level's sandbox; a chosen reasoning effort goes with the first turn.
+  - Resume: `thread/resume`, then the thread's turns page by page (`thread/turns/list`), replayed before `replay-finished`.
+  - History: the folder's threads, newest first, without subagents' threads (`thread/list`).
+  - Turns: `turn/start` and `turn/interrupt`. A switched model, effort, mode or sandbox level goes with the next turn, which is when Codex takes them: Codex 0.164.0 has no way to change the sandbox of a running turn, in its stable or its experimental API.
+  - Modes (ADR-0006): `auto` is on-request approvals, decided by Codex's automatic reviewer, which also decides when a command asks to leave the sandbox; `yolo` is an approval policy of never, in which nothing leaves the sandbox. Neither touches the sandbox. Approvals waiting when the session enters `yolo`, and any that Codex asks for before the next turn, are allowed by the adapter.
+  - Sandbox levels: read-only, workspace-write and full access are Codex's `read-only`, `workspace-write` and `danger-full-access` sandboxes, given to the thread when it starts or resumes, whatever the mode. A switched level goes with the next turn as the policy Codex gave the thread for that level, as Codex's own settings shape it (such as `[sandbox_workspace_write]`), or else as Codex's default, in which workspace-write writes in the session's folder and the temporary folders, without network. The session reports the sandbox Codex holds the thread to, which Codex's own settings may decide.
+  - Gateways (`main/gateways.ts`): Codex profile files named `<name>.toml` in `$CODEX_HOME/gateways`, or else `~/.codex/gateways`, listed by name. Codex loads profiles only from its home folder, so the adapter reads the selected file when a thread starts or resumes and sends its settings with the thread, its `model_provider` as the thread's provider. A token in the file passes to Codex in memory and is never kept, logged or shown, and Codex's errors are told with the file's strings hidden (ADR-0008). A gateway switch resumes the thread on a new app-server with the other file's settings; asked for during a turn, it waits for the turn's end. When Codex keeps a resumed thread on its earlier provider, the session reports it.
+  - Models: `model/list`, without hidden models; a gateway's own model leads the list when Codex does not offer it.
+  - Toolset (ADR-0009): every session opens the app's toolset, given as `options.toolset`, and starts its app-servers with `-c mcp_servers.3mukon-code.*` settings: the toolset's address; `bearer_token_env_var` naming `TOOLSET_3MUKON_CODE_TOKEN`, which holds the session's credential in the app-server's environment, and which Codex's default shell environment policy keeps out of the commands it runs, since the name contains `TOKEN`; `default_tools_approval_mode = "approve"`, so the toolset's tools run without asking in every mode; a `tool_timeout_sec` of a year, so a question waits for the user with no limit that matters; and `required`, so no thread starts without the toolset. The question tool's questions arrive as question requests with ids of the session's own; they end as cancelled on an interrupt, at the end of their turn, when the toolset's call ends first and when the session closes. The access lasts across gateway switches and closes with the session.
+- Translation (`main/translate.ts`): agent messages and reasoning summaries stream in as message deltas; commands become tool calls named by what Codex made of them (reading, searching or running), with their output streamed; file changes become edits and unified diffs (`main/patch.ts`), built from an added file's content, a deleted file's former content or an update's hunks; the turn plan becomes the task list; MCP tool calls, web searches and image views become tool calls; a denial by the automatic reviewer shows on the call it denied; turn ends, errors, titles and rerouted models are reported.
+- Approvals and questions (`main/requests.ts`): command, file change and permission approvals, where "allow for the session" is Codex's own session approval; `request_user_input` becomes a question, answered by question id. MCP elicitations, which only the user's own MCP servers send, are declined, since those servers are not part of this version, and other requests from the app-server are refused.
+- Protocol types (`main/protocol/`): generated from the bundled Codex by `scripts/codex-protocol.mjs` (`corepack pnpm run codex:protocol`), which keeps the types the adapter names and the types they import. They are regenerated with each upgrade of `@openai/codex`, never edited by hand, and left out of ESLint.
+
+## Not responsible for
+
+- Signing in: Codex signs in through its own `codex login` and keeps its credentials itself; this module never reads or passes them (ADR-0008).
+- Codex's own question tool: Codex offers `request_user_input` only in its plan collaboration mode, which needs its experimental API, and this version does not turn that on; sessions ask through the toolset's question tool instead.
+- Overriding the automatic reviewer's denials, Codex's command-policy amendments, collaboration modes, reviews, and Codex's own file and command methods.
+- Hosting: the main process runs the adapter, and the packaged app must keep the Codex binary outside the asar archive.
+
+## Interface
+
+- `createCodexProvider(options)` from `main/adapter.ts`, which returns a `Provider` (DOC-mod-sessions). `options.toolset`, the app's toolset (DOC-mod-toolset), is required; `options.gatewaysDir` replaces the gateways folder and `options.startRpc` the app-server, for tests.
+
+## Dependencies
+
+- Uses only the sessions module's interface and model (`src/sessions/main/provider.ts` and `src/sessions/shared/`), the `@openai/codex` binary at run time, `smol-toml`, `diff` and Node.js built-ins; the toolset reaches it through that interface. The live test also starts the toolset, as the app module does. The rules `providers-only-to-sessions-contract`, `provider-live-tests-compose-as-the-app` and `providers-not-to-each-other` in `.dependency-cruiser.js` enforce this.
+- Only the app module, which hosts providers, may import it.
+
+## Invariants
+
+- Sessions start in `auto` unless the user chose `yolo`; `yolo` is only ever entered by the user's choice.
+- A sandbox level's settings never depend on the mode, and switching one never changes the other.
+- A gateway file's settings stay in memory only while a thread starts or resumes, and never reach logs, errors or the renderer.
+- Every session gets the toolset, and its credential reaches Codex only through the app-server's environment.
+- The protocol types match the bundled Codex: `corepack pnpm run codex:protocol` runs after each upgrade.
+- The unit tests put a fake app-server in place of Codex (`main/adapter.test.ts`) and run the connection against a stand-in process (`main/rpc.test.ts`). The live test (`main/adapter.live.test.ts`) drives a real session with the real toolset in a throwaway folder on the account's usage, so only `corepack pnpm run test:live` runs it; it checks that the question tool runs in `auto` without an approval.

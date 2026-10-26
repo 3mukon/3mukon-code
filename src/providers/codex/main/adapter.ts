@@ -1,0 +1,828 @@
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type {
+  Provider,
+  ProviderSession,
+  SessionEventListener,
+  StartOptions,
+  Toolset,
+  ToolsetAccess,
+} from '../../../sessions/main/provider';
+import type {
+  ApprovalAnswer,
+  HistoryEntry,
+  ModelOption,
+  PermissionMode,
+  Question,
+  QuestionAnswer,
+  ReasoningEffort,
+  SandboxLevel,
+  SessionEvent,
+} from '../../../sessions/shared/events';
+import { bundledCodexBinary } from './binary';
+import { defaultGatewaysDir, listGateways, readGateway, redact } from './gateways';
+import type { InitializeParams } from './protocol/InitializeParams';
+import type { RequestId } from './protocol/RequestId';
+import type { CommandExecutionRequestApprovalParams } from './protocol/v2/CommandExecutionRequestApprovalParams';
+import type { FileChangeRequestApprovalParams } from './protocol/v2/FileChangeRequestApprovalParams';
+import type { Model } from './protocol/v2/Model';
+import type { ModelListResponse } from './protocol/v2/ModelListResponse';
+import type { PermissionsRequestApprovalParams } from './protocol/v2/PermissionsRequestApprovalParams';
+import type { SandboxMode } from './protocol/v2/SandboxMode';
+import type { SandboxPolicy } from './protocol/v2/SandboxPolicy';
+import type { ServerRequestResolvedNotification } from './protocol/v2/ServerRequestResolvedNotification';
+import type { ThreadListResponse } from './protocol/v2/ThreadListResponse';
+import type { ThreadResumeParams } from './protocol/v2/ThreadResumeParams';
+import type { ThreadResumeResponse } from './protocol/v2/ThreadResumeResponse';
+import type { ThreadStartParams } from './protocol/v2/ThreadStartParams';
+import type { ThreadStartResponse } from './protocol/v2/ThreadStartResponse';
+import type { ThreadTurnsListResponse } from './protocol/v2/ThreadTurnsListResponse';
+import type { ToolRequestUserInputParams } from './protocol/v2/ToolRequestUserInputParams';
+import type { TurnStartParams } from './protocol/v2/TurnStartParams';
+import type { TurnStartResponse } from './protocol/v2/TurnStartResponse';
+import {
+  approvalResult,
+  commandApproval,
+  fileChangeApproval,
+  permissionsApproval,
+  questionResult,
+  userInputQuestion,
+  type CodexRequest,
+} from './requests';
+import { CodexRpc, type Launch, type Rpc, type RpcHandlers, type StartRpc } from './rpc';
+import { Translator } from './translate';
+
+// Codex's approval settings behind each of the app's two permission modes (ADR-0006), for a thread
+// and as overrides for a turn and the turns after it. In auto, Codex asks before it leaves its sandbox,
+// and its automatic reviewer decides; in yolo, it never asks. The sandbox is a setting of its own.
+function approvals(
+  mode: PermissionMode,
+): Pick<ThreadStartParams & TurnStartParams, 'approvalPolicy' | 'approvalsReviewer'> {
+  return mode === 'yolo'
+    ? { approvalPolicy: 'never', approvalsReviewer: 'user' }
+    : { approvalPolicy: 'on-request', approvalsReviewer: 'auto_review' };
+}
+
+// Codex's sandbox behind each of the app's sandbox levels, as a thread starts or resumes in it.
+const sandboxModes: Record<SandboxLevel, SandboxMode> = {
+  'read-only': 'read-only',
+  'workspace-write': 'workspace-write',
+  'full-access': 'danger-full-access',
+};
+
+// The same as a turn's override, for a level Codex has not yet given the thread: Codex's defaults, in
+// which workspace-write writes in the session's folder and the temporary folders, without network.
+const defaultPolicies: Record<SandboxLevel, SandboxPolicy> = {
+  'read-only': { type: 'readOnly', networkAccess: false },
+  'workspace-write': {
+    type: 'workspaceWrite',
+    writableRoots: [],
+    networkAccess: false,
+    excludeTmpdirEnvVar: false,
+    excludeSlashTmp: false,
+  },
+  'full-access': { type: 'dangerFullAccess' },
+};
+
+// The level a policy stands for; none for a sandbox outside Codex.
+function sandboxLevel(policy: SandboxPolicy): SandboxLevel | undefined {
+  switch (policy.type) {
+    case 'readOnly':
+      return 'read-only';
+    case 'workspaceWrite':
+      return 'workspace-write';
+    case 'dangerFullAccess':
+      return 'full-access';
+    case 'externalSandbox':
+      return undefined;
+  }
+}
+
+// The environment variable that carries a session's toolset credential to its app-server. Codex's
+// default shell environment policy keeps variables whose names contain TOKEN out of the commands it
+// runs, so the agent's commands do not see it.
+const TOOLSET_VARIABLE = 'TOOLSET_3MUKON_CODE_TOKEN';
+
+// Longer than any question waits for the user: the toolset's calls have no time limit of their own.
+const TOOLSET_TIMEOUT_SECONDS = 365 * 24 * 60 * 60;
+
+// The app-server's settings for the app's toolset (ADR-0009): its address, the variable that holds the
+// session's credential, its tools allowed without asking, and no timeout that a waiting call reaches.
+// Codex starts no thread while it cannot reach the toolset.
+function toolsetLaunch(name: string, access: ToolsetAccess): Launch {
+  const server = `mcp_servers.${name}`;
+  const settings = [
+    `${server}.url=${JSON.stringify(access.url)}`,
+    `${server}.bearer_token_env_var=${JSON.stringify(TOOLSET_VARIABLE)}`,
+    `${server}.default_tools_approval_mode="approve"`,
+    `${server}.tool_timeout_sec=${String(TOOLSET_TIMEOUT_SECONDS)}`,
+    `${server}.required=true`,
+  ];
+  return {
+    args: settings.flatMap((setting) => ['-c', setting]),
+    env: { [TOOLSET_VARIABLE]: access.credential },
+  };
+}
+
+export interface CodexProviderOptions {
+  // The app's toolset, whose question tool every session gets, since Codex offers its own only in its
+  // plan mode (ADR-0009).
+  toolset: Toolset;
+  // The folder of gateway files; the gateways folder in Codex's home when left out.
+  gatewaysDir?: string;
+  // Starts an app-server; tests put a fake in place of the bundled Codex.
+  startRpc?: StartRpc;
+  // The app's version, which Codex records as its client's.
+  clientVersion?: string;
+}
+
+// Opens a connection to a new app-server and starts the protocol on it.
+type Connect = (cwd: string, handlers: RpcHandlers, launch?: Launch) => Promise<Rpc>;
+
+const startBundledCodex: StartRpc = (cwd, handlers, launch) =>
+  CodexRpc.start(bundledCodexBinary(), cwd, handlers, launch);
+
+// Codex through its app-server (ADR-0003), on whatever sign-in Codex itself has.
+export function createCodexProvider({
+  toolset,
+  gatewaysDir = defaultGatewaysDir(),
+  startRpc = startBundledCodex,
+  clientVersion = '0.0.0',
+}: CodexProviderOptions): Provider {
+  const connect: Connect = (cwd, handlers, launch) =>
+    initialize(startRpc(cwd, handlers, launch), clientVersion);
+  return {
+    id: 'codex',
+    start(options, onEvent) {
+      const settings = sessionSettings(options, gatewaysDir);
+      return CodexSession.open(settings, null, connect, toolset, onEvent);
+    },
+    resume(options, onEvent) {
+      const settings = sessionSettings(options, gatewaysDir);
+      return CodexSession.open(settings, options.sessionId, connect, toolset, onEvent);
+    },
+    listSessions(cwd, limit) {
+      return withCodex(connect, cwd, async (rpc): Promise<HistoryEntry[]> => {
+        const { data } = await rpc.request<ThreadListResponse>('thread/list', {
+          cwd,
+          limit,
+          sortKey: 'updated_at',
+          sortDirection: 'desc',
+        });
+        // Subagents' threads belong to the session that started them.
+        return data
+          .filter((thread) => thread.parentThreadId === null)
+          .map((thread) => ({
+            id: thread.id,
+            title: thread.name ?? thread.preview,
+            cwd: thread.cwd,
+            updatedAt: thread.updatedAt * 1000,
+          }));
+      });
+    },
+    listGateways() {
+      return listGateways(gatewaysDir);
+    },
+    async listModels(gateway) {
+      const own = gateway === null ? undefined : (await readGateway(gatewaysDir, gateway)).model;
+      const cwd = await mkdtemp(join(tmpdir(), 'codex-models-'));
+      try {
+        return withGatewayModel(modelOptions(await withCodex(connect, cwd, allModels)), own);
+      } finally {
+        await rm(cwd, { recursive: true, force: true });
+      }
+    },
+  };
+}
+
+async function initialize(rpc: Rpc, clientVersion: string): Promise<Rpc> {
+  const params: InitializeParams = {
+    clientInfo: { name: '3mukon-code', title: '3mukon-code', version: clientVersion },
+    capabilities: { experimentalApi: false, requestAttestation: false },
+  };
+  try {
+    await rpc.request('initialize', params);
+  } catch (error) {
+    void rpc.close();
+    throw error;
+  }
+  rpc.notify('initialized');
+  return rpc;
+}
+
+// One exchange with a short-lived app-server that starts no thread.
+async function withCodex<Result>(
+  connect: Connect,
+  cwd: string,
+  use: (rpc: Rpc) => Promise<Result>,
+): Promise<Result> {
+  const rpc = await connect(cwd, {
+    notification: () => undefined,
+    request: (method) => Promise.reject(new Error(`3mukon-code does not answer ${method} here.`)),
+    exit: () => undefined,
+  });
+  try {
+    return await use(rpc);
+  } finally {
+    await rpc.close();
+  }
+}
+
+// The models the account can choose, page by page.
+async function allModels(rpc: Rpc): Promise<Model[]> {
+  const models: Model[] = [];
+  let cursor: string | null = null;
+  do {
+    const page: ModelListResponse = await rpc.request<ModelListResponse>(
+      'model/list',
+      cursor === null ? {} : { cursor },
+    );
+    models.push(...page.data);
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  return models.filter((model) => !model.hidden);
+}
+
+function modelOptions(models: Model[]): ModelOption[] {
+  return models.map((model) => ({
+    id: model.model,
+    label: model.displayName,
+    ...(model.description === '' ? {} : { description: model.description }),
+    efforts: model.supportedReasoningEfforts.map((option) => option.reasoningEffort),
+  }));
+}
+
+// A gateway's own model, from its file, leads the list when Codex does not offer it.
+function withGatewayModel(models: ModelOption[], own: string | undefined): ModelOption[] {
+  return own === undefined || models.some((model) => model.id === own)
+    ? models
+    : [{ id: own, label: own, efforts: [] }, ...models];
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+interface SessionSettings {
+  cwd: string;
+  mode: PermissionMode;
+  gatewaysDir: string;
+  // The gateway's name. Its file is read whenever a thread starts or resumes, and never kept.
+  gateway: string | null;
+  model: string | null;
+  effort: ReasoningEffort | null;
+  sandbox: SandboxLevel;
+}
+
+function sessionSettings(options: StartOptions, gatewaysDir: string): SessionSettings {
+  return {
+    cwd: options.cwd,
+    mode: options.mode ?? 'auto',
+    gatewaysDir,
+    gateway: options.gateway ?? null,
+    model: options.model ?? null,
+    effort: options.effort ?? null,
+    sandbox: options.sandbox ?? 'workspace-write',
+  };
+}
+
+// An app-server with the session's thread started or resumed on it, not yet in use.
+interface Attached {
+  rpc: Rpc;
+  generation: number;
+  // The sandbox level the thread was started or resumed in.
+  sandbox: SandboxLevel;
+  response: ThreadStartResponse | ThreadResumeResponse;
+  // From the gateway's file, as it was read for this connection.
+  gatewayModel: string | undefined;
+  gatewayProvider: string | undefined;
+}
+
+class CodexSession implements ProviderSession {
+  private rpc!: Rpc;
+  private threadId = '';
+  private readonly translator: Translator;
+  // The session's access to the app's toolset, and what its app-servers start with to use it.
+  private readonly access: ToolsetAccess;
+  private readonly launch: Launch;
+  // The toolset's questions waiting for the user, by request id.
+  private readonly toolsetQuestions = new Map<string, (answer: QuestionAnswer) => void>();
+  // Each connection's handlers act only while their connection is the session's current one. The
+  // first connection is number 1, so 0 stands for none, as during a gateway switch.
+  private generation = 0;
+  private generations = 0;
+  private models: Model[] = [];
+  // The policy Codex gave the thread for each level it started or resumed in, as Codex's own settings
+  // shape it, such as the network access of its workspace-write.
+  private readonly sandboxPolicies: Partial<Record<SandboxLevel, SandboxPolicy>> = {};
+  private readonly pending = new Map<
+    string,
+    { request: CodexRequest; resolve: (result: unknown) => void }
+  >();
+  private turnRunning = false;
+  private turnId: string | null = null;
+  private closing = false;
+  private closed = false;
+  // What changed since the last turn started, which the next turn carries.
+  private modeChanged = false;
+  private modelChanged = false;
+  private effortChanged: boolean;
+  private sandboxChanged = false;
+  // A gateway asked for during a turn, which takes over when the turn ends.
+  private pendingGateway: string | null | undefined;
+  // The gateway switch under way, which a message waits for; it never rejects.
+  private switching: Promise<void> | null = null;
+
+  get id(): string {
+    return this.threadId;
+  }
+
+  // Starts a thread, or resumes one and replays its history, and resolves once Codex has it.
+  static async open(
+    settings: SessionSettings,
+    resumeId: string | null,
+    connect: Connect,
+    toolset: Toolset,
+    onEvent: SessionEventListener,
+  ): Promise<CodexSession> {
+    const session = new CodexSession(settings, connect, toolset, onEvent);
+    let attached: Attached;
+    try {
+      attached = await session.attach(resumeId);
+    } catch (error) {
+      session.access.close();
+      throw error;
+    }
+    session.use(attached);
+    try {
+      if (resumeId !== null) await session.replay();
+      onEvent({ type: 'mode', mode: settings.mode });
+      onEvent({
+        type: 'settings',
+        gateway: settings.gateway,
+        model: attached.response.model,
+        effort: settings.effort ?? attached.response.reasoningEffort,
+        sandbox: settings.sandbox,
+      });
+      await session.refreshModels(attached.gatewayModel);
+    } catch (error) {
+      void attached.rpc.close();
+      session.access.close();
+      throw error;
+    }
+    return session;
+  }
+
+  private constructor(
+    private readonly settings: SessionSettings,
+    private readonly connect: Connect,
+    toolset: Toolset,
+    private readonly onEvent: SessionEventListener,
+  ) {
+    this.translator = new Translator(settings.cwd);
+    this.access = toolset.open({
+      ask: (questions, signal) => this.askToolset(questions, signal),
+    });
+    this.launch = toolsetLaunch(toolset.name, this.access);
+    // A thread takes no effort of its own; a chosen one goes with the first turn.
+    this.effortChanged = settings.effort !== null;
+  }
+
+  async send(text: string): Promise<void> {
+    if (this.switching !== null) await this.switching;
+    if (this.closed) throw new Error('The session is closed.');
+    this.turnRunning = true;
+    this.onEvent({ type: 'turn-started' });
+    this.onEvent({ type: 'message', id: randomUUID(), role: 'user', text });
+    try {
+      const { turn } = await this.rpc.request<TurnStartResponse>(
+        'turn/start',
+        this.turnParams(text),
+      );
+      this.turnId = turn.id;
+      this.modeChanged = false;
+      this.modelChanged = false;
+      this.effortChanged = false;
+      this.sandboxChanged = false;
+    } catch (error) {
+      this.turnRunning = false;
+      const message = errorMessage(error);
+      this.onEvent({ type: 'turn-ended', outcome: 'failed', error: message });
+      throw error;
+    }
+  }
+
+  async interrupt(): Promise<void> {
+    // The toolset's questions end with the turn they were asked in.
+    this.cancelToolsetQuestions();
+    if (!this.turnRunning || this.turnId === null) return;
+    await this.rpc.request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId });
+  }
+
+  answerApproval(requestId: string, answer: ApprovalAnswer): Promise<void> {
+    const pending = this.pending.get(requestId);
+    if (pending === undefined || pending.request.kind === 'question') {
+      return Promise.reject(new Error(`No approval ${requestId} is waiting.`));
+    }
+    this.pending.delete(requestId);
+    pending.resolve(approvalResult(pending.request, answer));
+    this.onEvent({ type: 'request-resolved', requestId, outcome: 'answered' });
+    return Promise.resolve();
+  }
+
+  answerQuestion(requestId: string, answer: QuestionAnswer): Promise<void> {
+    const asked = this.toolsetQuestions.get(requestId);
+    if (asked !== undefined) {
+      this.toolsetQuestions.delete(requestId);
+      asked(answer);
+      this.onEvent({ type: 'request-resolved', requestId, outcome: 'answered' });
+      return Promise.resolve();
+    }
+    const pending = this.pending.get(requestId);
+    if (pending?.request.kind !== 'question') {
+      return Promise.reject(new Error(`No question ${requestId} is waiting.`));
+    }
+    this.pending.delete(requestId);
+    pending.resolve(questionResult(answer));
+    this.onEvent({ type: 'request-resolved', requestId, outcome: 'answered' });
+    return Promise.resolve();
+  }
+
+  // Codex takes the mode from the next turn on. Approvals already waiting are allowed as soon as the
+  // session is in yolo, and so is any that Codex asks for before the next turn.
+  setMode(mode: PermissionMode): Promise<void> {
+    this.settings.mode = mode;
+    this.modeChanged = true;
+    this.onEvent({ type: 'mode', mode });
+    if (mode === 'yolo') {
+      for (const [requestId, pending] of this.pending) {
+        if (pending.request.kind === 'question') continue;
+        this.pending.delete(requestId);
+        pending.resolve(approvalResult(pending.request, { decision: 'allow-once' }));
+        this.onEvent({ type: 'request-resolved', requestId, outcome: 'answered' });
+      }
+    }
+    return Promise.resolve();
+  }
+
+  setModel(model: string | null): Promise<void> {
+    this.settings.model = model;
+    this.modelChanged = true;
+    this.onEvent({ type: 'settings', model });
+    return Promise.resolve();
+  }
+
+  setEffort(effort: ReasoningEffort | null): Promise<void> {
+    this.settings.effort = effort;
+    this.effortChanged = true;
+    this.onEvent({ type: 'settings', effort });
+    return Promise.resolve();
+  }
+
+  // Codex 0.164.0 takes a sandbox only for the turns that follow, in its stable and its experimental
+  // API alike, so a switch during a turn applies from the next one.
+  setSandbox(sandbox: SandboxLevel): Promise<void> {
+    this.settings.sandbox = sandbox;
+    this.sandboxChanged = true;
+    this.onEvent({ type: 'settings', sandbox });
+    return Promise.resolve();
+  }
+
+  async setGateway(gateway: string | null): Promise<void> {
+    if (this.closed) throw new Error('The session is closed.');
+    // Reading the file now makes a missing or broken gateway fail here rather than later.
+    if (gateway !== null) await readGateway(this.settings.gatewaysDir, gateway);
+    if (this.turnRunning) {
+      this.pendingGateway = gateway;
+      return;
+    }
+    await this.switchGateway(gateway);
+  }
+
+  close(): Promise<void> {
+    this.closing = true;
+    return this.rpc.close();
+  }
+
+  // Starts an app-server and starts the thread on it, or resumes the thread there, with the session's
+  // settings and the gateway's file as they are now. Codex's errors are told without the file's text.
+  private async attach(resumeId: string | null): Promise<Attached> {
+    const { cwd, mode, model, sandbox, gatewaysDir, gateway: name } = this.settings;
+    const gateway = name === null ? null : await readGateway(gatewaysDir, name);
+    const generation = ++this.generations;
+    const rpc = await this.connect(cwd, this.handlers(generation), this.launch);
+    const params: Pick<
+      ThreadResumeParams,
+      | 'cwd'
+      | 'approvalPolicy'
+      | 'approvalsReviewer'
+      | 'sandbox'
+      | 'model'
+      | 'modelProvider'
+      | 'config'
+    > = {
+      cwd,
+      ...approvals(mode),
+      sandbox: sandboxModes[sandbox],
+      ...(model === null ? {} : { model }),
+      ...(gateway === null ? {} : { config: gateway.config }),
+      ...(gateway?.modelProvider === undefined ? {} : { modelProvider: gateway.modelProvider }),
+    };
+    try {
+      const response =
+        resumeId === null
+          ? await rpc.request<ThreadStartResponse>('thread/start', params)
+          : await rpc.request<ThreadResumeResponse>('thread/resume', {
+              ...params,
+              threadId: resumeId,
+              excludeTurns: true,
+            });
+      return {
+        rpc,
+        generation,
+        sandbox,
+        response,
+        gatewayModel: gateway?.model,
+        gatewayProvider: gateway?.modelProvider,
+      };
+    } catch (error) {
+      void rpc.close();
+      // eslint-disable-next-line preserve-caught-error -- the original error may show the gateway's settings.
+      throw new Error(redact(errorMessage(error), gateway));
+    }
+  }
+
+  // Makes an attached app-server the session's current one. Codex's own settings may hold the thread
+  // to another sandbox than the one asked for, and the session takes the one in force, unless the user
+  // has switched the level since, which then goes with the next turn.
+  private use({ rpc, generation, sandbox: requested, response }: Attached): void {
+    this.rpc = rpc;
+    this.generation = generation;
+    this.threadId = response.thread.id;
+    const granted = sandboxLevel(response.sandbox) ?? requested;
+    this.sandboxPolicies[granted] = response.sandbox;
+    if (this.settings.sandbox === requested) this.settings.sandbox = granted;
+  }
+
+  private handlers(generation: number): RpcHandlers {
+    const current = () => generation === this.generation;
+    return {
+      notification: (method, params) => {
+        if (current()) this.notification(method, params);
+      },
+      request: (method, params, id) =>
+        current()
+          ? this.request(method, params, id)
+          : Promise.reject(new Error('This connection has been replaced.')),
+      exit: (error) => {
+        if (current()) this.finish(error);
+      },
+    };
+  }
+
+  // The thread's past turns, page by page, then replay-finished.
+  private async replay(): Promise<void> {
+    let cursor: string | null = null;
+    do {
+      const page: ThreadTurnsListResponse = await this.rpc.request<ThreadTurnsListResponse>(
+        'thread/turns/list',
+        {
+          threadId: this.threadId,
+          itemsView: 'full',
+          sortDirection: 'asc',
+          ...(cursor === null ? {} : { cursor }),
+        },
+      );
+      for (const turn of page.data) {
+        for (const item of turn.items) {
+          for (const event of this.translator.history(item)) this.onEvent(event);
+        }
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+    this.onEvent({ type: 'replay-finished' });
+  }
+
+  private async refreshModels(gatewayModel: string | undefined): Promise<void> {
+    this.models = await allModels(this.rpc);
+    this.onEvent({
+      type: 'models',
+      models: withGatewayModel(modelOptions(this.models), gatewayModel),
+    });
+  }
+
+  // The turn's input, with whatever changed since the last turn. A model or an effort set back to the
+  // default goes as Codex's default, since a turn cannot unset what an earlier one chose.
+  private turnParams(text: string): TurnStartParams {
+    const model = this.settings.model ?? this.models.find((entry) => entry.isDefault)?.model;
+    const effort =
+      this.settings.effort ??
+      this.models.find((entry) => entry.model === model)?.defaultReasoningEffort;
+    return {
+      threadId: this.threadId,
+      input: [{ type: 'text', text, text_elements: [] }],
+      ...(this.modelChanged && model !== undefined ? { model } : {}),
+      ...(this.effortChanged && effort !== undefined ? { effort } : {}),
+      ...(this.modeChanged ? approvals(this.settings.mode) : {}),
+      ...(this.sandboxChanged ? { sandboxPolicy: this.sandboxPolicy(this.settings.sandbox) } : {}),
+    };
+  }
+
+  private sandboxPolicy(level: SandboxLevel): SandboxPolicy {
+    return this.sandboxPolicies[level] ?? defaultPolicies[level];
+  }
+
+  // Gateway switches run one after another, between turns.
+  private switchGateway(gateway: string | null): Promise<void> {
+    const switched = (this.switching ?? Promise.resolve()).then(() => this.reconnect(gateway));
+    const settled = switched.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.switching = settled;
+    void settled.then(() => {
+      if (this.switching === settled) this.switching = null;
+    });
+    return switched;
+  }
+
+  // Moves the thread to a new app-server that resumes it with the other gateway's settings, so the
+  // session keeps its id and its history. Codex lets one app-server write a thread at a time, so the
+  // current one ends first; what it still reports is ignored, and its end does not end the session.
+  // Should the new one fail, the thread is resumed again on the earlier gateway. Codex may keep a
+  // resumed thread on its earlier provider; the session then says so. A close asked for during the
+  // switch ends the session once the new app-server is up.
+  private async reconnect(gateway: string | null): Promise<void> {
+    if (this.closed) return;
+    const previousGateway = this.settings.gateway;
+    this.generation = 0;
+    await this.rpc.close();
+    this.settings.gateway = gateway;
+    let attached: Attached;
+    try {
+      attached = await this.attach(this.threadId);
+    } catch (error) {
+      this.settings.gateway = previousGateway;
+      try {
+        this.use(await this.attach(this.threadId));
+      } catch (again) {
+        this.finish(errorMessage(again));
+      }
+      throw error;
+    }
+    if (this.closing) {
+      await attached.rpc.close();
+      this.finish(undefined);
+      return;
+    }
+    this.use(attached);
+    this.onEvent({
+      type: 'settings',
+      gateway,
+      model: attached.response.model,
+      sandbox: this.settings.sandbox,
+    });
+    const { gatewayProvider, response } = attached;
+    if (gatewayProvider !== undefined && response.modelProvider !== gatewayProvider) {
+      this.onEvent({
+        type: 'error',
+        message: `Codex kept this session on its provider "${response.modelProvider}"; the gateway's provider "${gatewayProvider}" applies to new sessions.`,
+      });
+    }
+    await this.refreshModels(attached.gatewayModel);
+  }
+
+  private notification(method: string, params: unknown): void {
+    if (method === 'serverRequest/resolved') {
+      this.withdraw(String((params as ServerRequestResolvedNotification).requestId));
+      return;
+    }
+    for (const event of this.translator.live(method, params)) this.emit(event);
+  }
+
+  private request(method: string, params: unknown, id: RequestId): Promise<unknown> {
+    const context = { cwd: this.settings.cwd, now: Date.now() };
+    const requestId = String(id);
+    switch (method) {
+      case 'item/commandExecution/requestApproval':
+        return this.ask(
+          commandApproval(requestId, params as CommandExecutionRequestApprovalParams, context),
+        );
+      case 'item/fileChange/requestApproval': {
+        const changeParams = params as FileChangeRequestApprovalParams;
+        const change = this.translator.fileChangeOf(changeParams.itemId);
+        return this.ask(fileChangeApproval(requestId, changeParams, change, context));
+      }
+      case 'item/permissions/requestApproval':
+        return this.ask(
+          permissionsApproval(requestId, params as PermissionsRequestApprovalParams, context),
+        );
+      case 'item/tool/requestUserInput':
+        return this.ask(
+          userInputQuestion(requestId, params as ToolRequestUserInputParams, context),
+        );
+      // Only the user's own MCP servers ask this way, and they are not part of this version.
+      case 'mcpServer/elicitation/request':
+        return Promise.resolve({ action: 'decline', content: null, _meta: null });
+      default:
+        return Promise.reject(new Error(`3mukon-code does not answer ${method}.`));
+    }
+  }
+
+  // An approval or a question waits for the user; in yolo, an approval is allowed without asking.
+  private ask(request: CodexRequest): Promise<unknown> {
+    if (request.kind !== 'question' && this.settings.mode === 'yolo') {
+      return Promise.resolve(approvalResult(request, { decision: 'allow-once' }));
+    }
+    return new Promise((resolve) => {
+      this.pending.set(request.request.id, { request, resolve });
+      this.onEvent(
+        request.kind === 'question'
+          ? { type: 'question-asked', request: request.request }
+          : { type: 'approval-requested', request: request.request },
+      );
+    });
+  }
+
+  // A question from the app's toolset, which waits for the user as Codex's own do. It ends as declined
+  // when the toolset's call ends first.
+  private askToolset(questions: Question[], signal: AbortSignal): Promise<QuestionAnswer> {
+    if (this.closed || signal.aborted) return Promise.resolve({ decision: 'decline' });
+    const id = `toolset-${randomUUID()}`;
+    return new Promise((resolve) => {
+      this.toolsetQuestions.set(id, resolve);
+      signal.addEventListener(
+        'abort',
+        () => {
+          this.cancelToolsetQuestion(id);
+        },
+        { once: true },
+      );
+      this.onEvent({ type: 'question-asked', request: { id, questions, requestedAt: Date.now() } });
+    });
+  }
+
+  private cancelToolsetQuestion(id: string): void {
+    const asked = this.toolsetQuestions.get(id);
+    if (asked === undefined) return;
+    this.toolsetQuestions.delete(id);
+    asked({ decision: 'decline' });
+    this.onEvent({ type: 'request-resolved', requestId: id, outcome: 'cancelled' });
+  }
+
+  private cancelToolsetQuestions(): void {
+    for (const id of [...this.toolsetQuestions.keys()]) this.cancelToolsetQuestion(id);
+  }
+
+  // Codex resolved a request itself, such as when its turn ended; what the user has not answered is
+  // cancelled.
+  private withdraw(requestId: string): void {
+    const pending = this.pending.get(requestId);
+    if (pending === undefined) return;
+    this.pending.delete(requestId);
+    pending.resolve(declined(pending.request));
+    this.onEvent({ type: 'request-resolved', requestId, outcome: 'cancelled' });
+  }
+
+  // The session has ended: what is still open is cancelled, the toolset is closed to it, and closed is
+  // reported once.
+  private finish(error: string | undefined): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.turnRunning = false;
+    this.cancelToolsetQuestions();
+    this.access.close();
+    for (const [requestId, pending] of this.pending) {
+      pending.resolve(declined(pending.request));
+      this.onEvent({ type: 'request-resolved', requestId, outcome: 'cancelled' });
+    }
+    this.pending.clear();
+    this.onEvent(error === undefined ? { type: 'closed' } : { type: 'closed', error });
+  }
+
+  private emit(event: SessionEvent): void {
+    if (event.type === 'turn-ended') {
+      this.turnRunning = false;
+      this.turnId = null;
+      this.cancelToolsetQuestions();
+    }
+    this.onEvent(event);
+    // A gateway asked for during the turn takes over before the next turn.
+    if (event.type === 'turn-ended' && this.pendingGateway !== undefined) {
+      const gateway = this.pendingGateway;
+      this.pendingGateway = undefined;
+      this.switchGateway(gateway).catch((error: unknown) => {
+        this.onEvent({ type: 'error', message: errorMessage(error) });
+      });
+    }
+  }
+}
+
+// The answer to a request that no one answered: a denial, or no answers to the questions.
+function declined(request: CodexRequest): unknown {
+  return request.kind === 'question'
+    ? questionResult({ decision: 'decline' })
+    : approvalResult(request, { decision: 'deny' });
+}

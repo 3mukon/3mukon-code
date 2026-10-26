@@ -1,0 +1,756 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Toolset, ToolsetAccess, ToolsetSession } from '../../../sessions/main/provider';
+import type { QuestionAnswer, SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
+import { createCodexProvider } from './adapter';
+import type { Launch, Rpc, RpcHandlers } from './rpc';
+
+type Params = Record<string, unknown>;
+
+// The workspace sandbox as the fake app-server's own settings shape it, unlike Codex's default.
+const WORKSPACE = {
+  type: 'workspaceWrite',
+  writableRoots: ['/extra'],
+  networkAccess: true,
+  excludeTmpdirEnvVar: false,
+  excludeSlashTmp: false,
+};
+const READ_ONLY = { type: 'readOnly', networkAccess: false };
+
+const MODELS = [
+  {
+    model: 'gpt-default',
+    displayName: 'Default',
+    description: 'The usual one',
+    hidden: false,
+    isDefault: true,
+    defaultReasoningEffort: 'medium',
+    supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'medium' }],
+  },
+  {
+    model: 'gpt-small',
+    displayName: 'Small',
+    description: '',
+    hidden: false,
+    isDefault: false,
+    defaultReasoningEffort: 'low',
+    supportedReasoningEfforts: [{ reasoningEffort: 'low' }],
+  },
+  { model: 'gpt-hidden', hidden: true, supportedReasoningEfforts: [] },
+];
+
+// What the fake app-server answers; a test can change it.
+let resumedProvider: string | undefined;
+let failStart: string | undefined;
+let failResume: string | undefined;
+// A sandbox the fake's own settings hold every thread to, whatever was asked for.
+let heldSandbox: Params | undefined;
+// Runs while the fake handles a thread/resume, before it answers.
+let duringResume: (() => void) | undefined;
+
+function sandboxOf(mode: unknown): Params {
+  if (heldSandbox !== undefined) return heldSandbox;
+  if (mode === 'danger-full-access') return { type: 'dangerFullAccess' };
+  return mode === 'read-only' ? READ_ONLY : WORKSPACE;
+}
+
+function reply(method: string, params: Params): unknown {
+  const config = (params.config ?? {}) as Params;
+  const thread = (id: string) => ({
+    thread: { id },
+    model: params.model ?? config.model ?? 'gpt-default',
+    modelProvider: params.modelProvider ?? 'openai',
+    sandbox: sandboxOf(params.sandbox),
+    reasoningEffort: 'medium',
+  });
+  switch (method) {
+    case 'initialize':
+      return {
+        userAgent: 'fake',
+        codexHome: '/home/.codex',
+        platformFamily: 'unix',
+        platformOs: 'macos',
+      };
+    case 'thread/start':
+      if (failStart !== undefined) throw new Error(failStart);
+      return thread('th1');
+    case 'thread/resume':
+      duringResume?.();
+      if (failResume !== undefined && params.modelProvider === 'proxy') throw new Error(failResume);
+      return {
+        ...thread(params.threadId as string),
+        ...(resumedProvider === undefined ? {} : { modelProvider: resumedProvider }),
+      };
+    case 'thread/turns/list':
+      return params.cursor === undefined
+        ? {
+            data: [
+              {
+                id: 'old1',
+                items: [
+                  {
+                    type: 'userMessage',
+                    id: 'u1',
+                    content: [{ type: 'text', text: 'Earlier', text_elements: [] }],
+                  },
+                ],
+              },
+            ],
+            nextCursor: 'page2',
+          }
+        : {
+            data: [{ id: 'old2', items: [{ type: 'agentMessage', id: 'a1', text: 'Reply' }] }],
+            nextCursor: null,
+          };
+    case 'model/list':
+      return { data: MODELS, nextCursor: null };
+    case 'turn/start':
+      return {
+        turn: {
+          id: `turn-${String(fakes.flatMap((fake) => fake.calls).filter((call) => call.method === 'turn/start').length)}`,
+        },
+      };
+    case 'thread/list':
+      return {
+        data: [
+          {
+            id: 'a',
+            name: null,
+            preview: 'First message',
+            cwd: '/work',
+            updatedAt: 100,
+            parentThreadId: null,
+          },
+          {
+            id: 'b',
+            name: 'Named',
+            preview: 'x',
+            cwd: '/work',
+            updatedAt: 50,
+            parentThreadId: null,
+          },
+          {
+            id: 'c',
+            name: null,
+            preview: 'subagent',
+            cwd: '/work',
+            updatedAt: 70,
+            parentThreadId: 'a',
+          },
+        ],
+        nextCursor: null,
+      };
+    default:
+      return {};
+  }
+}
+
+// Stands in for one app-server process. The test plays the server through emit, ask and stop.
+class FakeCodex implements Rpc {
+  readonly calls: { method: string; params: Params }[] = [];
+  closed = false;
+
+  constructor(
+    readonly cwd: string,
+    private readonly handlers: RpcHandlers,
+    readonly launch: Launch | undefined,
+  ) {}
+
+  request<Result>(method: string, params: unknown): Promise<Result> {
+    this.calls.push({ method, params: params as Params });
+    try {
+      return Promise.resolve(reply(method, params as Params) as Result);
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  notify(method: string): void {
+    this.calls.push({ method, params: {} });
+  }
+
+  close(): Promise<void> {
+    if (!this.closed) {
+      this.closed = true;
+      this.handlers.exit(undefined);
+    }
+    return Promise.resolve();
+  }
+
+  emit(method: string, params: unknown): void {
+    this.handlers.notification(method, params);
+  }
+
+  ask(method: string, params: unknown, id: string | number): Promise<unknown> {
+    return this.handlers.request(method, params, id);
+  }
+
+  stop(error: string): void {
+    this.handlers.exit(error);
+  }
+
+  params(method: string, index = -1): Params | undefined {
+    return this.calls.filter((call) => call.method === method).at(index)?.params;
+  }
+}
+
+// Stands in for the app's toolset: it keeps each session's access, through which the test asks.
+class FakeToolset implements Toolset {
+  readonly name = '3mukon-code';
+  readonly opened: { session: ToolsetSession; access: ToolsetAccess; closed: boolean }[] = [];
+
+  open(session: ToolsetSession): ToolsetAccess {
+    const entry = {
+      session,
+      closed: false,
+      access: {
+        url: 'http://127.0.0.1:4000/mcp',
+        credential: `credential-${String(this.opened.length + 1)}`,
+        close: () => {
+          entry.closed = true;
+        },
+      },
+    };
+    this.opened.push(entry);
+    return entry.access;
+  }
+
+  // Asks through the latest session's access, as a call of the question tool would.
+  ask(signal = new AbortController().signal): Promise<QuestionAnswer> {
+    const entry = this.opened.at(-1);
+    if (entry === undefined) throw new Error('No session opened the toolset.');
+    return entry.session.ask([toolsetQuestion], signal);
+  }
+}
+
+const toolsetQuestion = {
+  id: 'q0',
+  text: 'Which library?',
+  options: [{ label: 'React' }],
+  multiSelect: false,
+  freeText: true,
+  secret: false,
+};
+
+let fakes: FakeCodex[] = [];
+let toolset: FakeToolset;
+let gatewaysDir: string;
+beforeEach(() => {
+  fakes = [];
+  toolset = new FakeToolset();
+  resumedProvider = undefined;
+  failStart = undefined;
+  failResume = undefined;
+  heldSandbox = undefined;
+  duringResume = undefined;
+  gatewaysDir = mkdtempSync(join(tmpdir(), 'codex-gateways-'));
+  writeFileSync(
+    join(gatewaysDir, 'work.toml'),
+    [
+      'model_provider = "proxy"',
+      'model = "gpt-proxy"',
+      '[model_providers.proxy]',
+      'base_url = "https://proxy.example.com/v1"',
+      'experimental_bearer_token = "secret-token-value"',
+    ].join('\n'),
+  );
+});
+afterEach(() => {
+  rmSync(gatewaysDir, { recursive: true, force: true });
+});
+
+function provider() {
+  return createCodexProvider({
+    toolset,
+    gatewaysDir,
+    startRpc: (cwd, handlers, launch) => {
+      const fake = new FakeCodex(cwd, handlers, launch);
+      fakes.push(fake);
+      return fake;
+    },
+  });
+}
+
+// The id of the latest question the session asked.
+function lastQuestionId(events: SessionEvent[]): string {
+  const asked = events.findLast((event) => event.type === 'question-asked');
+  if (asked?.type !== 'question-asked') throw new Error('No question was asked.');
+  return asked.request.id;
+}
+
+function current(): FakeCodex {
+  const fake = fakes.at(-1);
+  if (fake === undefined) throw new Error('No app-server was started.');
+  return fake;
+}
+
+async function startSession(
+  options: {
+    gateway?: string;
+    model?: string;
+    effort?: string;
+    mode?: 'auto' | 'yolo';
+    sandbox?: SandboxLevel;
+  } = {},
+) {
+  const events: SessionEvent[] = [];
+  const session = await provider().start({ cwd: '/work', ...options }, (event) => {
+    events.push(event);
+  });
+  return { session, events };
+}
+
+const completed = (turnId: string) => ({
+  threadId: 'th1',
+  turn: { id: turnId, items: [], status: 'completed', error: null },
+});
+
+const approvalParams = {
+  threadId: 'th1',
+  turnId: 'turn-1',
+  itemId: 'c1',
+  startedAtMs: 1,
+  kind: 'command',
+  environmentId: null,
+  command: 'rm -rf build',
+  cwd: '/work',
+};
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let tries = 0; tries < 200 && !condition(); tries++) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  expect(condition()).toBe(true);
+}
+
+describe('the Codex provider', () => {
+  it('starts a thread in auto with the gateway’s settings, and reports the mode, settings and models', async () => {
+    const { session, events } = await startSession({ gateway: 'work', effort: 'high' });
+    expect(
+      current()
+        .calls.slice(0, 2)
+        .map((call) => call.method),
+    ).toEqual(['initialize', 'initialized']);
+    expect(current().params('thread/start')).toEqual({
+      cwd: '/work',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+      sandbox: 'workspace-write',
+      modelProvider: 'proxy',
+      config: {
+        model_provider: 'proxy',
+        model: 'gpt-proxy',
+        model_providers: {
+          proxy: {
+            base_url: 'https://proxy.example.com/v1',
+            experimental_bearer_token: 'secret-token-value',
+          },
+        },
+      },
+    });
+    expect(session.id).toBe('th1');
+    expect(events).toEqual([
+      { type: 'mode', mode: 'auto' },
+      {
+        type: 'settings',
+        gateway: 'work',
+        model: 'gpt-proxy',
+        effort: 'high',
+        sandbox: 'workspace-write',
+      },
+      {
+        type: 'models',
+        models: [
+          { id: 'gpt-proxy', label: 'gpt-proxy', efforts: [] },
+          {
+            id: 'gpt-default',
+            label: 'Default',
+            description: 'The usual one',
+            efforts: ['low', 'medium'],
+          },
+          { id: 'gpt-small', label: 'Small', efforts: ['low'] },
+        ],
+      },
+    ]);
+  });
+
+  it('starts a thread on the sandbox level chosen, whatever the mode', async () => {
+    await startSession({ mode: 'yolo' });
+    expect(current().params('thread/start')).toMatchObject({
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user',
+      sandbox: 'workspace-write',
+    });
+    await startSession({ sandbox: 'full-access' });
+    expect(current().params('thread/start')).toMatchObject({
+      approvalPolicy: 'on-request',
+      sandbox: 'danger-full-access',
+    });
+    await startSession({ mode: 'yolo', sandbox: 'read-only' });
+    expect(current().params('thread/start')).toMatchObject({
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    });
+  });
+
+  it('reports the sandbox that Codex’s own settings hold the thread to', async () => {
+    heldSandbox = READ_ONLY;
+    const { events } = await startSession({ sandbox: 'full-access' });
+    expect(events).toContainEqual(expect.objectContaining({ sandbox: 'read-only' }));
+  });
+
+  it('keeps a level switched to while a gateway switch resumes the thread', async () => {
+    const { session, events } = await startSession();
+    duringResume = () => void session.setSandbox('full-access');
+    await session.setGateway('work');
+    expect(current().params('thread/resume')).toMatchObject({ sandbox: 'workspace-write' });
+    expect(events.at(-2)).toMatchObject({ type: 'settings', sandbox: 'full-access' });
+    await session.send('hi');
+    expect(current().params('turn/start')).toMatchObject({
+      sandboxPolicy: { type: 'dangerFullAccess' },
+    });
+  });
+
+  it('tells Codex’s errors without the gateway file’s text', async () => {
+    failStart = 'bad provider secret-token-value';
+    await expect(startSession({ gateway: 'work' })).rejects.toThrow('bad provider [hidden]');
+    expect(current().closed).toBe(true);
+    expect(toolset.opened[0]?.closed).toBe(true);
+  });
+
+  it('starts each session’s app-server with the toolset, its credential in the environment only', async () => {
+    await startSession();
+    const server = 'mcp_servers.3mukon-code';
+    expect(current().launch).toEqual({
+      args: [
+        `${server}.url="http://127.0.0.1:4000/mcp"`,
+        `${server}.bearer_token_env_var="TOOLSET_3MUKON_CODE_TOKEN"`,
+        `${server}.default_tools_approval_mode="approve"`,
+        `${server}.tool_timeout_sec=31536000`,
+        `${server}.required=true`,
+      ].flatMap((setting) => ['-c', setting]),
+      env: { TOOLSET_3MUKON_CODE_TOKEN: 'credential-1' },
+    });
+    await provider().listSessions('/work', 10);
+    expect(current().launch).toBeUndefined();
+  });
+
+  it('lists threads newest first without subagents’ threads, and models with the gateway’s own', async () => {
+    const codex = provider();
+    expect(await codex.listSessions('/work', 10)).toEqual([
+      { id: 'a', title: 'First message', cwd: '/work', updatedAt: 100_000 },
+      { id: 'b', title: 'Named', cwd: '/work', updatedAt: 50_000 },
+    ]);
+    expect(current().params('thread/list')).toMatchObject({
+      cwd: '/work',
+      limit: 10,
+      sortKey: 'updated_at',
+    });
+    expect(current().closed).toBe(true);
+    expect((await codex.listModels('work')).map((model) => model.id)).toEqual([
+      'gpt-proxy',
+      'gpt-default',
+      'gpt-small',
+    ]);
+    expect(current().closed).toBe(true);
+    expect(await codex.listGateways()).toEqual(['work']);
+  });
+
+  it('resumes a thread and replays its history, page by page', async () => {
+    const events: SessionEvent[] = [];
+    const session = await provider().resume(
+      { cwd: '/work', sessionId: 'th1', sandbox: 'read-only' },
+      (event) => {
+        events.push(event);
+      },
+    );
+    expect(session.id).toBe('th1');
+    expect(current().params('thread/resume')).toMatchObject({
+      threadId: 'th1',
+      excludeTurns: true,
+      sandbox: 'read-only',
+    });
+    expect(current().params('thread/turns/list', 1)).toMatchObject({
+      cursor: 'page2',
+      itemsView: 'full',
+    });
+    expect(events.slice(0, 3)).toEqual([
+      { type: 'message', id: 'u1', role: 'user', text: 'Earlier' },
+      { type: 'message', id: 'a1', role: 'agent', text: 'Reply' },
+      { type: 'replay-finished' },
+    ]);
+  });
+});
+
+describe('a Codex session', () => {
+  it('sends a chosen effort with the first turn, and ends the turn when Codex says so', async () => {
+    const { session, events } = await startSession({ effort: 'high' });
+    await session.send('hi');
+    expect(current().params('turn/start')).toEqual({
+      threadId: 'th1',
+      input: [{ type: 'text', text: 'hi', text_elements: [] }],
+      effort: 'high',
+    });
+    current().emit('turn/completed', completed('turn-1'));
+    expect(events.at(-1)).toEqual({ type: 'turn-ended', outcome: 'completed' });
+    await session.send('again');
+    expect(current().params('turn/start')).toEqual({
+      threadId: 'th1',
+      input: [{ type: 'text', text: 'again', text_elements: [] }],
+    });
+  });
+
+  it('carries a switched model, effort and mode with the next turn, defaults included', async () => {
+    const { session } = await startSession();
+    await session.setModel('gpt-small');
+    await session.setEffort('low');
+    await session.setMode('yolo');
+    await session.send('one');
+    expect(current().params('turn/start')).toMatchObject({
+      model: 'gpt-small',
+      effort: 'low',
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user',
+    });
+    expect(current().params('turn/start')).not.toHaveProperty('sandboxPolicy');
+    current().emit('turn/completed', completed('turn-1'));
+    await session.setModel(null);
+    await session.setEffort(null);
+    await session.setMode('auto');
+    await session.send('two');
+    expect(current().params('turn/start')).toMatchObject({
+      model: 'gpt-default',
+      effort: 'medium',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+    });
+  });
+
+  it('carries a switched sandbox with the next turn, without the mode, as Codex shaped it', async () => {
+    const { session, events } = await startSession();
+    await session.send('one');
+    await session.setSandbox('read-only');
+    expect(events.at(-1)).toEqual({ type: 'settings', sandbox: 'read-only' });
+    expect(current().calls.filter((call) => call.method === 'turn/start')).toHaveLength(1);
+    current().emit('turn/completed', completed('turn-1'));
+    await session.send('two');
+    expect(current().params('turn/start')).toMatchObject({ sandboxPolicy: READ_ONLY });
+    expect(current().params('turn/start')).not.toHaveProperty('approvalPolicy');
+    current().emit('turn/completed', completed('turn-2'));
+    await session.setSandbox('full-access');
+    await session.send('three');
+    expect(current().params('turn/start')).toMatchObject({
+      sandboxPolicy: { type: 'dangerFullAccess' },
+    });
+    current().emit('turn/completed', completed('turn-3'));
+    // The thread started in workspace-write, so the policy Codex gave it then comes back.
+    await session.setSandbox('workspace-write');
+    await session.send('four');
+    expect(current().params('turn/start')).toMatchObject({ sandboxPolicy: WORKSPACE });
+    current().emit('turn/completed', completed('turn-4'));
+    await session.send('five');
+    expect(current().params('turn/start')).not.toHaveProperty('sandboxPolicy');
+  });
+
+  it('sends Codex’s default policy for a level the thread never had', async () => {
+    const { session } = await startSession({ sandbox: 'read-only' });
+    await session.setSandbox('workspace-write');
+    await session.send('one');
+    expect(current().params('turn/start')).toMatchObject({
+      sandboxPolicy: { ...WORKSPACE, writableRoots: [], networkAccess: false },
+    });
+  });
+
+  it('asks the user for approvals in auto and allows them by itself in yolo', async () => {
+    const { session, events } = await startSession();
+    const first = current().ask('item/commandExecution/requestApproval', approvalParams, 5);
+    expect(events.at(-1)).toMatchObject({
+      type: 'approval-requested',
+      request: { id: '5', command: 'rm -rf build' },
+    });
+    await session.answerApproval('5', { decision: 'allow-for-session' });
+    expect(await first).toEqual({ decision: 'acceptForSession' });
+    const waiting = current().ask('item/commandExecution/requestApproval', approvalParams, 6);
+    await session.setMode('yolo');
+    expect(await waiting).toEqual({ decision: 'accept' });
+    expect(events).toContainEqual({
+      type: 'request-resolved',
+      requestId: '6',
+      outcome: 'answered',
+    });
+    const count = events.length;
+    expect(
+      await current().ask(
+        'item/fileChange/requestApproval',
+        { ...approvalParams, reason: null },
+        7,
+      ),
+    ).toEqual({
+      decision: 'accept',
+    });
+    expect(events).toHaveLength(count);
+  });
+
+  it('asks Codex’s questions and cancels what Codex resolves by itself', async () => {
+    const { session, events } = await startSession();
+    const question = current().ask(
+      'item/tool/requestUserInput',
+      {
+        threadId: 'th1',
+        turnId: 'turn-1',
+        itemId: 'q',
+        isBlocking: true,
+        autoResolutionMs: null,
+        questions: [
+          {
+            id: 'style',
+            header: '',
+            question: 'Tabs?',
+            isOther: false,
+            isSecret: false,
+            options: [{ label: 'Tabs', description: '' }],
+          },
+        ],
+      },
+      'q-1',
+    );
+    expect(events.at(-1)).toMatchObject({ type: 'question-asked', request: { id: 'q-1' } });
+    await session.answerQuestion('q-1', {
+      decision: 'answer',
+      answers: { style: { selected: ['Tabs'] } },
+    });
+    expect(await question).toEqual({ answers: { style: { answers: ['Tabs'] } } });
+    const approval = current().ask('item/commandExecution/requestApproval', approvalParams, 8);
+    current().emit('serverRequest/resolved', { threadId: 'th1', requestId: 8 });
+    expect(await approval).toEqual({ decision: 'decline' });
+    expect(events.at(-1)).toEqual({
+      type: 'request-resolved',
+      requestId: '8',
+      outcome: 'cancelled',
+    });
+    expect(await current().ask('mcpServer/elicitation/request', {}, 9)).toMatchObject({
+      action: 'decline',
+    });
+    await expect(current().ask('attestation/generate', {}, 10)).rejects.toThrow('does not answer');
+  });
+
+  it('asks the toolset’s questions and answers them as the user did', async () => {
+    const { session, events } = await startSession();
+    const asked = toolset.ask();
+    const id = lastQuestionId(events);
+    expect(id.startsWith('toolset-')).toBe(true);
+    expect(events.at(-1)).toMatchObject({
+      type: 'question-asked',
+      request: { id, questions: [toolsetQuestion] },
+    });
+    const answer: QuestionAnswer = { decision: 'answer', answers: { q0: { selected: ['React'] } } };
+    await session.answerQuestion(id, answer);
+    expect(await asked).toEqual(answer);
+    expect(events.at(-1)).toEqual({ type: 'request-resolved', requestId: id, outcome: 'answered' });
+  });
+
+  it('cancels the toolset’s questions on interrupt, at the turn’s end, when the call ends and on close', async () => {
+    const { session, events } = await startSession();
+    const declined = { decision: 'decline' };
+    await session.send('hi');
+    const interrupted = toolset.ask();
+    await session.interrupt();
+    expect(await interrupted).toEqual(declined);
+    expect(events.at(-1)).toMatchObject({ type: 'request-resolved', outcome: 'cancelled' });
+    const ended = toolset.ask();
+    current().emit('turn/completed', completed('turn-1'));
+    expect(await ended).toEqual(declined);
+    const call = new AbortController();
+    const givenUp = toolset.ask(call.signal);
+    call.abort();
+    expect(await givenUp).toEqual(declined);
+    const open = toolset.ask();
+    await session.close();
+    expect(await open).toEqual(declined);
+    expect(toolset.opened[0]?.closed).toBe(true);
+    expect(await toolset.ask()).toEqual(declined);
+    expect(events.filter((event) => event.type === 'question-asked')).toHaveLength(4);
+  });
+
+  it('switches the gateway between turns by resuming the thread on a new app-server', async () => {
+    const { session, events } = await startSession();
+    await session.send('hi');
+    current().emit('turn/completed', completed('turn-1'));
+    const first = current();
+    await session.setSandbox('read-only');
+    await session.setGateway('work');
+    expect(fakes).toHaveLength(2);
+    expect(first.closed).toBe(true);
+    expect(current().params('thread/resume')).toMatchObject({
+      threadId: 'th1',
+      excludeTurns: true,
+      sandbox: 'read-only',
+      modelProvider: 'proxy',
+      config: { model: 'gpt-proxy' },
+    });
+    expect(events).toContainEqual({
+      type: 'settings',
+      gateway: 'work',
+      model: 'gpt-proxy',
+      sandbox: 'read-only',
+    });
+    expect(events.some((event) => event.type === 'closed' || event.type === 'error')).toBe(false);
+    // The session keeps its toolset access, which the new app-server is started with.
+    expect(toolset.opened).toHaveLength(1);
+    expect(toolset.opened[0]?.closed).toBe(false);
+    expect(current().launch).toEqual(first.launch);
+    await session.send('again');
+    expect(current().params('turn/start')).toMatchObject({ threadId: 'th1' });
+  });
+
+  it('says so when Codex keeps the thread on its earlier provider', async () => {
+    resumedProvider = 'openai';
+    const { session, events } = await startSession();
+    await session.setGateway('work');
+    expect(events).toContainEqual({
+      type: 'error',
+      message:
+        'Codex kept this session on its provider "openai"; the gateway\'s provider "proxy" applies to new sessions.',
+    });
+  });
+
+  it('resumes the thread on its earlier gateway when the new one fails', async () => {
+    failResume = 'cannot reach secret-token-value';
+    const { session, events } = await startSession();
+    await expect(session.setGateway('work')).rejects.toThrow('cannot reach [hidden]');
+    expect(fakes).toHaveLength(3);
+    expect(fakes.slice(0, 2).every((fake) => fake.closed)).toBe(true);
+    expect(current().params('thread/resume')).not.toHaveProperty('modelProvider');
+    expect(events.some((event) => event.type === 'closed')).toBe(false);
+    await session.send('still here');
+    expect(current().params('turn/start')).toMatchObject({ threadId: 'th1' });
+  });
+
+  it('switches a gateway asked for during a turn once the turn has ended', async () => {
+    const { session, events } = await startSession();
+    await session.send('hi');
+    await session.setGateway('work');
+    expect(fakes).toHaveLength(1);
+    current().emit('turn/completed', completed('turn-1'));
+    await waitFor(() =>
+      events.some((event) => event.type === 'settings' && event.gateway === 'work'),
+    );
+    expect(fakes).toHaveLength(2);
+  });
+
+  it('closes when closed, and reports an unexpected exit, cancelling what was open', async () => {
+    const closing = await startSession();
+    await closing.session.close();
+    expect(closing.events.at(-1)).toEqual({ type: 'closed' });
+    const failing = await startSession();
+    const approval = current().ask('item/commandExecution/requestApproval', approvalParams, 11);
+    current().stop('Codex stopped unexpectedly (exit code 1).');
+    expect(await approval).toEqual({ decision: 'decline' });
+    expect(failing.events.slice(-2)).toEqual([
+      { type: 'request-resolved', requestId: '11', outcome: 'cancelled' },
+      { type: 'closed', error: 'Codex stopped unexpectedly (exit code 1).' },
+    ]);
+  });
+});

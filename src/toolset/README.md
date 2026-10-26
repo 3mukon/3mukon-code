@@ -20,7 +20,7 @@ tags: []
 ## Not responsible for
 
 - Showing questions and taking answers: the session does, through the adapter that opened the access.
-- Telling a provider about the toolset: each adapter that needs it configures its provider.
+- Telling a provider about the toolset: each adapter that needs it configures its provider; the Codex adapter does for every session (DOC-mod-codex).
 - Starting and stopping the toolset: the app module does, once for the app.
 - Provider credentials: a session's credential is the app's own and opens only the toolset (ADR-0008, ADR-0009).
 

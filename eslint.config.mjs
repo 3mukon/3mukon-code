@@ -4,7 +4,14 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  globalIgnores(['out/', 'dist/', 'test-results/', 'playwright-report/']),
+  globalIgnores([
+    'out/',
+    'dist/',
+    'test-results/',
+    'playwright-report/',
+    // Generated from the bundled Codex binary by scripts/codex-protocol.mjs; not edited by hand.
+    'src/providers/codex/main/protocol/',
+  ]),
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,

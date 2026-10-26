@@ -22,7 +22,8 @@
     "format:check": "prettier --check .",
     "test": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
     "test:smoke": "electron-vite build && playwright test",
-    "test:live": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run --config vitest.live.config.ts"
+    "test:live": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run --config vitest.live.config.ts",
+    "codex:protocol": "node scripts/codex-protocol.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -49,6 +50,7 @@
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-i18next": "17.1.0",
+    "smol-toml": "1.9.1",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.0",
@@ -57,6 +59,7 @@
     "zod": "4.6.7"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.310"
+    "@anthropic-ai/claude-agent-sdk": "0.3.310",
+    "@openai/codex": "0.164.0"
   }
 }
