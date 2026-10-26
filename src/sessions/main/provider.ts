@@ -1,7 +1,7 @@
 import type {
   ApprovalAnswer,
   HistoryEntry,
-  PermissionModeInfo,
+  PermissionMode,
   ProviderId,
   QuestionAnswer,
   SessionEvent,
@@ -13,8 +13,8 @@ export type SessionEventListener = (event: SessionEvent) => void;
 export interface StartOptions {
   // The workspace folder the agent works in.
   cwd: string;
-  // One of Provider.modes; the provider's default mode when left out.
-  mode?: string;
+  // auto when left out.
+  mode?: PermissionMode;
 }
 
 export interface ResumeOptions extends StartOptions {
@@ -28,7 +28,6 @@ export interface ResumeOptions extends StartOptions {
 // providers sign in through their own tools (ADR-0001).
 export interface Provider {
   readonly id: ProviderId;
-  readonly modes: readonly PermissionModeInfo[];
   // Starts a session and resolves once the provider has given it an id. The listener receives every
   // event of the session, from the first.
   start(options: StartOptions, onEvent: SessionEventListener): Promise<ProviderSession>;
@@ -49,8 +48,8 @@ export interface ProviderSession {
   interrupt(): Promise<void>;
   answerApproval(requestId: string, answer: ApprovalAnswer): Promise<void>;
   answerQuestion(requestId: string, answer: QuestionAnswer): Promise<void>;
-  // Switches to another of Provider.modes for what follows.
-  setMode(mode: string): Promise<void>;
+  // Switches the permission mode for what follows.
+  setMode(mode: PermissionMode): Promise<void>;
   // Ends the session and its provider process; a closed event follows.
   close(): Promise<void>;
 }

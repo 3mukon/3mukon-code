@@ -2,6 +2,7 @@ import type {
   ApprovalRequest,
   FileChange,
   MessageRole,
+  PermissionMode,
   QuestionRequest,
   SessionEvent,
   Task,
@@ -42,7 +43,7 @@ export interface SessionState {
   // A resumed session has not finished replaying its past events.
   loadingHistory: boolean;
   title?: string;
-  mode?: string;
+  mode?: PermissionMode;
 }
 
 export function initialSessionState(loadingHistory = false): SessionState {

@@ -1,19 +1,15 @@
 // The provider-neutral session model: the events a provider adapter reports, and the requests and
 // answers that pass between a session and the user. Everything here is plain JSON-serializable data,
 // so it crosses from the main process to the renderer unchanged. Text that comes from an agent or a
-// provider (messages, titles, reasons, questions) is shown as data, never as UI copy.
+// provider (messages, titles, reasons, questions) is shown as data, never as UI copy. Paths are
+// relative to the session's folder when they lie inside it, and absolute otherwise.
 
 export type ProviderId = 'claude-code' | 'codex' | 'grok-build';
 
-// One of a provider's permission modes, under the provider's own identifier.
-export interface PermissionModeInfo {
-  id: string;
-  // The mode new sessions start in: the provider asks before acting.
-  default: boolean;
-  // In this mode the agent acts without asking, at least for some actions, so choosing it needs the
-  // user's confirmation.
-  autoApproves: boolean;
-}
+// The two permission modes every provider offers (ADR-0006). In auto, the provider's own automatic
+// review approves or denies each action and asks the user only when it cannot decide; in yolo, nothing
+// is asked and every action runs. New sessions start in auto.
+export type PermissionMode = 'auto' | 'yolo';
 
 // What a tool call does, in the vocabulary of the Agent Client Protocol.
 export type ToolKind =
@@ -152,7 +148,7 @@ export type SessionEvent =
   // An approval or question was answered, or the provider withdrew it.
   | { type: 'request-resolved'; requestId: string; outcome: 'answered' | 'cancelled' }
   | { type: 'title'; title: string }
-  | { type: 'mode'; mode: string }
+  | { type: 'mode'; mode: PermissionMode }
   // A resumed session has replayed its past events; what follows is live.
   | { type: 'replay-finished' }
   | { type: 'error'; message: string }

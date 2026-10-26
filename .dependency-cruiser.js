@@ -56,6 +56,24 @@ export default {
       to: { path: '^src/providers/' },
     },
     {
+      name: 'providers-only-to-sessions-contract',
+      comment:
+        'A provider adapter uses only the sessions interface and model, never other modules or UI code (src/providers/claude-code/README.md).',
+      severity: 'error',
+      from: { path: '^src/providers/' },
+      to: {
+        path: '^src/',
+        pathNot: ['^src/providers/', '^src/sessions/main/provider\\.ts$', '^src/sessions/shared/'],
+      },
+    },
+    {
+      name: 'providers-not-to-each-other',
+      comment: 'Each provider adapter stands alone.',
+      severity: 'error',
+      from: { path: '^src/providers/([^/]+)/' },
+      to: { path: '^src/providers/', pathNot: '^src/providers/$1/' },
+    },
+    {
       name: 'shared-not-to-process-code',
       comment:
         "A module's shared/ code runs in the main process and the renderer alike, so it imports neither side's code.",

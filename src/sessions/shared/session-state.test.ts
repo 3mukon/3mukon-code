@@ -129,14 +129,14 @@ describe('applyEvent', () => {
     const state = fold(
       [
         { type: 'title', title: 'layout-refactor' },
-        { type: 'mode', mode: 'acceptEdits' },
+        { type: 'mode', mode: 'yolo' },
         { type: 'replay-finished' },
       ],
       initialSessionState(true),
     );
     expect(state).toMatchObject({
       title: 'layout-refactor',
-      mode: 'acceptEdits',
+      mode: 'yolo',
       loadingHistory: false,
     });
   });

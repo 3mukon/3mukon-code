@@ -67,6 +67,7 @@ type is one of feat, fix, refactor, docs, test, chore. Technical reasons only; `
 | Invariant 9 check | Inside the check command | Code under `src/` names no API key or token, as a setting or as an environment variable; matches are reported by file and line only | `sh scripts/checks/no-provider-keys.sh` |
 | Catalog parity | Inside the check command | Every folder under `src/` with a UI string catalog holds `en.json` and `zh-Hans.json` with the same keys, plural forms folded, and only non-empty string values | `sh scripts/checks/catalogs.sh` |
 | Code checks | Inside the check command, through `scripts/checks/code.sh` | TypeScript (`tsc -b`); ESLint with typescript-eslint's strict type-checked rules and the React hooks rules; the module rules in `.dependency-cruiser.js`; Prettier; vitest unit tests and component tests (in happy-dom), run on Electron's own Node.js; a Playwright smoke test that builds the app, launches it and checks its window | `corepack pnpm run` with `typecheck`, `lint`, `lint:modules`, `format:check`, `test` or `test:smoke` |
+| Live provider tests | By hand, after changing a provider adapter; never in the check command | Real sessions with each provider in throwaway folders, on the user's own sign-in; they need the provider signed in and use a little of the account's usage | `corepack pnpm run test:live` |
 | Secret scanning | The maintainer's local hooks: staged changes at commit, outgoing commits at push. CI: full history on every push and pull request | Secrets in content, using gitleaks' default rules | `gitleaks git --redact --no-banner -v .` |
 | Publishability check | The maintainer's local hooks, at commit and at push | Private references, local paths and sensitive terms in content, file names, commit messages and pushed ref names | Runs only in the maintainer's hooks |
 | Identity check | The maintainer's local hooks, at commit and at push | Every author and committer matches the repository's public commit identity | Runs only in the maintainer's hooks |
@@ -85,7 +86,7 @@ type is one of feat, fix, refactor, docs, test, chore. Technical reasons only; `
 
 ## Exemplars
 
-None yet.
+`sessions` (`src/sessions/`) with `providers/claude-code` (`src/providers/claude-code/`), the first vertical slice. New modules follow its layout: `main/`, `shared/` and `renderer/` parts, a README from the template, and their rules in `.dependency-cruiser.js`. They follow its tests too: unit tests beside the code, and for a provider adapter an opt-in live test. New provider adapters follow `providers/claude-code` in how they map their protocol onto the session model.
 
 ## Language
 
