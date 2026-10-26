@@ -32,6 +32,22 @@ export default {
       to: { path: '^src/app/' },
     },
     {
+      name: 'ui-imports-no-module',
+      comment:
+        'ui holds the design tokens and presentational components; every module may use it, and it uses none (src/ui/README.md).',
+      severity: 'error',
+      from: { path: '^src/ui/' },
+      to: { path: '^src/', pathNot: '^src/ui/' },
+    },
+    {
+      name: 'i18n-imports-no-module',
+      comment:
+        'i18n holds the catalogs and the localization runtime; every module may use it, and it uses none (src/i18n/README.md).',
+      severity: 'error',
+      from: { path: '^src/i18n/' },
+      to: { path: '^src/', pathNot: '^src/i18n/' },
+    },
+    {
       name: 'renderer-not-to-main',
       comment:
         'Renderer code runs in the sandboxed page and reaches the main process only through the preload bridge.',

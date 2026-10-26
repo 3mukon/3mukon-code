@@ -1,42 +1,25 @@
-/* System font and colours, light or dark as macOS is set. */
-:root {
-  color-scheme: light dark;
-  font-family: system-ui, sans-serif;
-}
+@import 'tailwindcss';
+@import '../../ui/renderer/tokens.css';
 
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-}
+/* Look for class names in every module under src/, not only in the renderer's root. */
+@source '../..';
 
-body {
-  background: Canvas;
-  color: CanvasText;
-}
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
 
-#root {
-  display: flex;
-  flex-direction: column;
-}
+  body {
+    background: var(--color-frame);
+    color: var(--color-ink);
+    font: 13px/1.6 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
 
-/* With the hidden-inset title bar, the page reaches the window's top edge; this strip moves the
-   window and leaves room for the traffic lights. */
-.title-bar {
-  flex: none;
-  height: 38px;
-  -webkit-app-region: drag;
-}
-
-.content {
-  flex: auto;
-  display: grid;
-  place-items: center;
-}
-
-.content h1 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
 }

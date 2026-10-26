@@ -1,0 +1,64 @@
+/* Design tokens. The reference design's palette is the dark theme, and a matching light theme follows
+   macOS's light appearance. Components reach them through the Tailwind theme at the end (bg-frame,
+   text-muted, border-line and so on); Tailwind's default palette is removed, so that no colour
+   bypasses the tokens. */
+:root {
+  color-scheme: light dark;
+  --frame: #f6f7f9;
+  --pane: #ffffff;
+  --line: rgb(0 0 0 / 0.08);
+  --hover: rgb(0 0 0 / 0.035);
+  --selected: rgb(0 0 0 / 0.06);
+  --ink: #1c1f26;
+  --muted: #5d6474;
+  --faint: #8e94a1;
+  --accent: #3d6fe8;
+  --run: #2e9d58;
+  --run-halo: rgb(46 157 88 / 0.15);
+  --wait: #c98a13;
+  --idle: #a2a8b4;
+  --add: #2e9d58;
+  --del: #d2453c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --frame: #12151c;
+    --pane: #151922;
+    --line: rgb(255 255 255 / 0.06);
+    --hover: rgb(255 255 255 / 0.03);
+    --selected: rgb(255 255 255 / 0.05);
+    --ink: #e6e8ee;
+    --muted: #7d8494;
+    --faint: #4a5060;
+    --accent: #7aa2ff;
+    --run: #50c878;
+    --run-halo: rgb(80 200 120 / 0.12);
+    --wait: #f0b84a;
+    --idle: #5a606e;
+    --add: #63c787;
+    --del: #e5736b;
+  }
+}
+
+@theme inline {
+  --color-*: initial;
+  --color-frame: var(--frame);
+  --color-pane: var(--pane);
+  --color-line: var(--line);
+  --color-hover: var(--hover);
+  --color-selected: var(--selected);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-run: var(--run);
+  --color-run-halo: var(--run-halo);
+  --color-wait: var(--wait);
+  --color-idle: var(--idle);
+  --color-add: var(--add);
+  --color-del: var(--del);
+  /* SF Pro and SF Mono on macOS. */
+  --font-sans: system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
+}

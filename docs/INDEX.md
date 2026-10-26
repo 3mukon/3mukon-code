@@ -19,7 +19,9 @@ Read this first and open documents based on their summaries. One line per docume
 
 | ID | Status | Title | Summary |
 |---|---|---|---|
-| [DOC-mod-app](../src/app/README.md) | current | app module | The Electron entry point, which starts the desktop app, opens its main window and keeps that window on the app's own page |
+| [DOC-mod-app](../src/app/README.md) | current | app module | The Electron entry point, which starts the desktop app, opens its main window on the app's own page and lays out the window shell |
+| [DOC-mod-i18n](../src/i18n/README.md) | current | i18n module | The English and Simplified Chinese catalogs and the runtime that shows the UI in the first of them that macOS's preferred languages name |
+| [DOC-mod-ui](../src/ui/README.md) | current | ui module | The reference design's tokens, as a dark and a matching light theme that follow macOS, and the presentational components other modules build their UI from |
 
 ## Architecture decisions
 

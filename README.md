@@ -6,7 +6,7 @@ This description is a working version.
 
 ## Status
 
-Scaffold: the app opens an empty window. Sessions and providers are not built yet.
+The window shell is in place, in English and Simplified Chinese and in light and dark appearance: the title bar, the sidebar and an empty main area. Sessions and providers are not built yet.
 
 ## Quick start
 
