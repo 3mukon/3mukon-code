@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Plus } from '../../ui/renderer/icons';
+import { Plus } from '../../ui/renderer/icons';
+import { Select } from '../../ui/renderer/select';
 import { StatusDot, type Status } from '../../ui/renderer/status-dot';
 import type { SessionStatus } from '../shared/session-state';
 import type { SessionSummary } from '../shared/sessions';
@@ -27,7 +28,7 @@ const dots: Record<SessionStatus, Status> = {
 };
 
 // The sidebar's Sessions section: its heading with New session just after it and, while there are
-// folders to choose, the filter at the row's end; then every session, each labelled with its folder.
+// folders to choose, the filter just after that; then every session, each labelled with its folder.
 // The filter narrows the list to the sessions in one folder or below it. Without sessions it shows the
 // heading row alone.
 export function SessionsSection({ sessions, folders }: SessionsSectionProps) {
@@ -42,7 +43,7 @@ export function SessionsSection({ sessions, folders }: SessionsSectionProps) {
   return (
     <section aria-labelledby={heading} className="flex min-h-0 flex-1 flex-col gap-1">
       <div className="flex items-center gap-1 px-2">
-        <h2 id={heading} className="text-[11px] text-faint">
+        <h2 id={heading} className="shrink-0 text-[11px] text-faint">
           {t('sessions.heading')}
         </h2>
         {/* New session, a plus icon whose name VoiceOver reads and the tooltip shows; the negative
@@ -52,30 +53,22 @@ export function SessionsSection({ sessions, folders }: SessionsSectionProps) {
           disabled
           aria-label={t('sessions.newSession')}
           title={t('sessions.newSession')}
-          className="-my-0.5 grid size-5 place-items-center rounded-md text-faint"
+          className="-my-0.5 grid size-5 shrink-0 place-items-center rounded-md text-faint"
         >
           <Plus className="size-4" />
         </button>
         {folders.length > 0 && (
-          <div className="relative ml-auto flex min-w-0 items-center">
-            <select
-              aria-label={t('sessions.filter')}
-              title={t('sessions.filter')}
-              value={filter?.id ?? ''}
-              onChange={(event) => {
-                setFilterId(event.target.value === '' ? null : event.target.value);
-              }}
-              className="max-w-[120px] min-w-0 appearance-none truncate rounded-md bg-transparent pr-4 pl-1 text-right text-[11px] text-faint hover:text-ink"
-            >
-              <option value="">{t('sessions.allWorkspaces')}</option>
-              {folders.map((folder) => (
-                <option key={folder.id} value={folder.id}>
-                  {folder.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-0 size-3 text-faint" />
-          </div>
+          <Select
+            label={t('sessions.filter')}
+            value={filter?.id ?? ''}
+            options={[
+              { value: '', label: t('sessions.allWorkspaces') },
+              ...folders.map((folder) => ({ value: folder.id, label: folder.name })),
+            ]}
+            onChange={(value) => {
+              setFilterId(value === '' ? null : value);
+            }}
+          />
         )}
       </div>
       {shown.length > 0 && (

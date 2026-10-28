@@ -1,4 +1,11 @@
-import { useRef, useState, type KeyboardEvent, type ReactNode, type SyntheticEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type SyntheticEvent,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, ShieldOff } from '../../ui/renderer/icons';
 import type {
@@ -7,6 +14,7 @@ import type {
   WorkspaceList,
   WorkspacesBridge,
 } from '../shared/workspaces';
+import { clickWait, withGap } from './click-wait';
 
 // One row of the tree: a workspace, or a folder or file in one.
 interface Item {
@@ -21,6 +29,21 @@ interface Item {
   parent: Item | null;
 }
 
+// The tree's open rows and their listings just before a click opened or closed the row of this key.
+interface Before {
+  key: string;
+  open: ReadonlySet<string>;
+  listings: ReadonlyMap<string, FolderListing>;
+}
+
+// A click on the workspace of this key, waiting to see whether a second press follows it, and what it
+// does if none does.
+interface Waiting {
+  key: string;
+  timer: ReturnType<typeof setTimeout>;
+  run: () => void;
+}
+
 interface WorkspaceTreeProps {
   bridge: WorkspacesBridge;
   list: WorkspaceList;
@@ -29,16 +52,35 @@ interface WorkspaceTreeProps {
 }
 
 // The workspaces as a tree, each expanding into its folder tree, which is read folder by folder as
-// folders open; a folder read again each time it opens shows what it holds then. Clicking a workspace,
-// or pressing Return or Space on it, selects it; its menu opens with a secondary click or VoiceOver's
-// menu command. The keyboard moves as in macOS lists: up and down, right to open or go in, left to
-// close or go out, Home and End.
+// folders open; a folder read again each time it opens shows what it holds then. A click opens or
+// closes a folder at once, and a workspace once no second press has followed it within the wait
+// (click-wait.ts); a double click selects a workspace without opening or closing it, and Return or
+// Space selects it too; a workspace's menu opens with a secondary click or VoiceOver's menu command.
+// The keyboard moves as in macOS lists: up and down, right to open or go in, left to close or go out,
+// Home and End.
 export function WorkspaceTree({ bridge, list, labelledBy }: WorkspaceTreeProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [listings, setListings] = useState<ReadonlyMap<string, FolderListing>>(new Map());
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const elements = useRef(new Map<string, HTMLLIElement>());
+  // A double click is two clicks, so a click on a workspace waits for a second press before acting.
+  const waiting = useRef<Waiting | null>(null);
+  // The last click on a workspace that could begin a double click, and when it came.
+  const firstClick = useRef<{ key: string; at: number } | null>(null);
+  // How long after their first clicks the second presses of the latest double clicks came.
+  const gaps = useRef<number[]>([]);
+  // The tree before that click opened or closed its workspace: a double click slower than the wait,
+  // which macOS still counts as one, finds its first click acted on, and puts the tree back.
+  const before = useRef<Before | null>(null);
+
+  // A click still waiting when the tree goes away does nothing.
+  useEffect(
+    () => () => {
+      if (waiting.current !== null) clearTimeout(waiting.current.timer);
+    },
+    [],
+  );
 
   const roots = list.workspaces.map((workspace): Item => ({
     key: keyOf(workspace.id, ''),
@@ -119,7 +161,68 @@ export function WorkspaceTree({ bridge, list, labelledBy }: WorkspaceTreeProps) 
     bridge.select(item.workspace.id).catch(report);
   };
 
-  // What Return, Space or a click on the row does: a workspace is selected, a folder opens or closes.
+  // A click opens or closes a folder at once; a workspace waits for a possible second press first.
+  const click = (item: Item, at: number) => {
+    if (item.kind !== 'workspace') {
+      toggle(item);
+      return;
+    }
+    const earlier = waiting.current;
+    if (earlier !== null) {
+      clearTimeout(earlier.timer);
+      waiting.current = null;
+      // Two clicks on a workspace that macOS does not count as a double click would open and close
+      // it, so it stays as it is. A click on another workspace acts at once.
+      if (earlier.key === item.key) return;
+      earlier.run();
+    }
+    firstClick.current = { key: item.key, at };
+    before.current = null;
+    const tree = { key: item.key, open, listings };
+    const change = open.has(item.key) ? collapse : expand;
+    const run = () => {
+      before.current = tree;
+      change(item);
+    };
+    const timer = setTimeout(() => {
+      waiting.current = null;
+      run();
+    }, clickWait(gaps.current));
+    waiting.current = { key: item.key, timer, run };
+  };
+
+  // The second press of a double click on a workspace, which comes before the double click itself:
+  // the click before it now does not open or close the workspace, and how long after that click the
+  // press came tells the wait how fast the user double-clicks.
+  const pressAgain = (item: Item, at: number) => {
+    const first = firstClick.current;
+    if (item.kind !== 'workspace' || first?.key !== item.key) return;
+    gaps.current = withGap(gaps.current, at - first.at);
+    const earlier = waiting.current;
+    if (earlier?.key === item.key) {
+      clearTimeout(earlier.timer);
+      waiting.current = null;
+    }
+  };
+
+  // A double click selects a workspace and leaves it open or closed as it was: when its first click
+  // acted before the second press came, the tree goes back as it was.
+  const doubleClick = (item: Item) => {
+    if (item.kind !== 'workspace') return;
+    select(item);
+    const earlier = waiting.current;
+    const tree = before.current;
+    if (earlier?.key === item.key) {
+      clearTimeout(earlier.timer);
+      waiting.current = null;
+    } else if (tree?.key === item.key) {
+      setOpen(tree.open);
+      setListings(tree.listings);
+    }
+    before.current = null;
+  };
+
+  // What Return or Space on the row does: a workspace is selected, a folder opens or closes.
   const activate = (item: Item) => {
     if (item.kind === 'workspace') select(item);
     else if (item.kind === 'folder') toggle(item);
@@ -209,11 +312,17 @@ export function WorkspaceTree({ bridge, list, labelledBy }: WorkspaceTreeProps) 
         >
           <div
             title={item.kind === 'workspace' ? item.workspace.path : undefined}
-            onClick={() => {
-              activate(item);
+            onMouseDown={(event) => {
+              // A press that macOS counts as the second of a double click.
+              if (event.detail === 2) pressAgain(item, event.timeStamp);
+            }}
+            onClick={(event) => {
+              // The second click of a double click is the double click's.
+              if (event.detail > 1 || item.kind === 'file') return;
+              click(item, event.timeStamp);
             }}
             onDoubleClick={() => {
-              if (item.kind === 'workspace') toggle(item);
+              doubleClick(item);
             }}
             style={{ paddingLeft: `${String(4 + (item.level - 1) * 12)}px` }}
             className={`flex h-6 items-center gap-1 rounded-md pr-2 ${selected ? 'bg-selected' : 'hover:bg-hover'}`}
@@ -223,11 +332,6 @@ export function WorkspaceTree({ bridge, list, labelledBy }: WorkspaceTreeProps) 
             ) : (
               <span
                 aria-hidden="true"
-                onClick={(event) => {
-                  // The chevron only opens and closes, without selecting.
-                  event.stopPropagation();
-                  toggle(item);
-                }}
                 className="grid size-4 shrink-0 place-items-center text-faint"
               >
                 <ChevronRight

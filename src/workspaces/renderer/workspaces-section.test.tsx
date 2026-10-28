@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { FolderListing, WorkspaceList, WorkspacesBridge } from '../shared/workspaces';
 import { WorkspacesSection } from './workspaces-section';
@@ -7,7 +7,14 @@ import { WorkspacesSection } from './workspaces-section';
 beforeAll(() => {
   initI18n(['en-US']);
 });
-afterEach(cleanup);
+// A click on a workspace waits for a possible second press; the tests let that time pass at will.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const list: WorkspaceList = {
   workspaces: [
@@ -51,8 +58,32 @@ function renderSection(bridge = fakeBridge(), shown = list) {
 const row = (name: string) => screen.getByRole('treeitem', { name });
 // The row's own line, which takes clicks, as opposed to the rows inside it.
 const line = (name: string) => row(name).firstElementChild as HTMLElement;
-const chevron = (name: string) => line(name).firstElementChild as HTMLElement;
 const settle = () => act(() => Promise.resolve());
+
+// A double click as the page receives one: two presses and clicks, then the double click.
+function doubleClick(element: HTMLElement) {
+  fireEvent.mouseDown(element, { detail: 1 });
+  fireEvent.click(element, { detail: 1 });
+  fireEvent.mouseDown(element, { detail: 2 });
+  fireEvent.click(element, { detail: 2 });
+  fireEvent.doubleClick(element, { detail: 2 });
+}
+
+// A mouse event of this type and click count, which happened this many milliseconds after the page
+// opened, as its time stamp says.
+function mouseAt(type: string, detail: number, timeStamp: number): MouseEvent {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, detail });
+  Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+  return event;
+}
+
+// Lets the time pass in which a second click could still follow a click, and the folders arrive.
+async function waitForSecondClick() {
+  act(() => {
+    vi.runOnlyPendingTimers();
+  });
+  await settle();
+}
 
 describe('WorkspacesSection', () => {
   it('shows the heading alone without workspaces, and adds one with Add workspace', () => {
@@ -81,18 +112,93 @@ describe('WorkspacesSection', () => {
     expect(row('api, Untrusted').tabIndex).toBe(-1);
   });
 
-  it('selects a workspace with a click, Return or Space', () => {
+  it('selects a workspace with a double click, Return or Space', async () => {
     const bridge = renderSection();
-    fireEvent.click(line('api, Untrusted'));
+    doubleClick(line('web'));
+    await settle();
     fireEvent.keyDown(row('api, Untrusted'), { key: 'Enter' });
     fireEvent.keyDown(row('web'), { key: ' ' });
-    expect(bridge.select.mock.calls).toEqual([['w2'], ['w2'], ['w1']]);
+    expect(bridge.select.mock.calls).toEqual([['w1'], ['w2'], ['w1']]);
+  });
+
+  it('opens and closes a workspace with a click once no second click has followed it', async () => {
+    const bridge = renderSection();
+    fireEvent.click(line('web'), { detail: 1 });
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(row('web').getAttribute('aria-expanded')).toBe('false');
+    await waitForSecondClick();
+    expect(row('web').getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(line('web'), { detail: 1 });
+    await waitForSecondClick();
+    expect(row('web').getAttribute('aria-expanded')).toBe('false');
+    expect(bridge.select).not.toHaveBeenCalled();
+  });
+
+  it('selects a workspace with a double click, without opening or closing it', async () => {
+    const bridge = renderSection();
+    doubleClick(line('web'));
+    await waitForSecondClick();
+    expect(row('web').getAttribute('aria-expanded')).toBe('false');
+    // An open workspace stays open, with the folder open inside it.
+    fireEvent.click(line('web'));
+    await waitForSecondClick();
+    fireEvent.click(line('src'));
+    await settle();
+    doubleClick(line('web'));
+    await waitForSecondClick();
+    expect(row('web').getAttribute('aria-expanded')).toBe('true');
+    expect(row('src').getAttribute('aria-expanded')).toBe('true');
+    expect(bridge.select.mock.calls).toEqual([['w1'], ['w1']]);
+    expect(bridge.listFolder).toHaveBeenCalledTimes(2);
+  });
+
+  it('puts the tree back when a double click’s second press comes after its first click acted, and then waits longer', async () => {
+    const bridge = renderSection();
+    // The first click acts after 150ms, and the second press comes at 200ms.
+    fireEvent(line('web'), mouseAt('click', 1, 1000));
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    await settle();
+    expect(row('web').getAttribute('aria-expanded')).toBe('true');
+    fireEvent(line('web'), mouseAt('mousedown', 2, 1200));
+    fireEvent(line('web'), mouseAt('click', 2, 1280));
+    fireEvent(line('web'), mouseAt('dblclick', 2, 1280));
+    expect(row('web').getAttribute('aria-expanded')).toBe('false');
+    expect(bridge.select.mock.calls).toEqual([['w1']]);
+    // A click now waits 240ms, a margin longer than that double click needed.
+    fireEvent(line('web'), mouseAt('click', 1, 3000));
+    act(() => {
+      vi.advanceTimersByTime(230);
+    });
+    expect(row('web').getAttribute('aria-expanded')).toBe('false');
+    act(() => {
+      vi.advanceTimersByTime(10);
+    });
+    await settle();
+    expect(row('web').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('leaves a workspace as it is after two clicks that are not a double click, and acts at once on a click elsewhere', async () => {
+    const bridge = renderSection();
+    fireEvent.click(line('web'), { detail: 1 });
+    fireEvent.click(line('web'), { detail: 1 });
+    await waitForSecondClick();
+    expect(row('web').getAttribute('aria-expanded')).toBe('false');
+    // A click on the other workspace lets the first click open its workspace at once.
+    fireEvent.click(line('web'), { detail: 1 });
+    fireEvent.click(line('api, Untrusted'), { detail: 1 });
+    await settle();
+    expect(row('web').getAttribute('aria-expanded')).toBe('true');
+    expect(bridge.listFolder.mock.calls).toEqual([['w1', '']]);
   });
 
   it('opens a workspace into its folder tree, and reads each folder again when it opens again', async () => {
     const bridge = renderSection();
-    fireEvent.click(chevron('web'));
-    await settle();
+    fireEvent.click(line('web'));
+    await waitForSecondClick();
     expect(bridge.select).not.toHaveBeenCalled();
     expect(row('web').getAttribute('aria-expanded')).toBe('true');
     const group = within(row('web')).getByRole('group');
@@ -103,7 +209,7 @@ describe('WorkspacesSection', () => {
     ).toEqual(['src', 'README.md']);
     expect(row('src').getAttribute('aria-level')).toBe('2');
     expect(row('README.md').getAttribute('aria-expanded')).toBeNull();
-    // A folder opens with a click on its row.
+    // A folder opens with a click on its row, at once.
     fireEvent.click(line('src'));
     await settle();
     screen.getByRole('treeitem', { name: 'main.ts' });
@@ -112,21 +218,23 @@ describe('WorkspacesSection', () => {
       ['w1', 'src'],
     ]);
     // Closing the workspace closes the folders inside it.
-    fireEvent.click(chevron('web'));
+    fireEvent.click(line('web'));
+    await waitForSecondClick();
     expect(screen.queryByRole('treeitem', { name: 'src' })).toBeNull();
-    fireEvent.click(chevron('web'));
-    await settle();
+    fireEvent.click(line('web'));
+    await waitForSecondClick();
     expect(row('src').getAttribute('aria-expanded')).toBe('false');
     expect(bridge.listFolder).toHaveBeenCalledTimes(3);
   });
 
   it('says when a folder cannot be read, and tries again when it is opened again', async () => {
     const bridge = renderSection();
-    fireEvent.click(chevron('api, Untrusted'));
-    await settle();
+    fireEvent.click(line('api, Untrusted'));
+    await waitForSecondClick();
     const failed = row('api, Untrusted, Can’t open this folder');
     expect(failed.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(chevron('api, Untrusted, Can’t open this folder'));
+    fireEvent.click(line('api, Untrusted, Can’t open this folder'));
+    await waitForSecondClick();
     expect(bridge.listFolder).toHaveBeenCalledTimes(2);
   });
 
@@ -168,8 +276,8 @@ describe('WorkspacesSection', () => {
     const bridge = renderSection();
     fireEvent.contextMenu(line('web'));
     expect(bridge.showMenu.mock.calls).toEqual([['w1']]);
-    fireEvent.click(chevron('web'));
-    await settle();
+    fireEvent.click(line('web'));
+    await waitForSecondClick();
     fireEvent.contextMenu(line('README.md'));
     expect(bridge.showMenu).toHaveBeenCalledOnce();
   });

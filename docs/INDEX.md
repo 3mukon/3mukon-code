@@ -26,7 +26,7 @@ Read this first and open documents based on their summaries. One line per docume
 | [DOC-mod-i18n](../src/i18n/README.md) | current | i18n module | The English and Simplified Chinese catalogs, and the runtimes that show the window and the main process's dialogs and menus in the first of them that macOS's preferred languages name |
 | [DOC-mod-sessions](../src/sessions/README.md) | current | sessions module | The provider-neutral session model, made of the interface every provider adapter implements, the events and requests a session produces and the state the UI folds from them, with the host that runs the app's open sessions and the sidebar's Sessions list |
 | [DOC-mod-toolset](../src/toolset/README.md) | current | toolset module | The app's own MCP toolset, 3mukon-code, which the main process serves over local streamable HTTP to each session's provider process with a credential of its own, and whose one tool asks the user questions |
-| [DOC-mod-ui](../src/ui/README.md) | current | ui module | The reference design's tokens, as a dark and a matching light theme that follow macOS, and the presentational components and icons other modules build their UI from |
+| [DOC-mod-ui](../src/ui/README.md) | current | ui module | The reference design's tokens, as a dark theme and a warm light theme that follow macOS, and the presentational components and icons other modules build their UI from |
 | [DOC-mod-workspaces](../src/workspaces/README.md) | current | workspaces module | The user's workspaces, folders on this Mac with the user's trust answer and one of them selected, kept in the app's own data, with the sidebar's Workspaces section and each workspace's folder tree |
 
 ## Architecture decisions

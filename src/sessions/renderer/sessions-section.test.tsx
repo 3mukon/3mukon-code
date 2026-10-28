@@ -70,6 +70,9 @@ describe('SessionsSection', () => {
         .getAllByRole('option')
         .map((option) => option.textContent),
     ).toEqual(['All workspaces', 'web', 'api']);
+    // It comes just after New session, so that it starts in the same place whatever it shows.
+    const newSession = within(region()).getByRole('button', { name: 'New session' });
+    expect(newSession.nextElementSibling?.contains(filter)).toBe(true);
     fireEvent.change(filter, { target: { value: 'w1' } });
     expect(rows()).toEqual(['RunningFix the buildweb', 'Waiting for youCodexui']);
     fireEvent.change(filter, { target: { value: 'w2' } });

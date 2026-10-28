@@ -8,8 +8,8 @@ import type { Bridge } from '../shared/bridge';
 
 // The window shell: a full-height sidebar, which ⌘B shows and hides, beside the main area. The top
 // 40px of both form the title bar, which moves the window, shows no title and has no line beneath
-// it; the sidebar's divider runs through it and is the shell's only line. The sidebar holds the
-// Workspaces section above the Sessions section; the main area stays blank until panels arrive.
+// it; the sidebar's divider runs through it. The sidebar holds the Workspaces section above the
+// Sessions section, with a thin line between them; the main area stays blank until panels arrive.
 export function App({ bridge }: { bridge: Bridge }) {
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -44,6 +44,8 @@ export function App({ bridge }: { bridge: Bridge }) {
             {/* The app's name, bold and compact, just below the title bar. */}
             <div className="shrink-0 truncate px-2 leading-5 font-bold">3mukon-code</div>
             <WorkspacesSection bridge={bridge.workspaces} list={workspaces} />
+            {/* A thin line between the two sections, as wide as their rows, halfway between them. */}
+            <div aria-hidden="true" className="-my-1 shrink-0 border-t border-line" />
             <SessionsSection sessions={sessions} folders={workspaces.workspaces} />
           </div>
         </div>

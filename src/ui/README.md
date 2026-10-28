@@ -5,19 +5,20 @@ title: ui module
 status: current
 visibility: public
 date: 2026-10-25
-summary: The reference design's tokens, as a dark and a matching light theme that follow macOS, and the presentational components and icons other modules build their UI from
+summary: The reference design's tokens, as a dark theme and a warm light theme that follow macOS, and the presentational components and icons other modules build their UI from
 scope: ["src/ui/**"]
 tags: []
 ---
 
 ## Responsibilities
 
-- Design tokens (`renderer/tokens.css`): the colours, with the reference design's palette as the dark theme and a matching light theme, switched by macOS's appearance, and the system fonts (SF Pro, SF Mono). Tailwind exposes them as classes such as `bg-frame`, `text-muted` and `border-line`; its default palette is removed, so every colour comes from a token.
+- Design tokens (`renderer/tokens.css`): the colours, with the reference design's palette as the dark theme and a light theme of warm greys on a warm white, switched by macOS's appearance; the menu tokens (`menu`, `menu-line` and the `menu` shadow) for lists that open over the window, a warm white raised by a soft warm shadow in the light theme and a surface lighter than the panes in the dark one; and the system fonts (SF Pro, SF Mono). Tailwind exposes them as classes such as `bg-frame`, `text-muted` and `border-line`; its default palette is removed, so every colour comes from a token.
 - Presentational components, which take their data and text as props:
   - `StatusDot` (`renderer/status-dot.tsx`): a status (running, waiting, done or idle) as a coloured dot.
   - `WaitingIndicator` (`renderer/waiting-indicator.tsx`): the title bar's count of sessions waiting on the user, as a button; it renders nothing at zero.
   - `Pane` (`renderer/pane.tsx`): a pane with a header (status, title, detail) above a scrolling body, dimmed while the other pane has focus.
   - `SplitPanes` (`renderer/split-panes.tsx`): one pane, or two side by side with a divider that the pointer drags or the keyboard moves (arrow keys, Shift for larger steps, Home, End), keeping each pane at least `minPaneWidth` wide (`renderer/split.ts`).
+  - `Select` (`renderer/select.tsx`): a compact choice of one option, the chosen option's text in small type with a chevron after it, which keeps its left edge whatever the text's width; its list, on the menu tokens, opens just below it, from that edge, and marks the chosen option with the select's own checkmark. A select in Chromium's customizable appearance (`appearance: base-select`) lies over the text, invisible but for its focus ring and its list, so that the keyboard and VoiceOver handle it as any select.
 - Icons (`renderer/icons.tsx`): the Lucide icons the app uses (ADR-0007), as components that draw in the current text colour and are hidden from VoiceOver.
 
 ## Not responsible for

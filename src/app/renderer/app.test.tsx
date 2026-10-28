@@ -56,10 +56,11 @@ describe('App', () => {
     expect(heading.parentElement?.contains(newSession)).toBe(true);
     expect(newSession).toHaveProperty('disabled', true);
     expect(sessions.textContent).toBe('Sessions');
-    // The Workspaces section comes first.
-    expect(
-      workspaces.compareDocumentPosition(sessions) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    // The Workspaces section comes first, and a thin line, hidden from VoiceOver, separates the two.
+    const line = workspaces.nextElementSibling;
+    expect(line?.nextElementSibling).toBe(sessions);
+    expect(line?.getAttribute('aria-hidden')).toBe('true');
+    expect(line?.className).toContain('border-line');
     // The sidebar's heading is the only place the name appears.
     expect(screen.getAllByText('3mukon-code')).toHaveLength(1);
     expect(screen.getByRole('main').textContent).toBe('');

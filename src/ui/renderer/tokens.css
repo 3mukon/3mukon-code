@@ -1,24 +1,28 @@
-/* Design tokens. The reference design's palette is the dark theme, and a matching light theme follows
-   macOS's light appearance. Components reach them through the Tailwind theme at the end (bg-frame,
-   text-muted, border-line and so on); Tailwind's default palette is removed, so that no colour
-   bypasses the tokens. */
+/* Design tokens. The reference design's palette is the dark theme, and a light theme on a warm white
+   follows macOS's light appearance. Components reach them through the Tailwind theme at the end
+   (bg-frame, text-muted, border-line and so on); Tailwind's default palette is removed, so that no
+   colour bypasses the tokens. */
 :root {
   color-scheme: light dark;
-  --frame: #f6f7f9;
+  --frame: #faf9f6;
   --pane: #ffffff;
   --line: rgb(0 0 0 / 0.08);
   --hover: rgb(0 0 0 / 0.035);
   --selected: rgb(0 0 0 / 0.06);
-  --ink: #1c1f26;
-  --muted: #5d6474;
-  --faint: #8e94a1;
+  --ink: #1f1d1a;
+  --muted: #66625b;
+  --faint: #98938b;
   --accent: #3d6fe8;
   --run: #2e9d58;
   --run-halo: rgb(46 157 88 / 0.15);
   --wait: #c98a13;
-  --idle: #a2a8b4;
+  --idle: #ada89f;
   --add: #2e9d58;
   --del: #d2453c;
+  /* Lists that open over the window, such as a select's: a warm white raised by a soft warm shadow. */
+  --menu: #fdfcf9;
+  --menu-line: rgb(70 50 25 / 0.12);
+  --menu-shadow: 0 10px 28px -10px rgb(70 50 25 / 0.25), 0 2px 6px -2px rgb(70 50 25 / 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -38,6 +42,10 @@
     --idle: #5a606e;
     --add: #63c787;
     --del: #e5736b;
+    /* Lighter than the panes, as raised surfaces are in the dark. */
+    --menu: #1c212b;
+    --menu-line: rgb(255 255 255 / 0.09);
+    --menu-shadow: 0 12px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px -2px rgb(0 0 0 / 0.4);
   }
 }
 
@@ -58,6 +66,9 @@
   --color-idle: var(--idle);
   --color-add: var(--add);
   --color-del: var(--del);
+  --color-menu: var(--menu);
+  --color-menu-line: var(--menu-line);
+  --shadow-menu: var(--menu-shadow);
   /* SF Pro and SF Mono on macOS. */
   --font-sans: system-ui, sans-serif;
   --font-mono: ui-monospace, monospace;
