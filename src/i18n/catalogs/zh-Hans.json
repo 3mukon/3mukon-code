@@ -1,7 +1,42 @@
 {
   "sidebar": {
-    "label": "边栏",
-    "sessions": "会话",
-    "newSession": "新建会话"
+    "label": "边栏"
+  },
+  "workspaces": {
+    "heading": "工作区",
+    "add": "添加工作区",
+    "untrusted": "未信任",
+    "unreadable": "无法打开此文件夹",
+    "picker": {
+      "message": "选择一个文件夹作为工作区。",
+      "button": "添加"
+    },
+    "trust": {
+      "message": "你信任“{{name}}”中的文件吗？",
+      "detail": "{{path}}\n\n3mukon-code 会把你的回答与这个工作区一起保存，你之后可以在工作区的菜单中更改。Claude Code、Codex 和 Grok Build 仍按各自的信任规则处理。",
+      "trust": "信任",
+      "distrust": "不信任"
+    },
+    "menu": {
+      "trusted": "已信任",
+      "remove": "移除工作区"
+    }
+  },
+  "sessions": {
+    "heading": "会话",
+    "newSession": "新建会话",
+    "filter": "按工作区筛选会话",
+    "allWorkspaces": "所有工作区",
+    "status": {
+      "running": "运行中",
+      "waiting": "等待你的回应",
+      "idle": "空闲",
+      "closed": "已结束"
+    }
+  },
+  "providers": {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "grok-build": "Grok Build"
   }
 }

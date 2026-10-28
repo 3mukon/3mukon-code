@@ -2,7 +2,7 @@ import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import en from '../catalogs/en.json';
 import zhHans from '../catalogs/zh-Hans.json';
-import { resolveLanguage, type Language } from './language';
+import { resolveLanguage, type Language } from '../shared/language';
 
 // Starts the localization runtime that react-i18next's useTranslation reads, in the language picked
 // from the preferred languages, and marks the page with that language so that VoiceOver reads it

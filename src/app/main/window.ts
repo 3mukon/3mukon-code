@@ -1,6 +1,15 @@
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, shell } from 'electron';
 import { isWebUrl } from './links';
+
+// The page the window shows: electron-vite dev serves the renderer and sets this variable, which a
+// packaged app ignores; otherwise the built page.
+export function pageUrl(): string {
+  const devServerUrl = process.env.ELECTRON_RENDERER_URL;
+  if (!app.isPackaged && devServerUrl) return devServerUrl;
+  return pathToFileURL(join(import.meta.dirname, '../renderer/index.html')).href;
+}
 
 export function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -11,6 +20,9 @@ export function createMainWindow(): BrowserWindow {
     show: false,
     titleBarStyle: 'hiddenInset',
     webPreferences: {
+      // The preload script gives the sandboxed page the bridge, its only way to the main process. A
+      // sandboxed preload script runs as CommonJS.
+      preload: join(import.meta.dirname, '../preload/index.cjs'),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
@@ -31,13 +43,7 @@ export function createMainWindow(): BrowserWindow {
     openWebLink(event.url);
   });
 
-  // electron-vite dev serves the renderer and sets this variable; a packaged app ignores it.
-  const devServerUrl = process.env.ELECTRON_RENDERER_URL;
-  if (!app.isPackaged && devServerUrl) {
-    void window.loadURL(devServerUrl);
-  } else {
-    void window.loadFile(join(import.meta.dirname, '../renderer/index.html'));
-  }
+  void window.loadURL(pageUrl());
   return window;
 }
 

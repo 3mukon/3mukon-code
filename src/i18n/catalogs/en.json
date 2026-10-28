@@ -1,7 +1,42 @@
 {
   "sidebar": {
-    "label": "Sidebar",
-    "sessions": "Sessions",
-    "newSession": "New session"
+    "label": "Sidebar"
+  },
+  "workspaces": {
+    "heading": "Workspaces",
+    "add": "Add workspace",
+    "untrusted": "Untrusted",
+    "unreadable": "Can’t open this folder",
+    "picker": {
+      "message": "Choose a folder to add as a workspace.",
+      "button": "Add"
+    },
+    "trust": {
+      "message": "Do you trust the files in “{{name}}”?",
+      "detail": "{{path}}\n\n3mukon-code keeps your answer with the workspace, and you can change it later from the workspace’s menu. Claude Code, Codex and Grok Build still apply their own trust rules.",
+      "trust": "Trust",
+      "distrust": "Don’t Trust"
+    },
+    "menu": {
+      "trusted": "Trusted",
+      "remove": "Remove Workspace"
+    }
+  },
+  "sessions": {
+    "heading": "Sessions",
+    "newSession": "New session",
+    "filter": "Filter sessions by workspace",
+    "allWorkspaces": "All workspaces",
+    "status": {
+      "running": "Running",
+      "waiting": "Waiting for you",
+      "idle": "Idle",
+      "closed": "Closed"
+    }
+  },
+  "providers": {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "grok-build": "Grok Build"
   }
 }

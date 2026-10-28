@@ -19,14 +19,15 @@ Read this first and open documents based on their summaries. One line per docume
 
 | ID | Status | Title | Summary |
 |---|---|---|---|
-| [DOC-mod-app](../src/app/README.md) | current | app module | The Electron entry point, which starts the desktop app, opens its main window on the app's own page and lays out the window shell |
+| [DOC-mod-app](../src/app/README.md) | current | app module | The Electron entry point, which starts the desktop app with its providers and toolset, opens its main window on the app's own page, serves that page its preload bridge and lays out the window shell |
 | [DOC-mod-claude-code](../src/providers/claude-code/README.md) | current | claude-code provider module | The Claude Code adapter, which drives Claude Code through the Claude Agent SDK on the user's own Claude Code sign-in and maps it onto the provider-neutral session model |
 | [DOC-mod-codex](../src/providers/codex/README.md) | current | codex provider module | The Codex adapter, which drives Codex through its app-server on the user's own Codex sign-in and maps it onto the provider-neutral session model |
 | [DOC-mod-grok-build](../src/providers/grok-build/README.md) | current | grok-build provider module | The Grok Build adapter, which drives Grok Build through its ACP agent mode on the user's own Grok sign-in and maps it onto the provider-neutral session model |
-| [DOC-mod-i18n](../src/i18n/README.md) | current | i18n module | The English and Simplified Chinese catalogs and the runtime that shows the UI in the first of them that macOS's preferred languages name |
-| [DOC-mod-sessions](../src/sessions/README.md) | current | sessions module | The provider-neutral session model, made of the interface every provider adapter implements, the events and requests a session produces, and the state the UI folds from them |
+| [DOC-mod-i18n](../src/i18n/README.md) | current | i18n module | The English and Simplified Chinese catalogs, and the runtimes that show the window and the main process's dialogs and menus in the first of them that macOS's preferred languages name |
+| [DOC-mod-sessions](../src/sessions/README.md) | current | sessions module | The provider-neutral session model, made of the interface every provider adapter implements, the events and requests a session produces and the state the UI folds from them, with the host that runs the app's open sessions and the sidebar's Sessions list |
 | [DOC-mod-toolset](../src/toolset/README.md) | current | toolset module | The app's own MCP toolset, 3mukon-code, which the main process serves over local streamable HTTP to each session's provider process with a credential of its own, and whose one tool asks the user questions |
 | [DOC-mod-ui](../src/ui/README.md) | current | ui module | The reference design's tokens, as a dark and a matching light theme that follow macOS, and the presentational components and icons other modules build their UI from |
+| [DOC-mod-workspaces](../src/workspaces/README.md) | current | workspaces module | The user's workspaces, folders on this Mac with the user's trust answer and one of them selected, kept in the app's own data, with the sidebar's Workspaces section and each workspace's folder tree |
 
 ## Architecture decisions
 

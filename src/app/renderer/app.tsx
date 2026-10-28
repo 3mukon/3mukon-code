@@ -1,15 +1,20 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus } from '../../ui/renderer/icons';
+import { SessionsSection } from '../../sessions/renderer/sessions-section';
+import { useSessions } from '../../sessions/renderer/use-sessions';
+import { useWorkspaces } from '../../workspaces/renderer/use-workspaces';
+import { WorkspacesSection } from '../../workspaces/renderer/workspaces-section';
+import type { Bridge } from '../shared/bridge';
 
 // The window shell: a full-height sidebar, which ⌘B shows and hides, beside the main area. The top
 // 40px of both form the title bar, which moves the window, shows no title and has no line beneath
-// it; the sidebar's divider runs through it and is the shell's only line. The session list and the
-// panes join the shell with their modules; until then the main area is blank.
-export function App() {
+// it; the sidebar's divider runs through it and is the shell's only line. The sidebar holds the
+// Workspaces section above the Sessions section; the main area stays blank until panels arrive.
+export function App({ bridge }: { bridge: Bridge }) {
   const { t } = useTranslation();
-  const sessionsHeading = useId();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const workspaces = useWorkspaces(bridge.workspaces);
+  const sessions = useSessions(bridge.sessions);
 
   useEffect(() => {
     const toggleSidebar = (event: KeyboardEvent) => {
@@ -37,26 +42,9 @@ export function App() {
           <div className="h-10 shrink-0 [-webkit-app-region:drag]" />
           <div className="flex min-h-0 flex-1 flex-col gap-4 px-2.5 pb-3.5">
             {/* The app's name, bold and compact, just below the title bar. */}
-            <div className="truncate px-2 leading-5 font-bold">3mukon-code</div>
-            <section aria-labelledby={sessionsHeading}>
-              <div className="flex items-center gap-1 px-2">
-                <h2 id={sessionsHeading} className="text-[11px] text-faint">
-                  {t('sidebar.sessions')}
-                </h2>
-                {/* New session, a plus icon whose name VoiceOver reads and the tooltip shows; the
-                    negative margin keeps the heading's row height. Starting sessions arrives with
-                    the sessions module. */}
-                <button
-                  type="button"
-                  disabled
-                  aria-label={t('sidebar.newSession')}
-                  title={t('sidebar.newSession')}
-                  className="-my-0.5 grid size-5 place-items-center rounded-md text-faint"
-                >
-                  <Plus className="size-4" />
-                </button>
-              </div>
-            </section>
+            <div className="shrink-0 truncate px-2 leading-5 font-bold">3mukon-code</div>
+            <WorkspacesSection bridge={bridge.workspaces} list={workspaces} />
+            <SessionsSection sessions={sessions} folders={workspaces.workspaces} />
           </div>
         </div>
       </aside>

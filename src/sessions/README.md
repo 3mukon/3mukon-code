@@ -5,7 +5,7 @@ title: sessions module
 status: current
 visibility: public
 date: 2026-10-25
-summary: The provider-neutral session model, made of the interface every provider adapter implements, the events and requests a session produces, and the state the UI folds from them
+summary: The provider-neutral session model, made of the interface every provider adapter implements, the events and requests a session produces and the state the UI folds from them, with the host that runs the app's open sessions and the sidebar's Sessions list
 scope: ["src/sessions/**"]
 tags: []
 ---
@@ -16,18 +16,25 @@ tags: []
 - The event model (`shared/events.ts`): the `SessionEvent` union a session reports (turns; streamed messages; tool calls, in the Agent Client Protocol's tool kinds and statuses; the agent's task list; file changes as unified diffs; approvals and questions and their resolution; title, mode, the session's gateway, model, reasoning effort and sandbox level, the models it can switch to, the end of a replay, errors, closing), together with the requests, answers, history entries, permission modes, sandbox levels and model options.
 - The toolset's contract (`main/provider.ts`, ADR-0009): `Toolset`, which the toolset module implements and the app hands to the adapters whose providers lack one of its tools; `ToolsetSession`, through which a call asks the session's user; and `ToolsetAccess`, the address and credential one session's provider process uses.
 - The session state (`shared/session-state.ts`): `applyEvent` folds a session's events into what the UI shows, a timeline in the order things first happened and the current task list; `sessionStatus` derives running, waiting, idle or closed, and `openRequests` lists the approvals and questions still waiting, oldest first.
+- The host (`main/host.ts`): `SessionHost` runs the app's open sessions in the main process, through the providers the app module hands it. It starts a session through its provider, folds the session's events into its state from the first, and lists it once the provider has started it, newest first. Listeners hear when a session joins the list or its title or status changes, not for every event; a closed session stays on the list as closed. `closeAll` closes every session as the app quits.
+- The list's contract (`shared/sessions.ts`): `SessionSummary`, what the Sessions list shows of an open session, and `SessionsBridge`, what the window asks of the sessions through the preload bridge.
+- The window's part (`renderer/`): `SessionsSection`, the sidebar's Sessions section, with New session just after its heading, disabled until session pages can open, and, while there are folders to choose, a filter at the row's end that narrows the list to the sessions in one folder or below it. Each session shows its status as a dot and in words for VoiceOver, its title or else its provider's name, and its folder's name, with the path in the tooltip; without sessions the section shows its heading row alone. `useSessions` keeps the list current through the bridge.
 
 ## Not responsible for
 
 - Speaking a provider's protocol: each adapter maps its provider onto this model (ADR-0005).
-- Showing sessions: the Sessions list, session pages and the composer arrive with the session UI, in this module's `renderer/`; the panel area that holds them is a module of its own.
-- Hosting the adapters and carrying events to the renderer: the main process does both once the preload bridge exists.
+- Creating the adapters and the toolset: the app module does, and hands the providers to the host.
+- Carrying calls and events between the window and the main process: the app module's preload bridge does.
+- Which folders the filter offers: the app module passes the workspaces.
+- Session pages, the composer and the past sessions in providers' history, which join the list later; the panel area that holds sessions is a module of its own.
 - Credentials: providers sign in through their own tools, and nothing here reads or carries a key or token (ADR-0008).
 
 ## Interface
 
 - From `main/provider.ts`, for adapters, the toolset and the main process: `Provider`, `ProviderSession`, `StartOptions`, `ResumeOptions`, `SessionEventListener`, `Toolset`, `ToolsetSession` and `ToolsetAccess`.
-- For both processes: the types in `shared/events.ts`, and `applyEvent`, `initialSessionState`, `sessionStatus` and `openRequests` from `shared/session-state.ts`.
+- From `main/host.ts`, for the app module: `SessionHost`.
+- For both processes: the types in `shared/events.ts`, `applyEvent`, `initialSessionState`, `sessionStatus` and `openRequests` from `shared/session-state.ts`, and `SessionSummary` and `SessionsBridge` from `shared/sessions.ts`.
+- For the app module's renderer: `SessionsSection` and `SessionFolder` from `renderer/sessions-section.tsx`, and `useSessions` from `renderer/use-sessions.ts`.
 - What an adapter must keep to:
   - `start` and `resume` resolve once the provider's session id is known, and the listener receives every event from the first.
   - `resume` replays the session's past events through the same listener, then reports `replay-finished`.
@@ -44,9 +51,11 @@ tags: []
 ## Dependencies
 
 - `main/` and `shared/` use nothing outside the module. `shared/` imports no main-process or renderer code, no Node.js built-ins and no Electron, so it runs in both processes; it is type-checked against both the Node.js and the browser configuration.
-- Never imports a provider adapter, the toolset or the app module. The rules `sessions-not-to-providers`, `toolset-only-from-app`, `app-is-the-entry` and the `shared-not-to-*` rules in `.dependency-cruiser.js` enforce this.
+- `renderer/` uses the ui and i18n modules, React and react-i18next.
+- Never imports a provider adapter, the toolset, the workspaces or the app module. The rules `sessions-not-to-providers`, `sessions-only-to-ui-and-i18n`, `toolset-only-from-app`, `app-is-the-entry` and the `shared-not-to-*` rules in `.dependency-cruiser.js` enforce this.
 
 ## Invariants
 
-- Events, requests, answers and the state are plain JSON-serializable data.
+- Events, requests, answers, summaries and the state are plain JSON-serializable data.
 - Text from agents and providers is data to show, never UI copy.
+- The host's unit tests drive it with a fake provider (`main/host.test.ts`), and the section is rendered with fixed sessions and folders (`renderer/sessions-section.test.tsx`).

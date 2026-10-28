@@ -5,34 +5,43 @@ title: app module
 status: current
 visibility: public
 date: 2026-10-25
-summary: The Electron entry point, which starts the desktop app, opens its main window on the app's own page and lays out the window shell
+summary: The Electron entry point, which starts the desktop app with its providers and toolset, opens its main window on the app's own page, serves that page its preload bridge and lays out the window shell
 scope: ["src/app/**", "tests/smoke/**"]
 tags: []
 ---
 
 ## Responsibilities
 
-- Lifecycle (`main/index.ts`): opens the main window once Electron is ready, and again when the Dock icon is clicked while no window is open. The app keeps running without windows until the user quits it, as macOS apps do.
-- The main window (`main/window.ts`): a hidden-inset title bar with the native traffic lights, and a renderer with context isolation, the OS sandbox and no Node.js integration. Under `electron-vite dev` it loads the renderer dev server; otherwise, and always when packaged, the built page.
+- Lifecycle (`main/index.ts`): once Electron is ready, it starts the toolset (ADR-0009) and composes the feature modules: the providers, which are Claude Code, Codex with the toolset, offered only when the toolset starts, and Grok Build with a `grok-build` folder in the app's data for its unpacked binary; the sessions module's host with them; and the workspaces, kept in the app's data. Then it serves the bridge and opens the main window, and opens it again when the Dock icon is clicked while no window is open. The app keeps running without windows until the user quits it, as macOS apps do; quitting first closes the sessions, with their provider processes, and the toolset, waiting five seconds at most.
+- The main process's language: the locale and then macOS's preferred languages, so that a `--lang` switch applies as it does to the page (DOC-mod-i18n).
+- The main window (`main/window.ts`): a hidden-inset title bar with the native traffic lights, and a renderer with context isolation, the OS sandbox and no Node.js integration, into which the preload script loads the bridge. Under `electron-vite dev` it loads the renderer dev server; otherwise, and always when packaged, the built page.
 - Navigation: the window opens no other windows and never leaves the app's page. Links to `http:` and `https:` URLs open in the default browser (`main/links.ts`); other links are dropped.
-- The renderer (`renderer/`): the page with its content security policy. `main.tsx` starts the i18n module and renders the window shell (`app.tsx`): a full-height 220px sidebar, which ⌘B hides and shows, with the app's name in bold just below the title bar and the Sessions section, whose heading has New session just after it as a plus icon, disabled until sessions can be started, and no empty-state text; beside it the main area, blank until sessions arrive. The top 40px of both form the title bar, which moves the window, shows no title and has no line beneath it; the sidebar's divider runs through it and is the shell's only line.
+- The preload bridge, the page's only way to the main process:
+  - The contract (`shared/bridge.ts`): `Bridge`, one part per feature module, each the interface that module declares in its `shared/` folder (`workspaces`, `sessions`), and the IPC channel of each call and notification.
+  - The page's side (`preload/`): the preload script, built as one CommonJS file since the page is sandboxed, gives the page `window.bridge` (`createBridge` in `preload/bridge.ts`): a function for each call and a subscription for each notification, never Electron's own objects. A dropped item reaches the main process only as the path of a file the page was given, which the preload script finds with Electron's `webUtils`.
+  - The main process's side (`main/bridge.ts`): `serveBridge` answers each call through the feature module that owns it, after checking that the call comes from the main frame of an app window showing the app's own page and that its values have the call's shapes (zod); anything else is refused. What the modules report goes to every window.
+- The renderer (`renderer/`): the page with its content security policy. `main.tsx` starts the i18n module and renders the window shell (`app.tsx`) with the bridge: a full-height 220px sidebar, which ⌘B hides and shows, with the app's name in bold just below the title bar, then the workspaces module's Workspaces section and the sessions module's Sessions section, which offers the workspaces as filters; beside it the main area, blank until panels arrive. The top 40px of both form the title bar, which moves the window, shows no title and has no line beneath it; the sidebar's divider runs through it and is the shell's only line.
 - The application menu, which is Electron's default macOS menu for now.
 
 ## Not responsible for
 
-- Feature UI and state, such as sessions: each lives in the feature module that owns it, and this module only composes them. The session list, the panes and the waiting indicator join the shell from the modules that own sessions and approvals, built from the ui module's components.
+- Feature UI and state, such as workspaces and sessions: each lives in the feature module that owns it, and this module only composes them. The panel area, the session pages and the waiting indicator join the shell from the modules that own them, built from the ui module's components.
+- What a bridge call does: the feature module behind it decides, and declares the call in its `shared/` contract.
 - Packaging, which `electron-builder.yml` and `scripts/package.sh` configure for the whole repository.
 
 ## Interface
 
-None: this module is the entry point, and no other module imports it. When renderer code first needs the main process, this module adds the preload script with its typed bridge, which is then the only way renderer code reaches the main process.
+None: this module is the entry point, and no other module imports it. Feature modules declare their part of the bridge in their own `shared/` folders, and this module's preload script and `main/bridge.ts` carry it.
 
 ## Dependencies
 
 - May import any feature module, to compose it; no module may import this one, which the rule `app-is-the-entry` in `.dependency-cruiser.js` enforces.
-- Today it imports Electron, Node.js built-ins, React, react-i18next and the i18n module.
+- Today it imports Electron, Node.js built-ins, React, react-i18next, zod, and the i18n, workspaces, sessions and toolset modules and the three provider adapters.
+- The preload script imports only Electron and `shared/` code, and no other code imports it: the rules `preload-only-to-shared-and-electron` and `nothing-imports-the-preload-script` enforce this.
 
 ## Invariants
 
-- The page has no Node.js and its renderer process is sandboxed: `tests/smoke/launch.spec.ts` checks that the page sees neither `require` nor `process` and that macOS reports the renderer process as sandboxed.
+- The page has no Node.js and its renderer process is sandboxed: `tests/smoke/launch.spec.ts` checks that the page sees neither `require` nor `process`, that macOS reports the renderer process as sandboxed, and that the page holds only the bridge's functions and no Electron objects.
+- The main process answers only the app's own page, and only with the calls the bridge declares.
 - Only web links leave the app: `shell.openExternal` never receives another scheme.
+- Smoke tests run the built app on a throwaway data folder of their own (`tests/smoke/app.ts`), never on the user's.

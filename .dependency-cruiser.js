@@ -64,6 +64,22 @@ export default {
       to: { path: '^src/providers/' },
     },
     {
+      name: 'sessions-only-to-ui-and-i18n',
+      comment:
+        'The sessions module uses only the ui and i18n modules; the app module hands it the providers and the folders (src/sessions/README.md).',
+      severity: 'error',
+      from: { path: '^src/sessions/' },
+      to: { path: '^src/', pathNot: ['^src/sessions/', '^src/ui/', '^src/i18n/'] },
+    },
+    {
+      name: 'workspaces-only-to-ui-and-i18n',
+      comment:
+        'The workspaces module uses only the ui and i18n modules (src/workspaces/README.md).',
+      severity: 'error',
+      from: { path: '^src/workspaces/' },
+      to: { path: '^src/', pathNot: ['^src/workspaces/', '^src/ui/', '^src/i18n/'] },
+    },
+    {
       name: 'providers-only-to-sessions-contract',
       comment:
         'A provider adapter uses only the sessions interface and model, never other modules or UI code (src/providers/claude-code/README.md).',
@@ -170,6 +186,22 @@ export default {
       severity: 'error',
       from: { path: '^src/.+/main/' },
       to: { path: '^src/.+/renderer/' },
+    },
+    {
+      name: 'preload-only-to-shared-and-electron',
+      comment:
+        "The preload script runs in the sandboxed page before it loads, as one file; it uses Electron and the shared/ parts' types and channels, never main-process or UI code, Node.js built-ins or other packages (src/app/README.md).",
+      severity: 'error',
+      from: { path: '^src/.+/preload/', pathNot: '\\.test\\.ts$' },
+      to: { pathNot: ['^src/.+/(shared|preload)/', 'node_modules/electron/'] },
+    },
+    {
+      name: 'nothing-imports-the-preload-script',
+      comment:
+        'The preload script is an entry point of its own, which Electron loads into the page.',
+      severity: 'error',
+      from: { path: '^src/', pathNot: '^src/.+/preload/' },
+      to: { path: '^src/.+/preload/' },
     },
   ],
   options: {

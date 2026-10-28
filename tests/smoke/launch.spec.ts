@@ -1,8 +1,8 @@
-import { _electron as electron, expect, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+import { withApp } from './app';
 
 test('the app opens its window on the built page, without Node.js and sandboxed', async () => {
-  const electronApp = await electron.launch({ args: ['.'] });
-  try {
+  await withApp(async (electronApp) => {
     const window = await electronApp.firstWindow();
     expect(window.url()).toMatch(/^file:.*\/out\/renderer\/index\.html$/);
     await expect(window).toHaveTitle('3mukon-code');
@@ -16,14 +16,50 @@ test('the app opens its window on the built page, without Node.js and sandboxed'
       return app.getAppMetrics().find((metric) => metric.pid === pid)?.sandboxed;
     });
     expect(sandboxed).toBe(true);
-  } finally {
-    await electronApp.close();
-  }
+  });
+});
+
+test('the page reaches the main process only through the bridge’s functions', async () => {
+  await withApp(async (electronApp) => {
+    const window = await electronApp.firstWindow();
+    const bridge = await window.evaluate(() => {
+      const page = globalThis as unknown as Record<string, unknown>;
+      const parts = page.bridge as Record<string, Record<string, unknown>>;
+      return {
+        parts: Object.keys(parts).sort(),
+        calls: Object.entries(parts).map(([name, part]) => [
+          name,
+          Object.entries(part)
+            .map(([call, value]) => `${call}:${typeof value}`)
+            .sort(),
+        ]),
+        electron: ['ipcRenderer', 'electron', 'webUtils'].filter((name) => name in page),
+      };
+    });
+    expect(bridge).toEqual({
+      parts: ['sessions', 'workspaces'],
+      calls: [
+        [
+          'workspaces',
+          [
+            'add:function',
+            'addDropped:function',
+            'get:function',
+            'listFolder:function',
+            'onChange:function',
+            'select:function',
+            'showMenu:function',
+          ],
+        ],
+        ['sessions', ['list:function', 'onChange:function']],
+      ],
+      electron: [],
+    });
+  });
 });
 
 test('Command-B hides the sidebar and shows it again', async () => {
-  const electronApp = await electron.launch({ args: ['.'] });
-  try {
+  await withApp(async (electronApp) => {
     const window = await electronApp.firstWindow();
     const sidebar = window.locator('aside');
     await expect(sidebar).toHaveCSS('width', '220px');
@@ -35,49 +71,48 @@ test('Command-B hides the sidebar and shows it again', async () => {
     await window.keyboard.press('Meta+B');
     await expect(sidebar).toHaveCSS('width', '220px');
     await expect(sidebar).not.toHaveAttribute('inert');
-  } finally {
-    await electronApp.close();
-  }
+  });
 });
 
-test('New session is a plus icon just after the Sessions heading, on its row', async () => {
-  const electronApp = await electron.launch({ args: ['.'] });
-  try {
+test('Add workspace and New session are plus icons just after their headings, on their rows', async () => {
+  await withApp(async (electronApp) => {
     const window = await electronApp.firstWindow();
-    const heading = await window.getByRole('heading', { name: 'Sessions' }).boundingBox();
-    const button = await window.getByRole('button', { name: 'New session' }).boundingBox();
-    if (!heading || !button) throw new Error('the Sessions heading or New session is not shown');
     const middle = (box: { y: number; height: number }) => box.y + box.height / 2;
-    expect(Math.abs(middle(button) - middle(heading))).toBeLessThan(2);
-    const gap = button.x - (heading.x + heading.width);
-    expect(gap).toBeGreaterThanOrEqual(0);
-    expect(gap).toBeLessThan(10);
-  } finally {
-    await electronApp.close();
-  }
+    for (const [name, label] of [
+      ['Workspaces', 'Add workspace'],
+      ['Sessions', 'New session'],
+    ] as const) {
+      const heading = await window.getByRole('heading', { name }).boundingBox();
+      const button = await window.getByRole('button', { name: label }).boundingBox();
+      if (!heading || !button) throw new Error(`${name} or ${label} is not shown`);
+      expect(Math.abs(middle(button) - middle(heading))).toBeLessThan(2);
+      const gap = button.x - (heading.x + heading.width);
+      expect(gap).toBeGreaterThanOrEqual(0);
+      expect(gap).toBeLessThan(10);
+    }
+    // The Workspaces section comes above the Sessions section.
+    const workspaces = await window.getByRole('heading', { name: 'Workspaces' }).boundingBox();
+    const sessions = await window.getByRole('heading', { name: 'Sessions' }).boundingBox();
+    expect(workspaces?.y).toBeLessThan(sessions?.y ?? 0);
+  });
 });
 
 test('the sidebar heading is bold and sits just below the title bar', async () => {
-  const electronApp = await electron.launch({ args: ['.'] });
-  try {
+  await withApp(async (electronApp) => {
     const window = await electronApp.firstWindow();
     const heading = window.getByText('3mukon-code');
     await expect(heading).toHaveCSS('font-weight', '700');
     const box = await heading.boundingBox();
     expect(box?.y).toBeGreaterThanOrEqual(40);
     expect(box?.y).toBeLessThan(48);
-  } finally {
-    await electronApp.close();
-  }
+  });
 });
 
 test('the UI is in Simplified Chinese when the app runs in that language', async () => {
-  const electronApp = await electron.launch({ args: ['.', '--lang=zh-CN'] });
-  try {
+  await withApp(async (electronApp) => {
     const window = await electronApp.firstWindow();
     await expect(window.getByRole('heading', { name: '会话' })).toBeVisible();
+    await expect(window.getByRole('heading', { name: '工作区' })).toBeVisible();
     await expect(window.locator('html')).toHaveAttribute('lang', 'zh-Hans');
-  } finally {
-    await electronApp.close();
-  }
+  }, '--lang=zh-CN');
 });
