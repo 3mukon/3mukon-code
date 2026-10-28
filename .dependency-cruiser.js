@@ -80,6 +80,13 @@ export default {
       to: { path: '^src/', pathNot: ['^src/workspaces/', '^src/ui/', '^src/i18n/'] },
     },
     {
+      name: 'panels-only-to-ui-and-i18n',
+      comment: 'The panels module uses only the ui and i18n modules (src/panels/README.md).',
+      severity: 'error',
+      from: { path: '^src/panels/' },
+      to: { path: '^src/', pathNot: ['^src/panels/', '^src/ui/', '^src/i18n/'] },
+    },
+    {
       name: 'providers-only-to-sessions-contract',
       comment:
         'A provider adapter uses only the sessions interface and model, never other modules or UI code (src/providers/claude-code/README.md).',

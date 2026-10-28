@@ -45,7 +45,11 @@ describe('createBridge', () => {
     const paths = new Map([['web', '/Users/me/web']]);
     const bridge = createBridge(ipc, (file) => paths.get(file.name) ?? '');
     await bridge.workspaces.addDropped([new File([], 'web'), new File([], 'text')]);
-    expect(ipc.invoke.mock.calls).toEqual([['workspaces:add-dropped', ['/Users/me/web', '']]]);
+    await bridge.panels.itemsAt([new File([], 'web')]);
+    expect(ipc.invoke.mock.calls).toEqual([
+      ['workspaces:add-dropped', ['/Users/me/web', '']],
+      ['panels:items-at', ['/Users/me/web']],
+    ]);
   });
 
   it('passes on what the main process reports, without its event, until the page stops listening', () => {

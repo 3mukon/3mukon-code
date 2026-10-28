@@ -44,11 +44,22 @@ interface Waiting {
   run: () => void;
 }
 
+// A row of the tree as something to open elsewhere: a workspace or folder as a folder, or a file, by
+// its absolute path.
+export interface TreeItem {
+  kind: 'folder' | 'file';
+  path: string;
+}
+
 interface WorkspaceTreeProps {
   bridge: WorkspacesBridge;
   list: WorkspaceList;
   // The id of the heading that names the tree.
   labelledBy: string;
+  // Puts a row being dragged on the drag, for whatever it is dropped on.
+  onDragItem?: (item: TreeItem, dataTransfer: DataTransfer) => void;
+  // Opens a row elsewhere, as dropping it would.
+  onOpenItem?: (item: TreeItem) => void;
 }
 
 // The workspaces as a tree, each expanding into its folder tree, which is read folder by folder as
@@ -57,8 +68,15 @@ interface WorkspaceTreeProps {
 // (click-wait.ts); a double click selects a workspace without opening or closing it, and Return or
 // Space selects it too; a workspace's menu opens with a secondary click or VoiceOver's menu command.
 // The keyboard moves as in macOS lists: up and down, right to open or go in, left to close or go out,
-// Home and End.
-export function WorkspaceTree({ bridge, list, labelledBy }: WorkspaceTreeProps) {
+// Home and End. Every row can be dragged elsewhere, and opened elsewhere with ⌘↓, as in the Finder,
+// or with Return or Space on a file.
+export function WorkspaceTree({
+  bridge,
+  list,
+  labelledBy,
+  onDragItem,
+  onOpenItem,
+}: WorkspaceTreeProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [listings, setListings] = useState<ReadonlyMap<string, FolderListing>>(new Map());
@@ -222,20 +240,28 @@ export function WorkspaceTree({ bridge, list, labelledBy }: WorkspaceTreeProps) 
     before.current = null;
   };
 
-  // What Return or Space on the row does: a workspace is selected, a folder opens or closes.
+  // What Return or Space on the row does: a workspace is selected, a folder opens or closes, and a
+  // file opens elsewhere.
   const activate = (item: Item) => {
     if (item.kind === 'workspace') select(item);
     else if (item.kind === 'folder') toggle(item);
+    else onOpenItem?.(itemOf(item));
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
     const key = (event.target as HTMLElement)
       .closest('[role="treeitem"]')
       ?.getAttribute('data-key');
     const index = shown.findIndex((item) => item.key === key);
     const item = shown[index];
     if (item === undefined) return;
+    const onlyCommand = event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+    if (onlyCommand && event.key === 'ArrowDown' && onOpenItem !== undefined) {
+      event.preventDefault();
+      onOpenItem(itemOf(item));
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     const expandable = item.kind !== 'file';
     switch (event.key) {
       case 'ArrowDown':
@@ -312,6 +338,10 @@ export function WorkspaceTree({ bridge, list, labelledBy }: WorkspaceTreeProps) 
         >
           <div
             title={item.kind === 'workspace' ? item.workspace.path : undefined}
+            draggable={onDragItem !== undefined}
+            onDragStart={(event) => {
+              onDragItem?.(itemOf(item), event.dataTransfer);
+            }}
             onMouseDown={(event) => {
               // A press that macOS counts as the second of a double click.
               if (event.detail === 2) pressAgain(item, event.timeStamp);
@@ -372,6 +402,13 @@ export function WorkspaceTree({ bridge, list, labelledBy }: WorkspaceTreeProps) 
 
 function keyOf(workspaceId: string, path: string): string {
   return `${workspaceId}:${path}`;
+}
+
+// A row as something to open elsewhere, with its absolute path.
+function itemOf(item: Item): TreeItem {
+  const base = item.workspace.path;
+  const path = item.path === '' ? base : `${base.endsWith('/') ? base : `${base}/`}${item.path}`;
+  return { kind: item.kind === 'file' ? 'file' : 'folder', path };
 }
 
 function without<T>(map: ReadonlyMap<string, T>, key: string): ReadonlyMap<string, T> {

@@ -3,6 +3,7 @@ import {
   ChevronRight as LucideChevronRight,
   Plus as LucidePlus,
   ShieldOff as LucideShieldOff,
+  X as LucideX,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react';
@@ -20,3 +21,4 @@ export const Plus = decorative(LucidePlus);
 export const ChevronRight = decorative(LucideChevronRight);
 export const ChevronDown = decorative(LucideChevronDown);
 export const ShieldOff = decorative(LucideShieldOff);
+export const X = decorative(LucideX);

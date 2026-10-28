@@ -34,6 +34,11 @@
       "closed": "已结束"
     }
   },
+  "panels": {
+    "sessionPage": "新建会话",
+    "close": "关闭面板",
+    "resize": "调整面板大小"
+  },
   "providers": {
     "claude-code": "Claude Code",
     "codex": "Codex",

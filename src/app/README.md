@@ -17,15 +17,15 @@ tags: []
 - The main window (`main/window.ts`): a hidden-inset title bar with the native traffic lights, and a renderer with context isolation, the OS sandbox and no Node.js integration, into which the preload script loads the bridge. Under `electron-vite dev` it loads the renderer dev server; otherwise, and always when packaged, the built page.
 - Navigation: the window opens no other windows and never leaves the app's page. Links to `http:` and `https:` URLs open in the default browser (`main/links.ts`); other links are dropped.
 - The preload bridge, the page's only way to the main process:
-  - The contract (`shared/bridge.ts`): `Bridge`, one part per feature module, each the interface that module declares in its `shared/` folder (`workspaces`, `sessions`), and the IPC channel of each call and notification.
+  - The contract (`shared/bridge.ts`): `Bridge`, one part per feature module, each the interface that module declares in its `shared/` folder (`workspaces`, `sessions`, `panels`), and the IPC channel of each call and notification.
   - The page's side (`preload/`): the preload script, built as one CommonJS file since the page is sandboxed, gives the page `window.bridge` (`createBridge` in `preload/bridge.ts`): a function for each call and a subscription for each notification, never Electron's own objects. A dropped item reaches the main process only as the path of a file the page was given, which the preload script finds with Electron's `webUtils`.
   - The main process's side (`main/bridge.ts`): `serveBridge` answers each call through the feature module that owns it, after checking that the call comes from the main frame of an app window showing the app's own page and that its values have the call's shapes (zod); anything else is refused. What the modules report goes to every window.
-- The renderer (`renderer/`): the page with its content security policy. `main.tsx` starts the i18n module and renders the window shell (`app.tsx`) with the bridge: a full-height 220px sidebar, which ⌘B hides and shows, with the app's name in bold just below the title bar, then the workspaces module's Workspaces section, a thin line as wide as their rows, and the sessions module's Sessions section, which offers the workspaces as filters; beside it the main area, blank until panels arrive. The top 40px of both form the title bar, which moves the window, shows no title and has no line beneath it; the sidebar's divider runs through it.
+- The renderer (`renderer/`): the page with its content security policy. `main.tsx` starts the i18n module and renders the window shell (`app.tsx`) with the bridge: a full-height 220px sidebar, which ⌘B hides and shows, with the app's name in bold just below the title bar, then the workspaces module's Workspaces section, a thin line as wide as their rows, and the sessions module's Sessions section, which offers the workspaces as filters; beside it the main area, which holds the panels module's panel area, blank until something opens in it. The workspaces' tree rows drag into the panel area in the panels module's drag format, and a row opened from the keyboard opens there too, to the right of the focused panel. The window's top 40px form its title bar, which moves the window, shows no title and has no line beneath it: in the sidebar, the row of the window buttons; over the main area, the headers of the panels at the top, or an empty strip while none is open. The sidebar's divider runs through it, and while the sidebar is hidden the window buttons lie over the main area, where the panel area leaves room for them.
 - The application menu, which is Electron's default macOS menu for now.
 
 ## Not responsible for
 
-- Feature UI and state, such as workspaces and sessions: each lives in the feature module that owns it, and this module only composes them. The panel area, the session pages and the waiting indicator join the shell from the modules that own them, built from the ui module's components.
+- Feature UI and state, such as workspaces and sessions: each lives in the feature module that owns it, and this module only composes them. The session pages and the waiting indicator join the shell from the modules that own them, built from the ui module's components.
 - What a bridge call does: the feature module behind it decides, and declares the call in its `shared/` contract.
 - Packaging, which `electron-builder.yml` and `scripts/package.sh` configure for the whole repository.
 
@@ -36,7 +36,7 @@ None: this module is the entry point, and no other module imports it. Feature mo
 ## Dependencies
 
 - May import any feature module, to compose it; no module may import this one, which the rule `app-is-the-entry` in `.dependency-cruiser.js` enforces.
-- Today it imports Electron, Node.js built-ins, React, react-i18next, zod, and the i18n, workspaces, sessions and toolset modules and the three provider adapters.
+- Today it imports Electron, Node.js built-ins, React, react-i18next, zod, and the i18n, workspaces, sessions, panels and toolset modules and the three provider adapters.
 - The preload script imports only Electron and `shared/` code, and no other code imports it: the rules `preload-only-to-shared-and-electron` and `nothing-imports-the-preload-script` enforce this.
 
 ## Invariants

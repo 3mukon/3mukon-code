@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
+import { droppedItems } from '../../panels/main/items';
 import type { SessionHost } from '../../sessions/main/host';
 import type { Workspaces, WorkspacesUi } from '../../workspaces/main/workspaces';
 import { channels } from '../shared/bridge';
@@ -46,6 +47,9 @@ export function serveBridge({ workspaces, sessions, workspacesUi, page }: Bridge
     workspaces.listFolder(workspace, folder),
   );
   handle(channels.sessions.list, z.tuple([]), () => sessions.list());
+  handle(channels.panels.itemsAt, z.tuple([z.array(path).max(100)]), (_window, paths) =>
+    droppedItems(paths),
+  );
 
   workspaces.onChange((list) => {
     broadcast(channels.workspaces.changed, list);

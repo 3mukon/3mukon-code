@@ -1,21 +1,8 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
-import { dataFolder, launch } from './app';
-
-// Stands in for the user in the native folder picker and trust question, which a test cannot click:
-// the picker chooses the folder, and the question gets the answer.
-async function answerDialogs(app: ElectronApplication, folder: string, trust: boolean) {
-  await app.evaluate(
-    ({ dialog }, { folder, trust }) => {
-      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [folder] });
-      dialog.showMessageBox = () =>
-        Promise.resolve({ response: trust ? 0 : 1, checkboxChecked: false });
-    },
-    { folder, trust },
-  );
-}
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import { answerDialogs, dataFolder, launch } from './app';
 
 test('a workspace added with its trust answer is selected, opens into its tree and is kept after a restart', async () => {
   const data = dataFolder();

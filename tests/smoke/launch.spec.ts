@@ -37,7 +37,7 @@ test('the page reaches the main process only through the bridge’s functions', 
       };
     });
     expect(bridge).toEqual({
-      parts: ['sessions', 'workspaces'],
+      parts: ['panels', 'sessions', 'workspaces'],
       calls: [
         [
           'workspaces',
@@ -52,6 +52,7 @@ test('the page reaches the main process only through the bridge’s functions', 
           ],
         ],
         ['sessions', ['list:function', 'onChange:function']],
+        ['panels', ['itemsAt:function']],
       ],
       electron: [],
     });

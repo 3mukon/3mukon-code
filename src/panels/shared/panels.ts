@@ -1,0 +1,17 @@
+// What a panel shows: a session page for a folder, which becomes a session with its first message, or
+// a file. Paths are absolute.
+export type PanelContent =
+  { kind: 'session-page'; folder: string } | { kind: 'file'; path: string };
+
+// A folder or file dropped on the main area or opened from a tree, by its absolute path.
+export interface DroppedItem {
+  kind: 'folder' | 'file';
+  path: string;
+}
+
+// What the window asks of the panel area's main-process side through the preload bridge.
+export interface PanelsBridge {
+  // The folders and files among items dropped from the Finder, in their order; items that are
+  // neither, or that cannot be read, are left out.
+  itemsAt(items: readonly File[]): Promise<DroppedItem[]>;
+}

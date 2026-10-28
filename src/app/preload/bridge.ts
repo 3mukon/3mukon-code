@@ -1,3 +1,4 @@
+import type { DroppedItem } from '../../panels/shared/panels';
 import type { SessionSummary } from '../../sessions/shared/sessions';
 import type { FolderListing, WorkspaceList } from '../../workspaces/shared/workspaces';
 import { channels, type Bridge } from '../shared/bridge';
@@ -51,6 +52,13 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
         subscribe(channels.sessions.changed, (value) => {
           listener(value as SessionSummary[]);
         }),
+    },
+    panels: {
+      itemsAt: (items) =>
+        invoke(
+          channels.panels.itemsAt,
+          items.map((item) => pathForFile(item)),
+        ) as Promise<DroppedItem[]>,
     },
   };
 }

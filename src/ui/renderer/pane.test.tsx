@@ -23,9 +23,10 @@ describe('Pane', () => {
     expect(pane.textContent).toContain('Claude Code');
     expect(pane.textContent).toContain('Refactor the workspace layout.');
     expect(pane.className).not.toContain('opacity-70');
+    expect(pane.getAttribute('aria-current')).toBe('true');
   });
 
-  it('dims while the other pane has focus, and asks for focus when pressed', () => {
+  it('dims while another pane has focus, and asks for focus when pressed or focused', () => {
     const onFocus = vi.fn();
     render(
       <Pane {...props} focused={false} onFocus={onFocus}>
@@ -34,7 +35,54 @@ describe('Pane', () => {
     );
     const pane = screen.getByRole('region', { name: 'layout-refactor' });
     expect(pane.className).toContain('opacity-70');
+    expect(pane.hasAttribute('aria-current')).toBe(false);
     fireEvent.pointerDown(pane);
-    expect(onFocus).toHaveBeenCalled();
+    pane.focus();
+    expect(onFocus).toHaveBeenCalledTimes(2);
+  });
+
+  it('lies in the title bar on request, moving the window from its header but for what takes clicks', () => {
+    render(
+      <Pane
+        title="web"
+        detail="me"
+        focused
+        onFocus={vi.fn()}
+        onClose={vi.fn()}
+        closeLabel="Close"
+        inTitleBar
+        clearsWindowButtons
+      />,
+    );
+    const header = screen.getByRole('region', { name: 'web' }).querySelector('header');
+    expect(header?.className).toContain('[-webkit-app-region:drag]');
+    expect(header?.className).toContain('pl-[84px]');
+    for (const part of [
+      screen.getByText('web'),
+      screen.getByText('me'),
+      screen.getByRole('button'),
+    ]) {
+      expect(part.className).toContain('[-webkit-app-region:no-drag]');
+    }
+  });
+
+  it('goes without a status, shows its detail with a tooltip, and closes from its header', () => {
+    const onClose = vi.fn();
+    render(
+      <Pane
+        title="README.md"
+        detail="web"
+        detailTitle="/Users/me/web"
+        focused
+        onFocus={vi.fn()}
+        onClose={onClose}
+        closeLabel="Close panel"
+      />,
+    );
+    const pane = screen.getByRole('region', { name: 'README.md' });
+    expect(pane.textContent).toBe('README.mdweb');
+    expect(screen.getByText('web').title).toBe('/Users/me/web');
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

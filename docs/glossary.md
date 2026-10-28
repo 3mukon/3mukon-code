@@ -24,3 +24,4 @@ One name per concept: naming and search follow the Term column, and Avoid lists 
 | toolset | The app's own MCP tools, named 3mukon-code, which it serves to each session's provider process (ADR-0009) | MCP server (for this meaning), plugin |
 | workspace | A folder on this Mac that the user added to the app's Workspaces list, with their answer to whether they trust its files | project, root (for this meaning) |
 | bridge | The typed interface the app module's preload script gives the page, its only way to the main process | IPC API, preload API |
+| panel | One part of the main area's layout, showing a session, a session page or a file | pane, tab, view |

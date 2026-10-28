@@ -1,3 +1,4 @@
+import type { PanelsBridge } from '../../panels/shared/panels';
 import type { SessionsBridge } from '../../sessions/shared/sessions';
 import type { WorkspacesBridge } from '../../workspaces/shared/workspaces';
 
@@ -6,6 +7,7 @@ import type { WorkspacesBridge } from '../../workspaces/shared/workspaces';
 export interface Bridge {
   workspaces: WorkspacesBridge;
   sessions: SessionsBridge;
+  panels: PanelsBridge;
 }
 
 // The bridge's IPC channels: one per call the main process answers, and one per notification it sends.
@@ -22,5 +24,8 @@ export const channels = {
   sessions: {
     list: 'sessions:list',
     changed: 'sessions:changed',
+  },
+  panels: {
+    itemsAt: 'panels:items-at',
   },
 } as const;

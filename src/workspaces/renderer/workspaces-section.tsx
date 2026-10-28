@@ -2,17 +2,26 @@ import { useId, useState, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus } from '../../ui/renderer/icons';
 import type { WorkspaceList, WorkspacesBridge } from '../shared/workspaces';
-import { WorkspaceTree } from './workspace-tree';
+import { WorkspaceTree, type TreeItem } from './workspace-tree';
 
 interface WorkspacesSectionProps {
   bridge: WorkspacesBridge;
   list: WorkspaceList;
+  // Puts a row of the tree being dragged on the drag, for whatever it is dropped on.
+  onDragItem?: (item: TreeItem, dataTransfer: DataTransfer) => void;
+  // Opens a row of the tree elsewhere, as dropping it would.
+  onOpenItem?: (item: TreeItem) => void;
 }
 
 // The sidebar's Workspaces section: its heading with Add workspace just after it, and the workspaces'
 // tree. Folders dropped from the Finder anywhere on the section are added too. Without workspaces it
 // shows the heading alone.
-export function WorkspacesSection({ bridge, list }: WorkspacesSectionProps) {
+export function WorkspacesSection({
+  bridge,
+  list,
+  onDragItem,
+  onOpenItem,
+}: WorkspacesSectionProps) {
   const { t } = useTranslation();
   const heading = useId();
   const [dropping, setDropping] = useState(false);
@@ -60,7 +69,13 @@ export function WorkspacesSection({ bridge, list }: WorkspacesSectionProps) {
         </button>
       </div>
       {list.workspaces.length > 0 && (
-        <WorkspaceTree bridge={bridge} list={list} labelledBy={heading} />
+        <WorkspaceTree
+          bridge={bridge}
+          list={list}
+          labelledBy={heading}
+          onDragItem={onDragItem}
+          onOpenItem={onOpenItem}
+        />
       )}
     </section>
   );

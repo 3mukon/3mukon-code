@@ -26,6 +26,7 @@ function fakeBridge(
       listFolder: () => Promise.resolve({ entries: [] }),
     },
     sessions: { list: () => Promise.resolve(sessions), onChange: () => () => undefined },
+    panels: { itemsAt: () => Promise.resolve([]) },
   };
 }
 
@@ -94,6 +95,26 @@ describe('App', () => {
         .getAllByRole('option')
         .map((option) => option.textContent),
     ).toEqual(['All workspaces', 'web']);
+  });
+
+  it('opens a tree row in the panel area, whose top-left header clears the window buttons while the sidebar is hidden', async () => {
+    await renderApp(
+      fakeBridge({
+        workspaces: [{ id: 'w1', name: 'web', path: '/Users/me/web', trusted: true }],
+        selectedId: 'w1',
+      }),
+    );
+    fireEvent.keyDown(screen.getByRole('treeitem', { name: 'web' }), {
+      key: 'ArrowDown',
+      metaKey: true,
+    });
+    const header = () =>
+      within(screen.getByRole('main'))
+        .getByRole('region', { name: 'New session' })
+        .querySelector('header');
+    expect(header()?.className).toContain('pl-5');
+    fireEvent.keyDown(window, { key: 'b', metaKey: true });
+    expect(header()?.className).toContain('pl-[84px]');
   });
 
   it('hides the sidebar with Command-B and shows it again', async () => {

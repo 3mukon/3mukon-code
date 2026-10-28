@@ -33,3 +33,16 @@ export async function withApp(
     data.remove();
   }
 }
+
+// Stands in for the user in the native folder picker and trust question, which a test cannot click:
+// the picker chooses the folder, and the question gets the answer.
+export async function answerDialogs(app: ElectronApplication, folder: string, trust: boolean) {
+  await app.evaluate(
+    ({ dialog }, { folder, trust }) => {
+      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [folder] });
+      dialog.showMessageBox = () =>
+        Promise.resolve({ response: trust ? 0 : 1, checkboxChecked: false });
+    },
+    { folder, trust },
+  );
+}

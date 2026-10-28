@@ -20,7 +20,7 @@ tags: []
 - Native dialogs and menu (`main/native.ts`): the folder picker and the trust question as sheets on the window that asked, and a workspace's menu, with Trusted and Remove Workspace, at the pointer, all in the main process's language (DOC-mod-i18n).
 - The window's part (`renderer/`):
   - `WorkspacesSection`: the sidebar's Workspaces section, with Add workspace just after its heading; folders dropped from the Finder anywhere on it are added. Without workspaces it shows its heading alone.
-  - `WorkspaceTree`: the workspaces as a tree, each by its folder's name with its path in the tooltip and a mark when untrusted. Each expands into its folder tree, read folder by folder as folders open and again each time one opens; a folder that cannot be read says so and closes again. A click opens or closes a folder at once, and a workspace once no second press has followed it within the wait (`renderer/click-wait.ts`), which follows the user's own double clicks: 150ms before the first, then a margin longer than the slowest of the last five, measured from the first click to the second press, between 100ms and 400ms. A double click, known from its second press, selects a workspace without opening or closing it; should that press come after the wait, it puts the tree back. Return or Space selects a workspace too; a secondary click or VoiceOver's menu command opens its menu; the arrow keys, Home and End move as in macOS lists.
+  - `WorkspaceTree`: the workspaces as a tree, each by its folder's name with its path in the tooltip and a mark when untrusted. Each expands into its folder tree, read folder by folder as folders open and again each time one opens; a folder that cannot be read says so and closes again. A click opens or closes a folder at once, and a workspace once no second press has followed it within the wait (`renderer/click-wait.ts`), which follows the user's own double clicks: 150ms before the first, then a margin longer than the slowest of the last five, measured from the first click to the second press, between 100ms and 400ms. A double click, known from its second press, selects a workspace without opening or closing it; should that press come after the wait, it puts the tree back. Return or Space selects a workspace too; a secondary click or VoiceOver's menu command opens its menu; the arrow keys, Home and End move as in macOS lists. Every row can be dragged elsewhere, as a folder or a file by its absolute path (`TreeItem`), and opened elsewhere with ⌘↓, as in the Finder, or with Return or Space on a file; the app module decides where.
   - `useWorkspaces`: the list as the main process keeps it, kept current through the bridge.
 - The contract (`shared/workspaces.ts`): the list's types, and `WorkspacesBridge`, what the window asks of the workspaces through the preload bridge.
 
@@ -33,7 +33,7 @@ tags: []
 
 ## Interface
 
-- For the app module: `Workspaces` and `WorkspacesUi` from `main/workspaces.ts`, `fileStorage` from `main/storage.ts` and `nativeWorkspacesUi` from `main/native.ts`; `WorkspacesSection` and `useWorkspaces` from `renderer/`.
+- For the app module: `Workspaces` and `WorkspacesUi` from `main/workspaces.ts`, `fileStorage` from `main/storage.ts` and `nativeWorkspacesUi` from `main/native.ts`; `WorkspacesSection`, which takes what to do with a row being dragged and a row to open, `useWorkspaces` and `TreeItem` from `renderer/`.
 - For both processes: the types and `WorkspacesBridge` in `shared/workspaces.ts`.
 
 ## Dependencies
