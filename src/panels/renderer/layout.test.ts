@@ -128,6 +128,60 @@ describe('reducePanels', () => {
   });
 });
 
+describe('moving panels', () => {
+  // page | a, then b below a: row(page, column(a, b)).
+  const opened = run(
+    { type: 'open', contents: [page('/web')] },
+    { type: 'open', contents: [file('/a')] },
+    {
+      type: 'open',
+      contents: [file('/b')],
+      at: { kind: 'beside', panelId: 'panel-2', side: 'bottom' },
+    },
+  );
+
+  it('moves a panel beside another, keeping its id, and focuses it', () => {
+    const moved = reducePanels(opened, {
+      type: 'move',
+      panelId: 'panel-1',
+      to: { kind: 'beside', panelId: 'panel-4', side: 'bottom' },
+    });
+    expect(shape(moved.layout)).toBe('column(/a, column(/b, page /web))');
+    expect(moved.focusedId).toBe('panel-1');
+    expect(
+      panelsOf(moved.layout)
+        .map((panel) => panel.id)
+        .sort(),
+    ).toEqual(['panel-1', 'panel-2', 'panel-4']);
+  });
+
+  it('swaps two panels’ places', () => {
+    const swapped = reducePanels(opened, {
+      type: 'move',
+      panelId: 'panel-1',
+      to: { kind: 'swap', panelId: 'panel-4' },
+    });
+    expect(shape(swapped.layout)).toBe('row(/b, column(/a, page /web))');
+    expect(swapped.focusedId).toBe('panel-1');
+  });
+
+  it('leaves the layout alone for a move onto itself or a panel that has gone', () => {
+    for (const to of [
+      { kind: 'swap', panelId: 'panel-1' },
+      { kind: 'beside', panelId: 'panel-9', side: 'left' },
+    ] as const) {
+      expect(reducePanels(opened, { type: 'move', panelId: 'panel-1', to })).toBe(opened);
+    }
+    expect(
+      reducePanels(opened, {
+        type: 'move',
+        panelId: 'panel-9',
+        to: { kind: 'swap', panelId: 'panel-1' },
+      }),
+    ).toBe(opened);
+  });
+});
+
 describe('helpers', () => {
   it('opens a folder as a session page and a file as itself', () => {
     expect(contentOf({ kind: 'folder', path: '/web' })).toEqual(page('/web'));

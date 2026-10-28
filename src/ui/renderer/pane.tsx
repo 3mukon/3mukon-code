@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from 'react';
+import type { DragEvent, ReactNode, Ref } from 'react';
 import { X } from './icons';
 import { StatusDot, type Status } from './status-dot';
 
@@ -22,6 +22,9 @@ interface PaneProps {
   inTitleBar?: boolean;
   // The header leaves room at its start for macOS's window buttons, which lie over it.
   clearsWindowButtons?: boolean;
+  // Dragging the pane by its title and detail, to move it.
+  onDragStart?: (event: DragEvent<HTMLElement>) => void;
+  onDragEnd?: () => void;
   // The pane's own element, for a parent that moves focus to it.
   ref?: Ref<HTMLElement>;
   children?: ReactNode;
@@ -29,8 +32,8 @@ interface PaneProps {
 
 // One pane of the main area: a header with the status, title, detail and close button, as tall as the
 // title bar, above a scrolling body. The pane takes focus from the keyboard as a whole, and marks
-// itself as the current one while it has focus. In the title bar, the header's title, detail and
-// button still take clicks.
+// itself as the current one while it has focus. Its title and detail are its handle, by which it
+// drags when its parent lets it; in the title bar, they and the button still take clicks.
 export function Pane({
   title,
   detail,
@@ -43,6 +46,8 @@ export function Pane({
   closeLabel,
   inTitleBar = false,
   clearsWindowButtons = false,
+  onDragStart,
+  onDragEnd,
   ref,
   children,
 }: PaneProps) {
@@ -61,15 +66,19 @@ export function Pane({
       >
         {status !== undefined && <StatusDot status={status} />}
         {statusLabel !== undefined && <span className="sr-only">{statusLabel}</span>}
-        <span className="truncate [-webkit-app-region:no-drag]">{title}</span>
-        {detail !== undefined && (
-          <small
-            title={detailTitle}
-            className="truncate text-xs font-normal text-faint [-webkit-app-region:no-drag]"
-          >
-            {detail}
-          </small>
-        )}
+        <span
+          draggable={onDragStart !== undefined}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          className="flex min-w-0 items-center gap-2.5 [-webkit-app-region:no-drag]"
+        >
+          <span className="truncate">{title}</span>
+          {detail !== undefined && (
+            <small title={detailTitle} className="truncate text-xs font-normal text-faint">
+              {detail}
+            </small>
+          )}
+        </span>
         {onClose !== undefined && (
           <button
             type="button"

@@ -1,6 +1,6 @@
 import { useMemo, useReducer } from 'react';
 import type { PanelContent } from '../shared/panels';
-import { emptyPanels, reducePanels, type Layout, type Target } from './layout';
+import { emptyPanels, reducePanels, type Layout, type Move, type Target } from './layout';
 
 // The panel area's layout and focused panel, and what changes them: for the area itself, and for
 // whatever opens items in it.
@@ -13,6 +13,8 @@ export interface Panels {
   close(panelId: string): void;
   focus(panelId: string): void;
   resize(splitId: string, ratio: number): void;
+  // Moves a panel beside another, or swaps the two.
+  move(panelId: string, to: Move): void;
 }
 
 export function usePanels(): Panels {
@@ -32,6 +34,9 @@ export function usePanels(): Panels {
       },
       resize: (splitId, ratio) => {
         dispatch({ type: 'resize', splitId, ratio });
+      },
+      move: (panelId, to) => {
+        dispatch({ type: 'move', panelId, to });
       },
     }),
     [state],

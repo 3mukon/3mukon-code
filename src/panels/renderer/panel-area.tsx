@@ -5,7 +5,15 @@ import { Pane } from '../../ui/renderer/pane';
 import type { PanelContent, PanelsBridge } from '../shared/panels';
 import { arrange, neighbour, zoneAt, type Box, type Direction, type Rect } from './geometry';
 import { itemDragType, readItemDrag } from './item-drag';
-import { contentOf, folderOf, inOpeningOrder, panelsOf, type Side, type Target } from './layout';
+import {
+  contentOf,
+  folderOf,
+  inOpeningOrder,
+  panelsOf,
+  type Move,
+  type Side,
+  type Target,
+} from './layout';
 import type { Panels } from './use-panels';
 
 interface PanelAreaProps {
@@ -24,7 +32,11 @@ type Command =
   | { type: 'split'; side: Side }
   | { type: 'close' }
   | { type: 'focus-index'; index: number }
-  | { type: 'focus-towards'; direction: Direction };
+  | { type: 'focus-towards'; direction: Direction }
+  | { type: 'swap-towards'; direction: Direction };
+
+// The type under which a panel being moved travels, as its id.
+const panelDragType = 'application/x-3mukon-code-panel';
 
 // The main area's panels, laid out as the panel layout says, from the window's top edge. Each panel
 // takes its box in the area, and the panels stay in the order they were opened, so that a split or a
@@ -34,18 +46,22 @@ type Command =
 // there moves the window instead.
 //
 // A folder or file dropped from a tree or the Finder fills the empty area; near a panel's edge it
-// splits that panel and opens on that side, and in a panel's middle it takes the panel's place.
+// splits that panel and opens on that side, and in a panel's middle it takes the panel's place. A
+// panel dragged by its title onto another panel moves beside it near its edge, and in its middle the
+// two swap places.
 //
 // The keyboard, from anywhere in the window: ⌘D splits the focused panel to the right and ⇧⌘D
 // downwards, opening a session page in its folder; ⌘W closes the focused panel; ⌘1 to ⌘9 focus the
-// panels in reading order; ⌥⌘ and an arrow focus the next panel that way. Dividers take focus with
-// Tab and move with the arrow keys.
+// panels in reading order; ⌥⌘ and an arrow focus the next panel that way, and ⇧⌥⌘ and an arrow swap
+// the focused panel with it. Dividers take focus with Tab and move with the arrow keys.
 export function PanelArea({ panels, bridge, clearsWindowButtons }: PanelAreaProps) {
   const { t } = useTranslation();
   const root = useRef<HTMLDivElement>(null);
   const elements = useRef(new Map<string, HTMLElement>());
   // Set by a key press that changes the focused panel, so that the keyboard focus follows it.
   const followFocus = useRef(false);
+  // The panel being dragged by its title, if any.
+  const moving = useRef<string | null>(null);
   const [drop, setDrop] = useState<DropTarget | null>(null);
 
   const ordered = panelsOf(panels.layout);
@@ -78,6 +94,12 @@ export function PanelArea({ panels, bridge, clearsWindowButtons }: PanelAreaProp
           if (nextFocus === undefined) return;
           panels.focus(nextFocus);
           break;
+        case 'swap-towards': {
+          const other = neighbour(rectsOf(elements.current), focused.id, command.direction);
+          if (other === undefined) return;
+          panels.move(focused.id, { kind: 'swap', panelId: other });
+          break;
+        }
       }
       event.preventDefault();
       followFocus.current = true;
@@ -106,24 +128,42 @@ export function PanelArea({ panels, bridge, clearsWindowButtons }: PanelAreaProp
     };
   };
 
+  // A panel being moved drops anywhere but on itself.
+  const dropTargetAt = (event: DragEvent<HTMLElement>): DropTarget | null => {
+    const target = targetAt(event);
+    const movingHere =
+      event.dataTransfer.types.includes(panelDragType) &&
+      target?.kind === 'panel' &&
+      target.panelId === moving.current;
+    return movingHere ? null : target;
+  };
+
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!accepts(event.dataTransfer.types)) return;
-    const target = targetAt(event);
+    const target = dropTargetAt(event);
     if (target === null) {
       setDrop(null);
       return;
     }
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'copy';
+    event.dataTransfer.dropEffect = event.dataTransfer.types.includes(panelDragType)
+      ? 'move'
+      : 'copy';
     if (!sameTarget(drop, target)) setDrop(target);
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     if (!accepts(event.dataTransfer.types)) return;
     event.preventDefault();
-    const target = targetAt(event);
+    const target = dropTargetAt(event);
     setDrop(null);
     if (target === null) return;
+    const movedId = event.dataTransfer.getData(panelDragType);
+    if (movedId !== '') {
+      moving.current = null;
+      if (target.kind === 'panel') panels.move(movedId, movingTo(target));
+      return;
+    }
     const at = openingAt(target);
     const dragged = readItemDrag(event.dataTransfer);
     if (dragged !== null) {
@@ -188,6 +228,15 @@ export function PanelArea({ panels, bridge, clearsWindowButtons }: PanelAreaProp
               onClose={() => {
                 panels.close(panel.id);
               }}
+              onDragStart={(event) => {
+                moving.current = panel.id;
+                event.dataTransfer.setData(panelDragType, panel.id);
+                event.dataTransfer.effectAllowed = 'move';
+              }}
+              onDragEnd={() => {
+                moving.current = null;
+                setDrop(null);
+              }}
               closeLabel={t('panels.close')}
             />
             {drop?.kind === 'panel' && drop.panelId === panel.id && <DropZone zone={drop.zone} />}
@@ -244,7 +293,8 @@ function commandFor(event: KeyboardEvent): Command | null {
   if (!event.metaKey || event.ctrlKey) return null;
   if (event.altKey) {
     const direction = directions[event.key];
-    return direction !== undefined && !event.shiftKey ? { type: 'focus-towards', direction } : null;
+    if (direction === undefined) return null;
+    return { type: event.shiftKey ? 'swap-towards' : 'focus-towards', direction };
   }
   const key = event.key.toLowerCase();
   if (key === 'd') return { type: 'split', side: event.shiftKey ? 'bottom' : 'right' };
@@ -256,12 +306,18 @@ function commandFor(event: KeyboardEvent): Command | null {
 
 // Whether a drag carries something the area opens: a folder or file from a tree, or Finder items.
 function accepts(types: readonly string[]): boolean {
-  return types.includes(itemDragType) || types.includes('Files');
+  return types.includes(panelDragType) || types.includes(itemDragType) || types.includes('Files');
 }
 
 function sameTarget(a: DropTarget | null, b: DropTarget): boolean {
   if (a?.kind === 'area') return b.kind === 'area';
   return a?.kind === 'panel' && b.kind === 'panel' && a.panelId === b.panelId && a.zone === b.zone;
+}
+
+function movingTo(target: { panelId: string; zone: Side | 'middle' }): Move {
+  return target.zone === 'middle'
+    ? { kind: 'swap', panelId: target.panelId }
+    : { kind: 'beside', panelId: target.panelId, side: target.zone };
 }
 
 function openingAt(target: DropTarget): Target {

@@ -57,13 +57,39 @@ describe('Pane', () => {
     const header = screen.getByRole('region', { name: 'web' }).querySelector('header');
     expect(header?.className).toContain('[-webkit-app-region:drag]');
     expect(header?.className).toContain('pl-[84px]');
-    for (const part of [
-      screen.getByText('web'),
-      screen.getByText('me'),
-      screen.getByRole('button'),
-    ]) {
-      expect(part.className).toContain('[-webkit-app-region:no-drag]');
+    // The title and detail, which make the handle, and the button take clicks.
+    const handle = screen.getByText('me').parentElement;
+    expect(handle?.contains(screen.getByText('web'))).toBe(true);
+    for (const part of [handle, screen.getByRole('button')]) {
+      expect(part?.className).toContain('[-webkit-app-region:no-drag]');
     }
+  });
+
+  it('drags by its title and detail when its parent lets it', () => {
+    const onDragStart = vi.fn();
+    const onDragEnd = vi.fn();
+    const { rerender } = render(<Pane title="web" detail="me" focused onFocus={vi.fn()} />);
+    const handle = () => {
+      const element = screen.getByText('me').parentElement;
+      if (element === null) throw new Error('The handle is not shown.');
+      return element;
+    };
+    expect(handle().getAttribute('draggable')).toBe('false');
+    rerender(
+      <Pane
+        title="web"
+        detail="me"
+        focused
+        onFocus={vi.fn()}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+      />,
+    );
+    expect(handle().getAttribute('draggable')).toBe('true');
+    fireEvent.dragStart(handle());
+    fireEvent.dragEnd(handle());
+    expect(onDragStart).toHaveBeenCalledOnce();
+    expect(onDragEnd).toHaveBeenCalledOnce();
   });
 
   it('goes without a status, shows its detail with a tooltip, and closes from its header', () => {

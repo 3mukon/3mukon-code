@@ -4,7 +4,7 @@ import { basename, join } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
 import { answerDialogs, dataFolder, launch } from './app';
 
-test('tree rows dragged into the main area open as panels, which split, resize, take focus and close', async () => {
+test('tree rows dragged into the main area open as panels, which split, resize, take focus, close and move', async () => {
   const data = dataFolder();
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'smoke-panels-')));
   mkdirSync(join(folder, 'src'));
@@ -67,6 +67,18 @@ test('tree rows dragged into the main area open as panels, which split, resize, 
         folder,
       );
       expect((await box(page)).y).toBeGreaterThan((await box(readme)).y);
+
+      // A panel dragged by its title near another panel's edge moves beside it.
+      const readmeBox = await box(readme);
+      await page
+        .getByText('New session', { exact: true })
+        .dragTo(readme, { targetPosition: { x: readmeBox.width - 10, y: readmeBox.height / 2 } });
+      await expect(main.getByRole('separator')).toHaveAttribute('aria-orientation', 'vertical');
+      await expect.poll(async () => (await box(page)).x - (await box(readme)).x).toBeGreaterThan(0);
+
+      // ⇧⌥⌘← swaps the focused panel with the one to its left.
+      await window.keyboard.press('Shift+Alt+Meta+ArrowLeft');
+      await expect.poll(async () => (await box(page)).x - (await box(readme)).x).toBeLessThan(0);
     } finally {
       await app.close();
     }

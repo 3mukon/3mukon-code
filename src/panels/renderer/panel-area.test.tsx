@@ -9,18 +9,30 @@ import { usePanels } from './use-panels';
 beforeAll(() => {
   initI18n(['en-US']);
 });
-// happy-dom lays nothing out, so the area and every panel in it measure 1000 by 600 pixels.
+// happy-dom lays nothing out, so the area measures 1000 by 600 pixels and each panel in it takes the
+// part its place in the layout gives it.
 beforeEach(() => {
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-    x: 0,
-    y: 0,
-    left: 0,
-    top: 0,
-    right: 1000,
-    bottom: 600,
-    width: 1000,
-    height: 600,
-    toJSON: () => ({}),
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const placed = this.closest<HTMLElement>('[data-panel]')?.style;
+    const share = (value: string | undefined, whole: number, fallback: number) =>
+      value === undefined || value === '' ? fallback : (parseFloat(value) / 100) * whole;
+    const left = share(placed?.left, 1000, 0);
+    const top = share(placed?.top, 600, 0);
+    const width = share(placed?.width, 1000, 1000);
+    const height = share(placed?.height, 600, 600);
+    return {
+      x: left,
+      y: top,
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height,
+      toJSON: () => ({}),
+    };
   });
 });
 afterEach(() => {
@@ -76,7 +88,27 @@ function drag(
   return fireEvent(element, event);
 }
 
+// Drops the panel being moved on an element, at a point on it.
+function dropPanel(element: Element, panelId: string, clientX: number, clientY: number) {
+  const event = new MouseEvent('drop', { bubbles: true, cancelable: true, clientX, clientY });
+  Object.defineProperty(event, 'dataTransfer', {
+    value: {
+      types: ['application/x-3mukon-code-panel'],
+      files: [],
+      getData: (format: string) => (format === 'application/x-3mukon-code-panel' ? panelId : ''),
+    },
+  });
+  return fireEvent(element, event);
+}
+
 const panel = (name: string) => screen.getByRole('region', { name });
+// Where a panel sits in the area: its box's place, as the layout gave it.
+const place = (name: string) => shown(panel(name).parentElement).style;
+
+function shown<T>(element: T | null): T {
+  if (element === null) throw new Error('The element is not shown.');
+  return element;
+}
 const settle = () => act(() => Promise.resolve());
 
 describe('PanelArea', () => {
@@ -112,7 +144,7 @@ describe('PanelArea', () => {
     ).toBe('vertical');
     expect(panel('a.ts').getAttribute('aria-current')).toBe('true');
     expect(panel('New session').getAttribute('aria-current')).toBeNull();
-    drag('drop', panel('a.ts'), fromTree({ kind: 'file', path: '/Users/me/web/b.ts' }));
+    drag('drop', panel('a.ts'), fromTree({ kind: 'file', path: '/Users/me/web/b.ts' }), 750, 300);
     expect(
       screen.getAllByRole('region').map((region) => region.getAttribute('aria-label')),
     ).toEqual(['New session', 'b.ts']);
@@ -195,6 +227,41 @@ describe('PanelArea', () => {
       false,
     ]);
     expect(headers.map((header) => header.includes('pl-[84px]'))).toEqual([true, false, false]);
+  });
+
+  it('moves a panel dragged by its title beside another, or swaps the two in its middle', () => {
+    const { area } = renderArea();
+    drag('drop', area, fromTree({ kind: 'file', path: '/Users/me/web/a.ts' }));
+    drag('drop', panel('a.ts'), fromTree({ kind: 'file', path: '/Users/me/web/b.ts' }), 990, 300);
+    // a.ts on the left, b.ts on the right.
+    expect([place('a.ts').left, place('b.ts').left]).toEqual(['0%', '50%']);
+    const handle = shown(within(panel('a.ts')).getByText('a.ts').parentElement);
+    const moved = { types: ['application/x-3mukon-code-panel'] };
+    fireEvent.dragStart(handle, { dataTransfer: { setData: vi.fn(), effectAllowed: 'none' } });
+    // A panel does not drop on itself.
+    expect(drag('dragover', panel('a.ts'), moved, 250, 300)).toBe(true);
+    expect(area.querySelector('.outline-accent')).toBeNull();
+    // Near b.ts's bottom edge, a.ts moves below it.
+    expect(drag('dragover', panel('b.ts'), moved, 750, 590)).toBe(false);
+    dropPanel(panel('b.ts'), 'panel-1', 750, 590);
+    expect([place('b.ts').top, place('a.ts').top]).toEqual(['0%', '50%']);
+    expect(screen.getByRole('separator').getAttribute('aria-orientation')).toBe('horizontal');
+    expect(panel('a.ts').getAttribute('aria-current')).toBe('true');
+    // In b.ts's middle, the two swap places.
+    dropPanel(panel('b.ts'), 'panel-1', 500, 150);
+    expect([place('a.ts').top, place('b.ts').top]).toEqual(['0%', '50%']);
+  });
+
+  it('focuses the next panel that way with ⌥⌘ and an arrow, and swaps with it with ⇧⌥⌘', () => {
+    const { area } = renderArea();
+    drag('drop', area, fromTree({ kind: 'file', path: '/Users/me/web/a.ts' }));
+    drag('drop', panel('a.ts'), fromTree({ kind: 'file', path: '/Users/me/web/b.ts' }), 990, 300);
+    fireEvent.keyDown(window, { key: 'ArrowLeft', metaKey: true, altKey: true });
+    expect(panel('a.ts').getAttribute('aria-current')).toBe('true');
+    expect(document.activeElement).toBe(panel('a.ts'));
+    fireEvent.keyDown(window, { key: 'ArrowRight', metaKey: true, altKey: true, shiftKey: true });
+    expect([place('b.ts').left, place('a.ts').left]).toEqual(['0%', '50%']);
+    expect(panel('a.ts').getAttribute('aria-current')).toBe('true');
   });
 
   it('resizes the panels from a divider', () => {

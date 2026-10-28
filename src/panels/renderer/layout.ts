@@ -24,6 +24,10 @@ export interface Split {
 // The side of a panel on which an item opens, splitting the panel in two.
 export type Side = 'left' | 'right' | 'top' | 'bottom';
 
+// Where a panel moves: beside another panel, splitting it, or into its place, the two swapping.
+export type Move =
+  { kind: 'beside'; panelId: string; side: Side } | { kind: 'swap'; panelId: string };
+
 // Where items open: filling the empty area, beside a panel, or in a panel's place.
 export type Target =
   | { kind: 'area' }
@@ -42,7 +46,8 @@ export type PanelsAction =
   | { type: 'open'; contents: readonly PanelContent[]; at?: Target }
   | { type: 'close'; panelId: string }
   | { type: 'focus'; panelId: string }
-  | { type: 'resize'; splitId: string; ratio: number };
+  | { type: 'resize'; splitId: string; ratio: number }
+  | { type: 'move'; panelId: string; to: Move };
 
 export const emptyPanels: PanelsState = { layout: null, focusedId: null, next: 1 };
 
@@ -68,6 +73,8 @@ export function reducePanels(state: PanelsState, action: PanelsAction): PanelsSt
               ratio: Math.min(Math.max(action.ratio, 0), 1),
             })),
           };
+    case 'move':
+      return move(state, action.panelId, action.to);
   }
 }
 
@@ -167,6 +174,34 @@ function besidePanel(
       second: before ? old : panel,
     };
   });
+}
+
+// Moves a panel, keeping its id and what it shows, and focuses it. Beside another panel, it leaves its
+// place as a close does and splits the other one; swapping, the two exchange places.
+function move(state: PanelsState, id: string, to: Move): PanelsState {
+  const { layout } = state;
+  if (layout === null || id === to.panelId) return state;
+  const panel = findPanel(layout, id);
+  const other = findPanel(layout, to.panelId);
+  if (panel === undefined || other === undefined) return state;
+  if (to.kind === 'swap') return { ...state, layout: swap(layout, panel, other), focusedId: id };
+  const rest = remove(layout, id)?.layout;
+  if (rest === undefined || rest === null) return state;
+  return {
+    layout: besidePanel(rest, other.id, to.side, panel, `split-${String(state.next)}`),
+    focusedId: id,
+    next: state.next + 1,
+  };
+}
+
+function swap(layout: Layout, a: Panel, b: Panel): Layout {
+  if (layout.type === 'panel') {
+    if (layout.id === a.id) return b;
+    return layout.id === b.id ? a : layout;
+  }
+  const first = swap(layout.first, a, b);
+  const second = swap(layout.second, a, b);
+  return first === layout.first && second === layout.second ? layout : { ...layout, first, second };
 }
 
 // Closes the panel. The other part of its split takes the split's place, and when the closed panel
