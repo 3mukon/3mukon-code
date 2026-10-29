@@ -69,6 +69,13 @@
   --color-menu: var(--menu);
   --color-menu-line: var(--menu-line);
   --shadow-menu: var(--menu-shadow);
+  /* The ellipsis after Working, blinking as the reference's does. */
+  --animate-blink: blink 1.4s steps(2) infinite;
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
   /* SF Pro and SF Mono on macOS. */
   --font-sans: system-ui, sans-serif;
   --font-mono: ui-monospace, monospace;

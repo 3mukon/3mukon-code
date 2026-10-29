@@ -32,6 +32,48 @@
       "waiting": "Waiting for you",
       "idle": "Idle",
       "closed": "Closed"
+    },
+    "confirm": {
+      "cancel": "Cancel"
+    },
+    "yolo": {
+      "message": "Run this session in yolo mode?",
+      "detail": "In yolo mode the agent carries out every action without asking, and nothing reviews it first. Its sandbox still applies.",
+      "confirm": "Use Yolo"
+    },
+    "sandbox": {
+      "read-only": "Read-only",
+      "workspace-write": "Workspace write",
+      "full-access": "Full access"
+    },
+    "mode": {
+      "auto": "Auto",
+      "yolo": "Yolo"
+    },
+    "page": {
+      "message": "Message {{provider}}",
+      "send": "Send",
+      "stop": "Stop",
+      "working": "Working",
+      "provider": "Provider",
+      "gateway": "Gateway",
+      "model": "Model",
+      "effort": "Reasoning effort",
+      "mode": "Permission mode",
+      "sandbox": "Sandbox",
+      "noGateway": "No gateway",
+      "defaultModel": "Default model",
+      "defaultEffort": "Default effort",
+      "loadingModels": "Loading models…",
+      "failed": "The turn failed.",
+      "startFailed": "The session couldn’t start.",
+      "approval": "Waiting for your approval",
+      "question": "Waiting for your answer",
+      "ended": "The session has ended.",
+      "activity": "Activity",
+      "context": "{{used}} / {{size}} ({{share}})",
+      "contextDetail": "{{used}} of {{size}} tokens of the context window in use ({{share}})",
+      "contextTokens": "{{tokens}} tokens of context"
     }
   },
   "panels": {

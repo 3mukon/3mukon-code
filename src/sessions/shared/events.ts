@@ -27,6 +27,10 @@ export interface ModelOption {
   description?: string;
   // The reasoning effort levels the model takes; empty when it takes none.
   efforts: ReasoningEffort[];
+  // The model a session uses when it chooses none, as the provider resolves its own configuration.
+  default?: boolean;
+  // The effort level the model uses when the session chooses none, where the provider says.
+  defaultEffort?: ReasoningEffort;
 }
 
 // What a tool call does, in the vocabulary of the Agent Client Protocol.
@@ -178,6 +182,9 @@ export type SessionEvent =
     }
   // The models the session can switch to.
   | { type: 'models'; models: ModelOption[] }
+  // How many tokens of the model's context window the conversation takes, and the window's size when
+  // the provider says.
+  | { type: 'context'; used: number; size: number | null }
   // A resumed session has replayed its past events; what follows is live.
   | { type: 'replay-finished' }
   | { type: 'error'; message: string }

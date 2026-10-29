@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { rmSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -67,6 +68,13 @@ function launchArgs(sandbox: SandboxLevel): string[] {
 const SESSION_META = { askUserQuestion: true };
 
 const NO_GATEWAYS = 'Grok Build has no gateways; its custom models are among its models.';
+
+// The folders of the probes still listing models, removed as the app's process exits, should it quit
+// during a probe, so that quitting leaves none behind.
+const probeFolders = new Set<string>();
+process.on('exit', () => {
+  for (const folder of probeFolders) rmSync(folder, { recursive: true, force: true });
+});
 
 export type GrokBuildProviderOptions = {
   // The app's version, which Grok records as its client's.
@@ -147,11 +155,13 @@ export function createGrokBuildProvider(options: GrokBuildProviderOptions): Prov
     async listModels(gateway) {
       if (gateway !== null) throw new Error(NO_GATEWAYS);
       const cwd = await mkdtemp(join(tmpdir(), 'grok-models-'));
+      probeFolders.add(cwd);
       try {
         return await withGrok(connect, cwd, (agent) =>
           Promise.resolve(catalogOf(agent.initialize).models),
         );
       } finally {
+        probeFolders.delete(cwd);
         await rm(cwd, { recursive: true, force: true });
       }
     },
@@ -200,7 +210,9 @@ async function stopAgent({ process, connection }: Pick<Agent, 'process' | 'conne
   await process.stop();
 }
 
-// One exchange with a short-lived process that starts no session; it runs read-only.
+// One exchange with a short-lived process that starts no session; it runs read-only. The answer comes
+// as soon as the exchange ends, without waiting for the process to stop, which takes Grok about four
+// seconds; it leaves nothing behind in its folder.
 async function withGrok<Result>(
   connect: Connect,
   cwd: string,
@@ -214,7 +226,7 @@ async function withGrok<Result>(
   try {
     return await use(agent);
   } finally {
-    await stopAgent(agent);
+    stopAgent(agent).catch(() => undefined);
   }
 }
 
@@ -245,7 +257,17 @@ function catalogOf(initialize: InitializeResponse): Catalog {
       efforts: efforts.flatMap((effort) => text(effort.value) ?? text(effort.id) ?? []),
     });
   }
-  return { models, defaultModel: text(state?.currentModelId), defaultEfforts };
+  // The model Grok uses when a session chooses none, and each model's own effort, marked on the list.
+  const defaultModel = text(state?.currentModelId);
+  const marked = models.map((model) => {
+    const defaultEffort = defaultEfforts.get(model.id);
+    return {
+      ...model,
+      ...(model.id === defaultModel ? { default: true } : {}),
+      ...(defaultEffort === undefined ? {} : { defaultEffort }),
+    };
+  });
+  return { models: marked, defaultModel, defaultEfforts };
 }
 
 // A model's effort levels, which Grok lists in the model's metadata.

@@ -47,6 +47,7 @@ const ROOTS = [
   'v2/TurnCompletedNotification',
   'v2/TurnPlanUpdatedNotification',
   'v2/ThreadNameUpdatedNotification',
+  'v2/ThreadTokenUsageUpdatedNotification',
   'v2/ErrorNotification',
   'v2/ServerRequestResolvedNotification',
   'v2/ItemGuardianApprovalReviewCompletedNotification',

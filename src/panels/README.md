@@ -12,11 +12,11 @@ tags: []
 
 ## Responsibilities
 
-- The layout (`renderer/layout.ts`): a tree whose leaves are panels and whose other nodes split their space in two, side by side or stacked, each giving its first part a share of it. `reducePanels` opens items, filling the empty area, beside a panel or in a panel's place; closes a panel, whose space goes to the rest of its split and whose focus passes to the nearest panel there; moves a panel beside another or swaps the two; focuses a panel; and resizes a split. A panel shows a session page for a folder, or a file (`PanelContent` in `shared/panels.ts`).
+- The layout (`renderer/layout.ts`): a tree whose leaves are panels and whose other nodes split their space in two, side by side or stacked, each giving its first part a share of it. `reducePanels` opens items, filling the empty area, beside a panel or in a panel's place; closes a panel, whose space goes to the rest of its split and whose focus passes to the nearest panel there; moves a panel beside another or swaps the two; focuses a panel; and resizes a split. A panel shows a session page for a folder, a session the app has open, or a file (`PanelContent` in `shared/panels.ts`).
 - `usePanels` (`renderer/use-panels.ts`): the layout and the focused panel as React state, with what changes them, for the area itself and for whatever opens items in it.
 - `PanelArea` (`renderer/panel-area.tsx`), the main area:
   - Each panel takes its box in the area (`arrange` in `renderer/geometry.ts`), and the panels stay in the page in the order they were opened, so that a split or a close never moves a panel's content elsewhere in the page and nothing in it starts over. Each split gets the ui module's divider.
-  - Each panel is the ui module's pane: a session page goes by New session and a file by its name, each with its folder's name and the full path as the tooltip, and a close button. The focused panel is marked current and the others dim. The bodies stay empty until session pages and the file editor fill them.
+  - Each panel is the ui module's pane, with a close button. What it shows comes from whoever composes the area (`PanelView`): its title, detail, status and body. What is left out keeps the area's own: a session page or session goes by New session and a file by its name, each with its folder's name and the full path as the tooltip, and an empty body. The focused panel is marked current and the others dim.
   - The area starts at the window's top edge: the headers of the panels at the top lie in the title bar and move the window from their empty part, and the header under macOS's window buttons, which lie over the area while the sidebar is hidden, leaves room for them. While no panel is open, an empty strip there moves the window.
   - Drops: a folder or file dragged from one of the app's trees (`renderer/item-drag.ts`) or from the Finder fills the empty area; near a panel's edge, within a quarter of its width or height, it splits the panel and opens on that side; in its middle it takes the panel's place. A highlight shows where. Several items open one beside the other. Finder items reach the main process as the paths of their files, and come back as folders and files.
   - Moving: a panel dragged by its title and folder name onto another panel moves beside it near its edge, leaving its place as a close does, and in its middle the two swap places; it never drops on itself. A moved panel keeps its id, so what it shows does not start over.
@@ -26,14 +26,14 @@ tags: []
 
 ## Not responsible for
 
-- What a panel's body shows: the sessions module fills session pages and sessions, and the files module the file editor.
+- What a panel shows: the app module composes it, from the sessions module's session pages and, later, the files module's editor.
 - Reading files, or checking that a file lies inside a workspace or was dropped: the files module does when it opens one.
 - Starting drags from the trees: the workspaces module does, and the app module gives its drags this module's format.
 - Tabs inside a panel, and keeping the layout across a restart, which are deferred.
 
 ## Interface
 
-- For the app module: `PanelArea`, `usePanels` and `Panels`, `contentOf` and `writeItemDrag` from `renderer/`; `droppedItems` from `main/items.ts`.
+- For the app module: `PanelArea` and `PanelView`, `usePanels` and `Panels`, `contentOf`, `panelsOf`, `Panel` and `writeItemDrag` from `renderer/`; `droppedItems` from `main/items.ts`.
 - For both processes: the types in `shared/panels.ts`.
 
 ## Dependencies

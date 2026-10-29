@@ -91,6 +91,8 @@ let failNew: string | undefined;
 // The sandbox profile whose processes cannot resume a session.
 let failResumeAt: string | undefined;
 let pages: ListSessionsResponse[];
+// Whether a stopped process takes its time to exit, as Grok does.
+let slowExit: boolean;
 let fakes: FakeGrok[];
 
 beforeEach(() => {
@@ -98,6 +100,7 @@ beforeEach(() => {
   failNew = undefined;
   failResumeAt = undefined;
   pages = [];
+  slowExit = false;
   fakes = [];
 });
 
@@ -201,7 +204,7 @@ class FakeGrok {
         this.stopped = true;
         this.connection.close();
         this.end(undefined);
-        return Promise.resolve();
+        return slowExit ? new Promise<void>(() => undefined) : Promise.resolve();
       },
     };
   }
@@ -353,11 +356,14 @@ describe('starting a session', () => {
       {
         type: 'models',
         models: [
+          // The model Grok uses when the session chooses none, with its own effort.
           {
             id: 'grok-default',
             label: 'Grok Default',
             description: 'The usual one',
             efforts: ['high', 'low'],
+            default: true,
+            defaultEffort: 'high',
           },
           { id: 'grok-small', label: 'Grok Small', efforts: [] },
         ],
@@ -754,7 +760,8 @@ describe('resuming and history', () => {
     expect(fake().stopped).toBe(true);
   });
 
-  it('lists the models as Grok starts, without creating a session', async () => {
+  it('lists the models as Grok starts, without creating a session or waiting for the process to exit', async () => {
+    slowExit = true;
     const models = await provider.listModels(null);
     expect(models.map((model) => model.id)).toEqual(['grok-default', 'grok-small']);
     expect(fake().methods()).toEqual(['initialize']);

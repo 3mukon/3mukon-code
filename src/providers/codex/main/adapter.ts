@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { rmSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -108,6 +109,13 @@ const TOOLSET_VARIABLE = 'TOOLSET_3MUKON_CODE_TOKEN';
 // Longer than any question waits for the user: the toolset's calls have no time limit of their own.
 const TOOLSET_TIMEOUT_SECONDS = 365 * 24 * 60 * 60;
 
+// The folders of the probes still listing models, removed as the app's process exits, should it quit
+// during a probe, so that quitting leaves none behind.
+const probeFolders = new Set<string>();
+process.on('exit', () => {
+  for (const folder of probeFolders) rmSync(folder, { recursive: true, force: true });
+});
+
 // The app-server's settings for the app's toolset (ADR-0009): its address, the variable that holds the
 // session's credential, its tools allowed without asking, and no timeout that a waiting call reaches.
 // Codex starts no thread while it cannot reach the toolset.
@@ -188,9 +196,11 @@ export function createCodexProvider({
     async listModels(gateway) {
       const own = gateway === null ? undefined : (await readGateway(gatewaysDir, gateway)).model;
       const cwd = await mkdtemp(join(tmpdir(), 'codex-models-'));
+      probeFolders.add(cwd);
       try {
         return withGatewayModel(modelOptions(await withCodex(connect, cwd, allModels)), own);
       } finally {
+        probeFolders.delete(cwd);
         await rm(cwd, { recursive: true, force: true });
       }
     },
@@ -245,12 +255,15 @@ async function allModels(rpc: Rpc): Promise<Model[]> {
   return models.filter((model) => !model.hidden);
 }
 
+// The models, with the one Codex uses when a thread chooses none marked, and each one's own effort.
 function modelOptions(models: Model[]): ModelOption[] {
   return models.map((model) => ({
     id: model.model,
     label: model.displayName,
     ...(model.description === '' ? {} : { description: model.description }),
     efforts: model.supportedReasoningEfforts.map((option) => option.reasoningEffort),
+    ...(model.isDefault ? { default: true } : {}),
+    defaultEffort: model.defaultReasoningEffort,
   }));
 }
 

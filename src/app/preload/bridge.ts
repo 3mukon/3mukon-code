@@ -1,5 +1,6 @@
 import type { DroppedItem } from '../../panels/shared/panels';
-import type { SessionSummary } from '../../sessions/shared/sessions';
+import type { ModelOption, ProviderId, SessionEvent } from '../../sessions/shared/events';
+import type { SessionSnapshot, SessionSummary } from '../../sessions/shared/sessions';
 import type { FolderListing, WorkspaceList } from '../../workspaces/shared/workspaces';
 import { channels, type Bridge } from '../shared/bridge';
 
@@ -51,6 +52,28 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
       onChange: (listener) =>
         subscribe(channels.sessions.changed, (value) => {
           listener(value as SessionSummary[]);
+        }),
+      providers: () => invoke(channels.sessions.providers) as Promise<ProviderId[]>,
+      dayFolder: () => invoke(channels.sessions.dayFolder) as Promise<string>,
+      gateways: (provider) => invoke(channels.sessions.gateways, provider) as Promise<string[]>,
+      models: (provider, gateway) =>
+        invoke(channels.sessions.models, provider, gateway) as Promise<ModelOption[]>,
+      confirmYolo: () => invoke(channels.sessions.confirmYolo) as Promise<boolean>,
+      start: (request) => invoke(channels.sessions.start, request) as Promise<string>,
+      send: (id, text) => invoke(channels.sessions.send, id, text) as Promise<void>,
+      interrupt: (id) => invoke(channels.sessions.interrupt, id) as Promise<void>,
+      setMode: (id, mode) => invoke(channels.sessions.setMode, id, mode) as Promise<boolean>,
+      setGateway: (id, gateway) =>
+        invoke(channels.sessions.setGateway, id, gateway) as Promise<void>,
+      setModel: (id, model) => invoke(channels.sessions.setModel, id, model) as Promise<void>,
+      setEffort: (id, effort) => invoke(channels.sessions.setEffort, id, effort) as Promise<void>,
+      setSandbox: (id, sandbox) =>
+        invoke(channels.sessions.setSandbox, id, sandbox) as Promise<void>,
+      snapshot: (id) => invoke(channels.sessions.snapshot, id) as Promise<SessionSnapshot | null>,
+      onEvent: (listener) =>
+        subscribe(channels.sessions.event, (value) => {
+          const { id, seq, event } = value as { id: string; seq: number; event: SessionEvent };
+          listener(id, seq, event);
         }),
     },
     panels: {

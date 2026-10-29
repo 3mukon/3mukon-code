@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { writeItemDrag } from '../../panels/renderer/item-drag';
-import { contentOf } from '../../panels/renderer/layout';
-import { PanelArea } from '../../panels/renderer/panel-area';
+import { contentOf, panelsOf, type Panel } from '../../panels/renderer/layout';
+import { PanelArea, type PanelView } from '../../panels/renderer/panel-area';
 import { usePanels } from '../../panels/renderer/use-panels';
+import type { SessionSummary } from '../../sessions/shared/sessions';
+import { SessionPage } from '../../sessions/renderer/session-page';
 import { SessionsSection } from '../../sessions/renderer/sessions-section';
+import { statusDots } from '../../sessions/renderer/timeline';
+import { preloadOffers } from '../../sessions/renderer/use-offers';
 import { useSessions } from '../../sessions/renderer/use-sessions';
 import { useWorkspaces } from '../../workspaces/renderer/use-workspaces';
 import { WorkspacesSection } from '../../workspaces/renderer/workspaces-section';
@@ -17,13 +21,70 @@ import type { Bridge } from '../shared/bridge';
 // while the sidebar is hidden, the window buttons lie over the main area. The sidebar holds the
 // Workspaces section above the Sessions section, with a thin line between them; the main area holds
 // the panel area, blank until something opens in it. The workspaces' tree rows drag into the panel
-// area, and open in it from the keyboard.
+// area, and open in it from the keyboard. New session opens a session page in the selected
+// workspace's folder, or while there is none in the day's folder in ~/3mukon-code; a session in the list shows in its
+// panel, or opens in one. Session pages and sessions fill their panels, titled by the session once it
+// runs. As the window opens, it asks for what session pages offer, each provider's models among them,
+// so that a page has them when it opens.
 export function App({ bridge }: { bridge: Bridge }) {
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const workspaces = useWorkspaces(bridge.workspaces);
   const sessions = useSessions(bridge.sessions);
   const panels = usePanels();
+
+  const openNewSession = () => {
+    const selected = workspaces.workspaces.find(
+      (workspace) => workspace.id === workspaces.selectedId,
+    );
+    const open = (folder: string) => {
+      panels.open([{ kind: 'session-page', folder }]);
+    };
+    if (selected !== undefined) open(selected.path);
+    else bridge.sessions.dayFolder().then(open, report);
+  };
+
+  const openSession = (session: SessionSummary) => {
+    const shown = panelsOf(panels.layout).find(
+      (panel) => panel.content.kind === 'session' && panel.content.id === session.id,
+    );
+    if (shown !== undefined) panels.focus(shown.id);
+    else panels.open([{ kind: 'session', id: session.id, folder: session.cwd }]);
+  };
+
+  const view = (panel: Panel): PanelView => {
+    const { content } = panel;
+    if (content.kind === 'file') return {};
+    const sessionId = content.kind === 'session' ? content.id : null;
+    const summary = sessions.find((session) => session.id === sessionId);
+    return {
+      ...(summary === undefined
+        ? {}
+        : {
+            title: summary.title ?? t(`providers.${summary.provider}`),
+            status: statusDots[summary.status],
+            statusLabel: t(`sessions.status.${summary.status}`),
+          }),
+      body: (
+        <SessionPage
+          bridge={bridge.sessions}
+          folder={content.folder}
+          sessionId={sessionId}
+          {...(summary === undefined ? {} : { summary })}
+          onStarted={(started) => {
+            panels.open([{ kind: 'session', id: started, folder: content.folder }], {
+              kind: 'replace',
+              panelId: panel.id,
+            });
+          }}
+        />
+      ),
+    };
+  };
+
+  useEffect(() => {
+    preloadOffers(bridge.sessions);
+  }, [bridge]);
 
   useEffect(() => {
     const toggleSidebar = (event: KeyboardEvent) => {
@@ -64,13 +125,27 @@ export function App({ bridge }: { bridge: Bridge }) {
             />
             {/* A thin line between the two sections, as wide as their rows, halfway between them. */}
             <div aria-hidden="true" className="-my-1 shrink-0 border-t border-line" />
-            <SessionsSection sessions={sessions} folders={workspaces.workspaces} />
+            <SessionsSection
+              sessions={sessions}
+              folders={workspaces.workspaces}
+              onNewSession={openNewSession}
+              onOpenSession={openSession}
+            />
           </div>
         </div>
       </aside>
       <main className="min-h-0 min-w-0 flex-1">
-        <PanelArea panels={panels} bridge={bridge.panels} clearsWindowButtons={!sidebarOpen} />
+        <PanelArea
+          panels={panels}
+          bridge={bridge.panels}
+          view={view}
+          clearsWindowButtons={!sidebarOpen}
+        />
       </main>
     </div>
   );
+}
+
+function report(error: unknown): void {
+  console.error('The session page could not open:', error);
 }

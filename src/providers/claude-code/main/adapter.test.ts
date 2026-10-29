@@ -20,6 +20,12 @@ const fakes = vi.hoisted(() => {
     readonly applyFlagSettings = vi.fn(() => Promise.resolve());
     readonly setPermissionMode = vi.fn(() => Promise.resolve());
     readonly interrupt = vi.fn(() => Promise.resolve());
+    // Claude Code's own count of the context, which names the model a session uses.
+    readonly getContextUsage = vi.fn(() =>
+      stalled.has('getContextUsage')
+        ? new Promise<typeof usage>(() => undefined)
+        : Promise.resolve({ ...usage }),
+    );
     closed = false;
     private readonly messages: unknown[] = [];
     private wake: (() => void) | null = null;
@@ -31,10 +37,18 @@ const fakes = vi.hoisted(() => {
     }
 
     initializationResult() {
+      if (stalled.has('initializationResult')) return new Promise<never>(() => undefined);
       return Promise.resolve({
         models: [
           {
+            value: 'default',
+            displayName: 'Default (recommended)',
+            description: 'Opus · Most capable',
+            supportedEffortLevels: ['low', 'high'],
+          },
+          {
             value: 'opus',
+            resolvedModel: 'claude-opus-5',
             displayName: 'Opus',
             description: 'Most capable',
             supportedEffortLevels: ['low', 'high'],
@@ -69,7 +83,11 @@ const fakes = vi.hoisted(() => {
       }
     }
   }
-  return { FakeQuery, queries: [] as FakeQuery[] };
+  // What the fake processes count, which a test may change before they start.
+  const usage = { totalTokens: 1200, maxTokens: 200_000, model: 'claude-opus-5' };
+  // The calls the fake processes never answer, which a test may choose before they start.
+  const stalled = new Set<'initializationResult' | 'getContextUsage'>();
+  return { FakeQuery, queries: [] as FakeQuery[], usage, stalled };
 });
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -79,20 +97,31 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     return fake;
   }),
   getSessionMessages: vi.fn(() => Promise.resolve([])),
+  getSessionInfo: vi.fn(() => Promise.resolve({ sessionId: 's', summary: 'Fix the build' })),
   listSessions: vi.fn(() => Promise.resolve([])),
 }));
 
 const init = { type: 'system', subtype: 'init', permissionMode: 'auto', model: 'claude-opus-5' };
 const result = { type: 'result', subtype: 'success', is_error: false, result: 'Done' };
-const opus = { id: 'opus', label: 'Opus', description: 'Most capable', efforts: ['low', 'high'] };
+// Claude Code's own default row goes, since the model it stands for is listed.
+const opus = {
+  id: 'opus',
+  label: 'Opus',
+  description: 'Most capable',
+  efforts: ['low', 'high'],
+  default: true,
+};
 
 let gatewaysDir: string;
 beforeEach(() => {
   fakes.queries.length = 0;
+  fakes.usage.model = 'claude-opus-5';
+  fakes.stalled.clear();
   gatewaysDir = mkdtempSync(join(tmpdir(), 'gateways-'));
   writeFileSync(join(gatewaysDir, 'work.json'), '{}');
 });
 afterEach(() => {
+  vi.useRealTimers();
   rmSync(gatewaysDir, { recursive: true, force: true });
 });
 
@@ -179,9 +208,10 @@ describe('the Claude Code provider', () => {
     expect(fakes.queries).toHaveLength(0);
   });
 
-  it('lists gateways, and models from a probe that loads no settings files and gets no message', async () => {
+  it('lists gateways, and models from a probe that gets no message, with the model a session uses marked', async () => {
     const provider = createClaudeCodeProvider({ gatewaysDir });
     expect(await provider.listGateways()).toEqual(['work']);
+    // Through a gateway, the probe reads only the gateway's file.
     expect(await provider.listModels('work')).toEqual([opus]);
     const probe = current();
     expect(probe.params.options).toMatchObject({
@@ -191,10 +221,93 @@ describe('the Claude Code provider', () => {
     });
     expect(probe.closed).toBe(true);
     expect(probe.inputs).toEqual([]);
+    // Otherwise it reads the user's own settings, with their hooks off, and no project's.
+    expect(await provider.listModels(null)).toEqual([opus]);
+    expect(current().params.options).toMatchObject({
+      settingSources: ['user'],
+      settings: { disableAllHooks: true },
+    });
+  });
+
+  it('keeps Claude Code’s own default row when no other row is the model a session uses', async () => {
+    const provider = createClaudeCodeProvider({ gatewaysDir });
+    fakes.usage.model = 'claude-elsewhere';
+    expect((await provider.listModels(null)).map((model) => [model.id, model.default])).toEqual([
+      ['default', true],
+      ['opus', undefined],
+    ]);
+  });
+
+  it('closes a probe that has not started within 30 seconds, and fails the list', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    fakes.stalled.add('initializationResult');
+    const listing = createClaudeCodeProvider({ gatewaysDir }).listModels(null);
+    const failed = expect(listing).rejects.toThrow('did not start in time');
+    await vi.waitFor(() => {
+      expect(fakes.queries).toHaveLength(1);
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await failed;
+    expect(current().closed).toBe(true);
+  });
+
+  it('keeps Claude Code’s own default row marked when its count of the context takes too long', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    fakes.stalled.add('getContextUsage');
+    const listing = createClaudeCodeProvider({ gatewaysDir }).listModels(null);
+    await vi.waitFor(() => {
+      expect(fakes.queries).toHaveLength(1);
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect((await listing).map((model) => [model.id, model.default])).toEqual([
+      ['default', true],
+      ['opus', undefined],
+    ]);
+    expect(current().closed).toBe(true);
   });
 });
 
 describe('a Claude Code session', () => {
+  it('starts without a count of the context when Claude Code takes too long to give one', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    fakes.stalled.add('getContextUsage');
+    const events: SessionEvent[] = [];
+    const starting = createClaudeCodeProvider({ gatewaysDir }).start({ cwd: '/work' }, (event) => {
+      events.push(event);
+    });
+    await vi.waitFor(() => {
+      expect(fakes.queries).toHaveLength(1);
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await starting;
+    const lists = events.flatMap((event) => (event.type === 'models' ? [event.models] : []));
+    expect(lists.map((models) => models.map((model) => [model.id, model.default]))).toEqual([
+      [
+        ['default', true],
+        ['opus', undefined],
+      ],
+    ]);
+    expect(events.some((event) => event.type === 'context')).toBe(false);
+  });
+
+  it('reports how much of the context the conversation takes, and the title Claude Code keeps', async () => {
+    const { session, events } = await startSession();
+    expect(events).toContainEqual({ type: 'context', used: 1200, size: 200_000 });
+    current().getContextUsage.mockResolvedValue({
+      totalTokens: 4800,
+      maxTokens: 200_000,
+      model: 'claude-opus-5',
+    });
+    await playTurn(session, events, 'Fix the build');
+    await waitFor(() => events.some((event) => event.type === 'title'));
+    expect(events).toContainEqual({ type: 'context', used: 4800, size: 200_000 });
+    expect(events).toContainEqual({ type: 'title', title: 'Fix the build' });
+    // The same title is not reported again.
+    await playTurn(session, events, 'Again');
+    await waitFor(() => events.filter((event) => event.type === 'context').length === 3);
+    expect(events.filter((event) => event.type === 'title')).toHaveLength(1);
+  });
+
   it('switches the model and the effort in place', async () => {
     const { session, events } = await startSession();
     await session.setModel('haiku');

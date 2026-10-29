@@ -220,6 +220,27 @@ describe('Translator.live', () => {
     ]);
   });
 
+  it('reports how much of the context window the thread takes, as of its last request', () => {
+    const breakdown = (totalTokens: number) => ({
+      totalTokens,
+      inputTokens: totalTokens,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      outputTokens: 0,
+      reasoningOutputTokens: 0,
+    });
+    expect(
+      new Translator(cwd).live('thread/tokenUsage/updated', {
+        ...turn,
+        tokenUsage: {
+          total: breakdown(90_000),
+          last: breakdown(30_000),
+          modelContextWindow: 272_000,
+        },
+      }),
+    ).toEqual([{ type: 'context', used: 30_000, size: 272_000 }]);
+  });
+
   it('reports the title, a rerouted model and the automatic review’s denials', () => {
     const translator = new Translator(cwd);
     expect(

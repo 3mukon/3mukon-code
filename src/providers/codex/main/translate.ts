@@ -15,6 +15,7 @@ import type { ModelReroutedNotification } from './protocol/v2/ModelReroutedNotif
 import type { ReasoningSummaryTextDeltaNotification } from './protocol/v2/ReasoningSummaryTextDeltaNotification';
 import type { ThreadItem } from './protocol/v2/ThreadItem';
 import type { ThreadNameUpdatedNotification } from './protocol/v2/ThreadNameUpdatedNotification';
+import type { ThreadTokenUsageUpdatedNotification } from './protocol/v2/ThreadTokenUsageUpdatedNotification';
 import type { TurnCompletedNotification } from './protocol/v2/TurnCompletedNotification';
 import type { TurnPlanUpdatedNotification } from './protocol/v2/TurnPlanUpdatedNotification';
 
@@ -80,6 +81,17 @@ export class Translator {
         return threadName === undefined || threadName === ''
           ? []
           : [{ type: 'title', title: threadName }];
+      }
+      // The context the thread takes is its last request's tokens, of the model's window.
+      case 'thread/tokenUsage/updated': {
+        const { tokenUsage } = params as ThreadTokenUsageUpdatedNotification;
+        return [
+          {
+            type: 'context',
+            used: tokenUsage.last.totalTokens,
+            size: tokenUsage.modelContextWindow,
+          },
+        ];
       }
       case 'item/autoApprovalReview/completed':
         return this.review(params as ItemGuardianApprovalReviewCompletedNotification);

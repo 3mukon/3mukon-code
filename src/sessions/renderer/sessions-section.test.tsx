@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { SessionSummary } from '../shared/sessions';
 import { SessionsSection, type SessionFolder } from './sessions-section';
@@ -79,6 +79,23 @@ describe('SessionsSection', () => {
     expect(rows()).toEqual(['IdleGrok Buildapi']);
     fireEvent.change(filter, { target: { value: '' } });
     expect(rows()).toHaveLength(4);
+  });
+
+  it('opens a session page with New session, and shows a session clicked in the list', () => {
+    const onNewSession = vi.fn();
+    const onOpenSession = vi.fn();
+    render(
+      <SessionsSection
+        sessions={sessions}
+        folders={folders}
+        onNewSession={onNewSession}
+        onOpenSession={onOpenSession}
+      />,
+    );
+    fireEvent.click(within(region()).getByRole('button', { name: 'New session' }));
+    expect(onNewSession).toHaveBeenCalledOnce();
+    fireEvent.click(within(region()).getByRole('button', { name: /Fix the build/ }));
+    expect(onOpenSession.mock.calls).toEqual([[sessions[0]]]);
   });
 
   it('shows every session again when the chosen workspace leaves the list', () => {

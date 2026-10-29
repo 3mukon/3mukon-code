@@ -5,6 +5,7 @@ import { createClaudeCodeProvider } from '../../providers/claude-code/main/adapt
 import { createCodexProvider } from '../../providers/codex/main/adapter';
 import { createGrokBuildProvider } from '../../providers/grok-build/main/adapter';
 import { SessionHost } from '../../sessions/main/host';
+import { nativeSessionsUi } from '../../sessions/main/native';
 import type { Provider } from '../../sessions/main/provider';
 import { startToolset, type RunningToolset } from '../../toolset/main/server';
 import { nativeWorkspacesUi } from '../../workspaces/main/native';
@@ -31,6 +32,7 @@ void app
       workspaces,
       sessions,
       workspacesUi: (window) => nativeWorkspacesUi(window, t),
+      sessionsUi: (window) => nativeSessionsUi(window, t),
       page: pageUrl(),
     });
     closeBeforeQuitting(sessions, toolset);

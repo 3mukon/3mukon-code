@@ -2,9 +2,9 @@ import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus } from '../../ui/renderer/icons';
 import { Select } from '../../ui/renderer/select';
-import { StatusDot, type Status } from '../../ui/renderer/status-dot';
-import type { SessionStatus } from '../shared/session-state';
+import { StatusDot } from '../../ui/renderer/status-dot';
 import type { SessionSummary } from '../shared/sessions';
+import { statusDots } from './timeline';
 
 // A folder the list can be narrowed to, such as a workspace.
 export interface SessionFolder {
@@ -18,20 +18,22 @@ interface SessionsSectionProps {
   sessions: SessionSummary[];
   // The folders the filter offers, in order.
   folders: SessionFolder[];
+  // Opens a new session page; New session stays disabled without it.
+  onNewSession?: () => void;
+  // Shows a session, as a click on it in the list asks.
+  onOpenSession?: (session: SessionSummary) => void;
 }
 
-const dots: Record<SessionStatus, Status> = {
-  running: 'running',
-  waiting: 'waiting',
-  idle: 'idle',
-  closed: 'done',
-};
-
 // The sidebar's Sessions section: its heading with New session just after it and, while there are
-// folders to choose, the filter just after that; then every session, each labelled with its folder.
-// The filter narrows the list to the sessions in one folder or below it. Without sessions it shows the
-// heading row alone.
-export function SessionsSection({ sessions, folders }: SessionsSectionProps) {
+// folders to choose, the filter just after that; then every session, each labelled with its folder,
+// which a click or Return shows. The filter narrows the list to the sessions in one folder or below
+// it. Without sessions it shows the heading row alone.
+export function SessionsSection({
+  sessions,
+  folders,
+  onNewSession,
+  onOpenSession,
+}: SessionsSectionProps) {
   const { t } = useTranslation();
   const heading = useId();
   const [filterId, setFilterId] = useState<string | null>(null);
@@ -47,13 +49,14 @@ export function SessionsSection({ sessions, folders }: SessionsSectionProps) {
           {t('sessions.heading')}
         </h2>
         {/* New session, a plus icon whose name VoiceOver reads and the tooltip shows; the negative
-            margin keeps the heading's row height. It opens session pages once they exist. */}
+            margin keeps the heading's row height. */}
         <button
           type="button"
-          disabled
+          disabled={onNewSession === undefined}
+          onClick={onNewSession}
           aria-label={t('sessions.newSession')}
           title={t('sessions.newSession')}
-          className="-my-0.5 grid size-5 shrink-0 place-items-center rounded-md text-faint"
+          className="-my-0.5 grid size-5 shrink-0 place-items-center rounded-md text-faint enabled:hover:bg-hover enabled:hover:text-ink"
         >
           <Plus className="size-4" />
         </button>
@@ -74,20 +77,29 @@ export function SessionsSection({ sessions, folders }: SessionsSectionProps) {
       {shown.length > 0 && (
         <ul aria-labelledby={heading} className="min-h-0 overflow-y-auto">
           {shown.map((session) => (
-            <li key={session.id} className="flex h-7 items-center gap-2 rounded-md px-2">
-              <StatusDot status={dots[session.status]} />
-              <span className="sr-only">{t(`sessions.status.${session.status}`)}</span>
-              <span className="min-w-0 flex-1 truncate">
-                {session.title === undefined || session.title === ''
-                  ? t(`providers.${session.provider}`)
-                  : session.title}
-              </span>
-              <span
-                title={session.cwd}
-                className="max-w-[45%] shrink-0 truncate text-[11px] text-faint"
+            <li key={session.id}>
+              <button
+                type="button"
+                disabled={onOpenSession === undefined}
+                onClick={() => {
+                  onOpenSession?.(session);
+                }}
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left enabled:hover:bg-hover"
               >
-                {folderName(session.cwd)}
-              </span>
+                <StatusDot status={statusDots[session.status]} />
+                <span className="sr-only">{t(`sessions.status.${session.status}`)}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {session.title === undefined || session.title === ''
+                    ? t(`providers.${session.provider}`)
+                    : session.title}
+                </span>
+                <span
+                  title={session.cwd}
+                  className="max-w-[45%] shrink-0 truncate text-[11px] text-faint"
+                >
+                  {folderName(session.cwd)}
+                </span>
+              </button>
             </li>
           ))}
         </ul>

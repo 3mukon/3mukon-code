@@ -54,6 +54,8 @@ export interface SessionState {
   sandbox?: SandboxLevel;
   // The models the session can switch to, once the provider has listed them.
   models?: ModelOption[];
+  // How much of the model's context window the conversation takes, once the provider has said.
+  context?: { used: number; size: number | null };
 }
 
 export function initialSessionState(loadingHistory = false): SessionState {
@@ -163,6 +165,8 @@ export function applyEvent(state: SessionState, event: SessionEvent): SessionSta
       };
     case 'models':
       return { ...state, models: event.models };
+    case 'context':
+      return { ...state, context: { used: event.used, size: event.size } };
     case 'replay-finished':
       return { ...state, loadingHistory: false };
     case 'error':

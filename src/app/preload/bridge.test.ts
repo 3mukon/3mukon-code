@@ -30,6 +30,19 @@ describe('createBridge', () => {
     await bridge.workspaces.showMenu('w1');
     await bridge.workspaces.listFolder('w1', 'src/app');
     await bridge.sessions.list();
+    await bridge.sessions.models('codex', null);
+    await bridge.sessions.start({
+      provider: 'codex',
+      cwd: '/Users/me/web',
+      mode: 'auto',
+      gateway: null,
+      model: null,
+      effort: null,
+      sandbox: 'workspace-write',
+      message: 'Hi',
+    });
+    await bridge.sessions.setSandbox('s1', 'read-only');
+    await bridge.sessions.snapshot('s1');
     expect(ipc.invoke.mock.calls).toEqual([
       ['workspaces:get'],
       ['workspaces:add'],
@@ -37,6 +50,22 @@ describe('createBridge', () => {
       ['workspaces:show-menu', 'w1'],
       ['workspaces:list-folder', 'w1', 'src/app'],
       ['sessions:list'],
+      ['sessions:models', 'codex', null],
+      [
+        'sessions:start',
+        {
+          provider: 'codex',
+          cwd: '/Users/me/web',
+          mode: 'auto',
+          gateway: null,
+          model: null,
+          effort: null,
+          sandbox: 'workspace-write',
+          message: 'Hi',
+        },
+      ],
+      ['sessions:set-sandbox', 's1', 'read-only'],
+      ['sessions:snapshot', 's1'],
     ]);
   });
 
@@ -57,13 +86,17 @@ describe('createBridge', () => {
     const bridge = createBridge(ipc, () => '');
     const workspaces = vi.fn();
     const sessions = vi.fn();
+    const events = vi.fn();
     const stop = bridge.workspaces.onChange(workspaces);
     bridge.sessions.onChange(sessions);
+    bridge.sessions.onEvent(events);
     send('workspaces:changed', { workspaces: [], selectedId: null });
     send('sessions:changed', []);
+    send('sessions:event', { id: 's1', seq: 1, event: { type: 'turn-started' } });
     stop();
     send('workspaces:changed', { workspaces: [], selectedId: null });
     expect(workspaces.mock.calls).toEqual([[{ workspaces: [], selectedId: null }]]);
     expect(sessions.mock.calls).toEqual([[[]]]);
+    expect(events.mock.calls).toEqual([['s1', 1, { type: 'turn-started' }]]);
   });
 });

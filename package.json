@@ -52,6 +52,8 @@
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-i18next": "17.1.0",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "smol-toml": "1.9.1",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3",

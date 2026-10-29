@@ -25,7 +25,25 @@ function fakeBridge(
       showMenu: () => Promise.resolve(),
       listFolder: () => Promise.resolve({ entries: [] }),
     },
-    sessions: { list: () => Promise.resolve(sessions), onChange: () => () => undefined },
+    sessions: {
+      list: () => Promise.resolve(sessions),
+      onChange: () => () => undefined,
+      providers: () => Promise.resolve(['claude-code']),
+      dayFolder: () => Promise.resolve('/Users/me/3mukon-code/2026-10-28'),
+      gateways: () => Promise.resolve([]),
+      models: () => Promise.resolve([]),
+      confirmYolo: () => Promise.resolve(false),
+      start: () => Promise.resolve('s9'),
+      send: () => Promise.resolve(),
+      interrupt: () => Promise.resolve(),
+      setMode: () => Promise.resolve(false),
+      setGateway: () => Promise.resolve(),
+      setModel: () => Promise.resolve(),
+      setEffort: () => Promise.resolve(),
+      setSandbox: () => Promise.resolve(),
+      snapshot: () => Promise.resolve(null),
+      onEvent: () => () => undefined,
+    },
     panels: { itemsAt: () => Promise.resolve([]) },
   };
 }
@@ -55,7 +73,6 @@ describe('App', () => {
     const heading = within(sessions).getByRole('heading', { name: 'Sessions' });
     const newSession = within(sessions).getByRole('button', { name: 'New session' });
     expect(heading.parentElement?.contains(newSession)).toBe(true);
-    expect(newSession).toHaveProperty('disabled', true);
     expect(sessions.textContent).toBe('Sessions');
     // The Workspaces section comes first, and a thin line, hidden from VoiceOver, separates the two.
     const line = workspaces.nextElementSibling;
@@ -115,6 +132,55 @@ describe('App', () => {
     expect(header()?.className).toContain('pl-5');
     fireEvent.keyDown(window, { key: 'b', metaKey: true });
     expect(header()?.className).toContain('pl-[84px]');
+  });
+
+  it('opens a session page with New session, in the selected workspace or else the day’s folder', async () => {
+    await renderApp(
+      fakeBridge({
+        workspaces: [{ id: 'w1', name: 'web', path: '/Users/me/web', trusted: true }],
+        selectedId: 'w1',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'New session' }));
+    const page = within(screen.getByRole('main')).getByRole('region', { name: 'New session' });
+    expect(within(page).getByText('web').title).toBe('/Users/me/web');
+    within(page).getByRole('textbox', { name: 'Message Claude Code' });
+    cleanup();
+    await renderApp();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'New session' }));
+      await Promise.resolve();
+    });
+    const day = within(screen.getByRole('main')).getByRole('region', { name: 'New session' });
+    expect(within(day).getByText('2026-10-28').title).toBe('/Users/me/3mukon-code/2026-10-28');
+  });
+
+  it('shows a session clicked in the list in a panel of its own, titled by the session', async () => {
+    await renderApp(
+      fakeBridge({ workspaces: [], selectedId: null }, [
+        {
+          id: 's1',
+          provider: 'codex',
+          sessionId: 'thread-1',
+          cwd: '/Users/me/web',
+          title: 'Fix the build',
+          status: 'running',
+          openedAt: 1,
+        },
+      ]),
+    );
+    const row = () =>
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Fix the build/,
+      });
+    fireEvent.click(row());
+    const panel = within(screen.getByRole('main')).getByRole('region', { name: 'Fix the build' });
+    expect(panel.textContent).toContain('Running');
+    // A second click shows the same panel.
+    fireEvent.click(row());
+    expect(
+      within(screen.getByRole('main')).getAllByRole('region', { name: 'Fix the build' }),
+    ).toHaveLength(1);
   });
 
   it('hides the sidebar with Command-B and shows it again', async () => {

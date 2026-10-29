@@ -31,7 +31,7 @@ interface PaneProps {
 }
 
 // One pane of the main area: a header with the status, title, detail and close button, as tall as the
-// title bar, above a scrolling body. The pane takes focus from the keyboard as a whole, and marks
+// title bar, above a body that its content lays out and scrolls itself. The pane takes focus from the keyboard as a whole, and marks
 // itself as the current one while it has focus. Its title and detail are its handle, by which it
 // drags when its parent lets it; in the title bar, they and the button still take clicks.
 export function Pane({
@@ -91,9 +91,7 @@ export function Pane({
           </button>
         )}
       </header>
-      <div className="min-h-0 overflow-auto px-5 pt-2 pb-5 font-mono text-[12.5px]/[1.75] text-muted">
-        {children}
-      </div>
+      <div className="grid min-h-0 min-w-0">{children}</div>
     </section>
   );
 }

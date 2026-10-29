@@ -32,6 +32,48 @@
       "waiting": "等待你的回应",
       "idle": "空闲",
       "closed": "已结束"
+    },
+    "confirm": {
+      "cancel": "取消"
+    },
+    "yolo": {
+      "message": "以 yolo 模式运行此会话？",
+      "detail": "在 yolo 模式下，代理执行每个操作都不会询问，也不会事先经过审查。沙盒仍然有效。",
+      "confirm": "使用 Yolo"
+    },
+    "sandbox": {
+      "read-only": "只读",
+      "workspace-write": "工作区可写",
+      "full-access": "完全访问"
+    },
+    "mode": {
+      "auto": "自动",
+      "yolo": "Yolo"
+    },
+    "page": {
+      "message": "给 {{provider}} 发消息",
+      "send": "发送",
+      "stop": "停止",
+      "working": "工作中",
+      "provider": "提供方",
+      "gateway": "网关",
+      "model": "模型",
+      "effort": "推理强度",
+      "mode": "权限模式",
+      "sandbox": "沙盒",
+      "noGateway": "不使用网关",
+      "defaultModel": "默认模型",
+      "defaultEffort": "默认强度",
+      "loadingModels": "正在加载模型…",
+      "failed": "本轮失败。",
+      "startFailed": "无法启动会话。",
+      "approval": "等待你的批准",
+      "question": "等待你的回答",
+      "ended": "会话已结束。",
+      "activity": "活动",
+      "context": "{{used}} / {{size}}（{{share}}）",
+      "contextDetail": "上下文窗口已用 {{used}} / {{size}} 个令牌（{{share}}）",
+      "contextTokens": "上下文已用 {{tokens}} 个令牌"
     }
   },
   "panels": {

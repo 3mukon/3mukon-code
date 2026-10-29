@@ -1,7 +1,15 @@
-import { useEffect, useRef, useState, type CSSProperties, type DragEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { Divider } from '../../ui/renderer/divider';
 import { Pane } from '../../ui/renderer/pane';
+import type { Status } from '../../ui/renderer/status-dot';
 import type { PanelContent, PanelsBridge } from '../shared/panels';
 import { arrange, neighbour, zoneAt, type Box, type Direction, type Rect } from './geometry';
 import { itemDragType, readItemDrag } from './item-drag';
@@ -11,14 +19,28 @@ import {
   inOpeningOrder,
   panelsOf,
   type Move,
+  type Panel,
   type Side,
   type Target,
 } from './layout';
 import type { Panels } from './use-panels';
 
+// What a panel shows, as whoever composes the area decides: its header's title, detail, the detail's
+// tooltip and status, and its body. What is left out keeps the area's own: the panel's name and
+// folder, and an empty body.
+export interface PanelView {
+  title?: string;
+  detail?: string;
+  detailTitle?: string;
+  status?: Status;
+  statusLabel?: string;
+  body?: ReactNode;
+}
+
 interface PanelAreaProps {
   panels: Panels;
   bridge: PanelsBridge;
+  view?: (panel: Panel) => PanelView;
   // macOS's window buttons lie over the area's top-left corner, as they do while the sidebar is
   // hidden.
   clearsWindowButtons: boolean;
@@ -54,7 +76,7 @@ const panelDragType = 'application/x-3mukon-code-panel';
 // downwards, opening a session page in its folder; ⌘W closes the focused panel; ⌘1 to ⌘9 focus the
 // panels in reading order; ⌥⌘ and an arrow focus the next panel that way, and ⇧⌥⌘ and an arrow swap
 // the focused panel with it. Dividers take focus with Tab and move with the arrow keys.
-export function PanelArea({ panels, bridge, clearsWindowButtons }: PanelAreaProps) {
+export function PanelArea({ panels, bridge, view, clearsWindowButtons }: PanelAreaProps) {
   const { t } = useTranslation();
   const root = useRef<HTMLDivElement>(null);
   const elements = useRef(new Map<string, HTMLElement>());
@@ -201,7 +223,8 @@ export function PanelArea({ panels, bridge, clearsWindowButtons }: PanelAreaProp
       {inOpeningOrder(ordered).map((panel) => {
         const box = arrangement.panels.get(panel.id);
         if (box === undefined) return null;
-        const { title, detail, path } = describe(panel.content, t('panels.sessionPage'));
+        const own = describe(panel.content, t('panels.sessionPage'));
+        const shown = view?.(panel) ?? {};
         return (
           <div
             key={panel.id}
@@ -216,9 +239,11 @@ export function PanelArea({ panels, bridge, clearsWindowButtons }: PanelAreaProp
                   elements.current.delete(panel.id);
                 };
               }}
-              title={title}
-              detail={detail}
-              detailTitle={path}
+              title={shown.title ?? own.title}
+              detail={shown.detail ?? own.detail}
+              detailTitle={shown.detailTitle ?? own.path}
+              {...(shown.status === undefined ? {} : { status: shown.status })}
+              {...(shown.statusLabel === undefined ? {} : { statusLabel: shown.statusLabel })}
               focused={panel.id === panels.focusedId}
               inTitleBar={box.y === 0}
               clearsWindowButtons={clearsWindowButtons && box.x === 0 && box.y === 0}
@@ -238,7 +263,9 @@ export function PanelArea({ panels, bridge, clearsWindowButtons }: PanelAreaProp
                 setDrop(null);
               }}
               closeLabel={t('panels.close')}
-            />
+            >
+              {shown.body}
+            </Pane>
             {drop?.kind === 'panel' && drop.panelId === panel.id && <DropZone zone={drop.zone} />}
           </div>
         );
@@ -326,14 +353,14 @@ function openingAt(target: DropTarget): Target {
   return { kind: 'beside', panelId: target.panelId, side: target.zone };
 }
 
-// A panel's title, and its folder's name with the full path: a session page goes by the given title,
-// a file by its name.
+// A panel's own title, and its folder's name with the full path: a session page or session goes by
+// the given title, a file by its name.
 function describe(content: PanelContent, sessionPage: string) {
   const path = folderOf(content);
   const folder = nameOf(path);
-  return content.kind === 'session-page'
-    ? { title: sessionPage, detail: folder, path }
-    : { title: nameOf(content.path), detail: folder, path: content.path };
+  return content.kind === 'file'
+    ? { title: nameOf(content.path), detail: folder, path: content.path }
+    : { title: sessionPage, detail: folder, path };
 }
 
 // The last name in a path, or the path itself for the startup disk's root.

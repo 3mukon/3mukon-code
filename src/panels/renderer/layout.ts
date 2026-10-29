@@ -87,7 +87,7 @@ export function contentOf(item: DroppedItem): PanelContent {
 
 // The folder a panel's content is in, where a session page opened from it starts.
 export function folderOf(content: PanelContent): string {
-  if (content.kind === 'session-page') return content.folder;
+  if (content.kind !== 'file') return content.folder;
   const parent = content.path.slice(0, content.path.lastIndexOf('/'));
   return parent === '' ? '/' : parent;
 }

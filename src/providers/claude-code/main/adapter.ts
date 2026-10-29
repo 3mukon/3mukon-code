@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { rmSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  getSessionInfo,
   getSessionMessages,
   listSessions,
   query,
@@ -12,6 +14,7 @@ import {
   type PermissionMode as ClaudePermissionMode,
   type PermissionResult,
   type Query,
+  type SDKControlGetContextUsageResponse,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import type {
@@ -48,6 +51,18 @@ const EFFORT_LEVELS = new Set<string>([
   'xhigh',
   'max',
 ] satisfies EffortLevel[]);
+
+// How long a probe gives Claude Code to start before the list of models fails.
+const PROBE_TIMEOUT_MS = 30_000;
+// How long Claude Code's own count of the context may take before it is left out.
+const COUNT_TIMEOUT_MS = 5_000;
+
+// The folders of the probes still listing models, removed as the app's process exits, should it quit
+// during a probe, so that quitting leaves none behind.
+const probeFolders = new Set<string>();
+process.on('exit', () => {
+  for (const folder of probeFolders) rmSync(folder, { recursive: true, force: true });
+});
 
 // Claude Code's effort level for the app's choice; throws for a level Claude Code does not have.
 function effortLevel(effort: ReasoningEffort | null): EffortLevel | null {
@@ -119,36 +134,83 @@ async function sessionSettings(
 }
 
 // The models a session would have, from a Claude Code that initializes and is closed before any message,
-// so that no session is recorded. It loads no settings files, so that none of the user's or a project's
-// hooks run; a gateway's file is the one it reads.
+// so that no session is recorded, with the model it would use marked as the default. Through a gateway
+// it reads only the gateway's file; otherwise it reads the user's own settings, with their hooks off,
+// so that the default is the model they set. It never reads a project's settings, whose hooks and
+// servers could run from a folder no one trusted yet. The app opens none of these files itself. A
+// Claude Code that has not started within the probe's time is closed, and the list fails.
 async function probeModels(gatewayFile: string | null): Promise<ModelOption[]> {
   const cwd = await mkdtemp(join(tmpdir(), 'claude-code-models-'));
+  probeFolders.add(cwd);
   const input = new InputQueue();
   const probe = query({
     prompt: input,
     options: {
       cwd,
-      settingSources: [],
       persistSession: false,
-      ...(gatewayFile === null ? {} : { settings: gatewayFile }),
+      ...(gatewayFile === null
+        ? { settingSources: ['user'], settings: { disableAllHooks: true } }
+        : { settingSources: [], settings: gatewayFile }),
     },
   });
   try {
-    return modelOptions((await probe.initializationResult()).models);
+    const init = await withinTime(
+      probe.initializationResult(),
+      PROBE_TIMEOUT_MS,
+      'Claude Code did not start in time to list its models.',
+    );
+    return modelOptions(init.models, (await countContext(probe))?.model);
   } finally {
     input.end();
     probe.close();
+    probeFolders.delete(cwd);
     await rm(cwd, { recursive: true, force: true });
   }
 }
 
-function modelOptions(models: ModelInfo[]): ModelOption[] {
-  return models.map((model) => ({
-    id: model.value,
-    label: model.displayName,
-    ...(model.description === '' ? {} : { description: model.description }),
-    efforts: model.supportedEffortLevels ?? [],
-  }));
+// The models a session can choose, with the one it uses when it chooses none, as Claude Code reports
+// it, marked as the default. Claude Code's own default row stands for that model, so it goes unless no
+// other row is that model.
+function modelOptions(models: ModelInfo[], current: string | undefined): ModelOption[] {
+  const isCurrent = (model: ModelInfo) =>
+    current !== undefined && (model.value === current || model.resolvedModel === current);
+  const own = models.find((model) => model.value !== 'default' && isCurrent(model));
+  return models.flatMap((model) => {
+    if (model.value === 'default' && own !== undefined) return [];
+    const marked = model === own || (own === undefined && model.value === 'default');
+    return [
+      {
+        id: model.value,
+        label: model.displayName,
+        ...(model.description === '' ? {} : { description: model.description }),
+        efforts: model.supportedEffortLevels ?? [],
+        ...(marked ? { default: true } : {}),
+      },
+    ];
+  });
+}
+
+// Claude Code's own count of the context, from the last response's usage and local estimates without
+// asking the API, which names the model in use; nothing when the count fails or takes too long.
+function countContext(query: Query): Promise<SDKControlGetContextUsageResponse | undefined> {
+  return withinTime(
+    query.getContextUsage({ detail: 'summary' }),
+    COUNT_TIMEOUT_MS,
+    'Claude Code did not count the context in time.',
+  ).catch(() => undefined);
+}
+
+// The promise's value, or a rejection with the message once ms have passed without one.
+function withinTime<Value>(promise: Promise<Value>, ms: number, message: string): Promise<Value> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(message));
+    }, ms);
+  });
+  return Promise.race([promise, late]).finally(() => {
+    clearTimeout(timer);
+  });
 }
 
 function errorMessage(error: unknown): string {
@@ -194,6 +256,8 @@ class ClaudeCodeSession implements ProviderSession {
   private pendingGateway: string | null | undefined;
   // The gateway switch under way, which a message waits for; it never rejects.
   private switching: Promise<void> | null = null;
+  // The title last reported.
+  private title: string | undefined;
 
   // Resolves once Claude Code has started and answered the SDK's initialization.
   static async open(
@@ -368,7 +432,32 @@ class ClaudeCodeSession implements ProviderSession {
     await this.connection.query.applyFlagSettings(
       sandboxSettings(this.settings.sandbox, this.settings.folders, false),
     );
-    this.onEvent({ type: 'models', models: modelOptions(init.models) });
+    const usage = await countContext(this.connection.query);
+    this.onEvent({ type: 'models', models: modelOptions(init.models, usage?.model) });
+    if (usage !== undefined) {
+      this.onEvent({ type: 'context', used: usage.totalTokens, size: usage.maxTokens });
+    }
+  }
+
+  // After each turn, how much of the context window the conversation takes, from Claude Code's own
+  // count without asking the API, and the title Claude Code keeps for the session: the one the user
+  // gave it, the one it wrote itself, or else its first prompt.
+  private async afterTurn(): Promise<void> {
+    // Without a count, or once the session has closed, nothing is reported; the next turn tries again.
+    const usage = await this.process().then(countContext, () => undefined);
+    if (usage !== undefined) {
+      this.onEvent({ type: 'context', used: usage.totalTokens, size: usage.maxTokens });
+    }
+    try {
+      const info = await getSessionInfo(this.settings.sessionId, { dir: this.settings.cwd });
+      const title = info?.customTitle ?? info?.summary;
+      if (title !== undefined && title !== '' && title !== this.title) {
+        this.title = title;
+        this.onEvent({ type: 'title', title });
+      }
+    } catch {
+      // The transcript is not there yet; the next turn tries again.
+    }
   }
 
   // Gateway switches run one after another, between turns.
@@ -473,6 +562,7 @@ class ClaudeCodeSession implements ProviderSession {
     } else {
       this.onEvent(event);
     }
+    void this.afterTurn();
     // A gateway asked for during the turn takes over before the next turn.
     if (this.pendingGateway !== undefined) {
       const gateway = this.pendingGateway;

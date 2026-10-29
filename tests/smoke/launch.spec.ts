@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { withApp } from './app';
 
@@ -51,11 +53,48 @@ test('the page reaches the main process only through the bridge’s functions', 
             'showMenu:function',
           ],
         ],
-        ['sessions', ['list:function', 'onChange:function']],
+        [
+          'sessions',
+          [
+            'confirmYolo:function',
+            'dayFolder:function',
+            'gateways:function',
+            'interrupt:function',
+            'list:function',
+            'models:function',
+            'onChange:function',
+            'onEvent:function',
+            'providers:function',
+            'send:function',
+            'setEffort:function',
+            'setGateway:function',
+            'setMode:function',
+            'setModel:function',
+            'setSandbox:function',
+            'snapshot:function',
+            'start:function',
+          ],
+        ],
         ['panels', ['itemsAt:function']],
       ],
       electron: [],
     });
+    // The sessions answer through the bridge without starting anything: the providers the app
+    // composed, Codex among them once the toolset runs, and the day's folder for a first session
+    // page, which is not made until a session starts there.
+    const answers = await window.evaluate(async () => {
+      const page = globalThis as unknown as {
+        bridge: { sessions: { providers(): Promise<string[]>; dayFolder(): Promise<string> } };
+      };
+      return {
+        providers: await page.bridge.sessions.providers(),
+        dayFolder: await page.bridge.sessions.dayFolder(),
+      };
+    });
+    expect(answers.providers).toEqual(['claude-code', 'codex', 'grok-build']);
+    expect(answers.dayFolder).toMatch(
+      new RegExp(`^${join(homedir(), '3mukon-code')}/\\d{4}-\\d{2}-\\d{2}$`),
+    );
   });
 });
 

@@ -234,6 +234,12 @@ describe('the rest of a session', () => {
     ]);
   });
 
+  it('reports how many tokens of its context window the session takes', () => {
+    expect(translate([{ sessionUpdate: 'usage_update', used: 52_000, size: 256_000 }])).toEqual([
+      { type: 'context', used: 52_000, size: 256_000 },
+    ]);
+  });
+
   it('reads the model and effort from the configuration options', () => {
     expect(
       currentChoices([

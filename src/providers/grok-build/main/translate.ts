@@ -86,6 +86,9 @@ export class Translator {
         return update.title == null || update.title === ''
           ? []
           : [{ type: 'title', title: update.title }];
+      // How many tokens of its context window the session takes, as ACP reports it.
+      case 'usage_update':
+        return [{ type: 'context', used: update.used, size: update.size }];
       case 'current_mode_update': {
         const mode = modeOf(update.currentModeId);
         return mode === undefined ? [] : [{ type: 'mode', mode }];

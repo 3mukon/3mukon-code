@@ -364,13 +364,16 @@ describe('the Codex provider', () => {
         type: 'models',
         models: [
           { id: 'gpt-proxy', label: 'gpt-proxy', efforts: [] },
+          // The model Codex uses when the thread chooses none, and each model's own effort.
           {
             id: 'gpt-default',
             label: 'Default',
             description: 'The usual one',
             efforts: ['low', 'medium'],
+            default: true,
+            defaultEffort: 'medium',
           },
-          { id: 'gpt-small', label: 'Small', efforts: ['low'] },
+          { id: 'gpt-small', label: 'Small', efforts: ['low'], defaultEffort: 'low' },
         ],
       },
     ]);

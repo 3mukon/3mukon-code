@@ -39,6 +39,15 @@ function fold(events: SessionEvent[], state = initialSessionState()): SessionSta
 }
 
 describe('applyEvent', () => {
+  it('keeps the latest count of the context the conversation takes', () => {
+    expect(
+      fold([
+        { type: 'context', used: 1200, size: 200_000 },
+        { type: 'context', used: 4800, size: null },
+      ]).context,
+    ).toEqual({ used: 4800, size: null });
+  });
+
   it('assembles a streamed message, and a full message replaces it', () => {
     const streamed = fold([
       { type: 'message-delta', id: 'm1', role: 'agent', text: 'Refactor' },
