@@ -80,6 +80,13 @@ export default {
       to: { path: '^src/', pathNot: ['^src/workspaces/', '^src/ui/', '^src/i18n/'] },
     },
     {
+      name: 'files-only-to-ui-and-i18n',
+      comment: 'The files module uses only the ui and i18n modules (src/files/README.md).',
+      severity: 'error',
+      from: { path: '^src/files/' },
+      to: { path: '^src/', pathNot: ['^src/files/', '^src/ui/', '^src/i18n/'] },
+    },
+    {
       name: 'panels-only-to-ui-and-i18n',
       comment: 'The panels module uses only the ui and i18n modules (src/panels/README.md).',
       severity: 'error',

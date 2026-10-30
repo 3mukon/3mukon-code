@@ -39,7 +39,7 @@ test('the page reaches the main process only through the bridge’s functions', 
       };
     });
     expect(bridge).toEqual({
-      parts: ['panels', 'sessions', 'workspaces'],
+      parts: ['files', 'panels', 'sessions', 'workspaces'],
       calls: [
         [
           'workspaces',
@@ -82,6 +82,16 @@ test('the page reaches the main process only through the bridge’s functions', 
           ],
         ],
         ['panels', ['itemsAt:function']],
+        [
+          'files',
+          [
+            'confirmClose:function',
+            'onChange:function',
+            'open:function',
+            'save:function',
+            'watch:function',
+          ],
+        ],
       ],
       electron: [],
     });

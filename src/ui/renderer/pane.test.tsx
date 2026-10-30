@@ -26,6 +26,25 @@ describe('Pane', () => {
     expect(pane.getAttribute('aria-current')).toBe('true');
   });
 
+  it('marks unsaved changes with a dot in its close button, which VoiceOver hears after the title', () => {
+    render(
+      <Pane
+        title="a.ts"
+        unsaved
+        unsavedLabel="Unsaved changes"
+        focused
+        onFocus={vi.fn()}
+        onClose={vi.fn()}
+        closeLabel="Close panel"
+      />,
+    );
+    const pane = screen.getByRole('region', { name: 'a.ts' });
+    expect(pane.textContent).toBe('a.tsUnsaved changes');
+    const close = screen.getByRole('button', { name: 'Close panel' });
+    expect(close.querySelector('.rounded-full')?.className).toContain('group-hover/close:hidden');
+    expect(close.querySelector('svg')?.getAttribute('class')).toContain('group-hover/close:block');
+  });
+
   it('dims while another pane has focus, and asks for focus when pressed or focused', () => {
     const onFocus = vi.fn();
     render(

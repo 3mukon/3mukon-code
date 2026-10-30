@@ -16,7 +16,8 @@ tags: []
 - `usePanels` (`renderer/use-panels.ts`): the layout and the focused panel as React state, with what changes them, for the area itself and for whatever opens items in it.
 - `PanelArea` (`renderer/panel-area.tsx`), the main area:
   - Each panel takes its box in the area (`arrange` in `renderer/geometry.ts`), and the panels stay in the page in the order they were opened, so that a split or a close never moves a panel's content elsewhere in the page and nothing in it starts over. Each split gets the ui module's divider.
-  - Each panel is the ui module's pane, with a close button. What it shows comes from whoever composes the area (`PanelView`): its title, detail, status and body. What is left out keeps the area's own: a session page or session goes by New session and a file by its name, each with its folder's name and the full path as the tooltip, and an empty body. The focused panel is marked current and the others dim.
+  - Each panel is the ui module's pane, with a close button. What it shows comes from whoever composes the area (`PanelView`): its title, detail, status, unsaved mark and body. What is left out keeps the area's own: a session page or session goes by New session and a file by its name, each with its folder's name and the full path as the tooltip, and an empty body. The focused panel is marked current and the others dim.
+  - A panel may ask before it closes (`confirmClose` in its `PanelView`), from its close button or ⌘W, and before a drop in its middle takes its place; it stays when the answer is no.
   - The area starts at the window's top edge: the headers of the panels at the top lie in the title bar and move the window from their empty part, and the header under macOS's window buttons, which lie over the area while the sidebar is hidden, leaves room for them. While no panel is open, an empty strip there moves the window.
   - Drops: a folder or file dragged from one of the app's trees (`renderer/item-drag.ts`) or from the Finder fills the empty area; near a panel's edge, within a quarter of its width or height, it splits the panel and opens on that side; in its middle it takes the panel's place. A highlight shows where. Several items open one beside the other. Finder items reach the main process as the paths of their files, and come back as folders and files.
   - Moving: a panel dragged by its title and folder name onto another panel moves beside it near its edge, leaving its place as a close does, and in its middle the two swap places; it never drops on itself. A moved panel keeps its id, so what it shows does not start over.
@@ -26,7 +27,7 @@ tags: []
 
 ## Not responsible for
 
-- What a panel shows: the app module composes it, from the sessions module's session pages and, later, the files module's editor.
+- What a panel shows: the app module composes it, from the sessions module's session pages and the files module's editors, which decide whether a panel may close.
 - Reading files, or checking that a file lies inside a workspace or was dropped: the files module does when it opens one.
 - Starting drags from the trees: the workspaces module does, and the app module gives its drags this module's format.
 - Tabs inside a panel, and keeping the layout across a restart, which are deferred.
@@ -45,4 +46,4 @@ tags: []
 
 - A panel keeps its id while it is open, and the panels stay in the page in the order they were opened.
 - Items reach panels by absolute path only; a drag from a tree carries the path of a row inside a workspace.
-- The layout, its geometry and the drag format have unit tests (`renderer/*.test.ts`); the area is rendered with a fake bridge (`renderer/panel-area.test.tsx`); dropped items are checked on real folders (`main/items.test.ts`); and a smoke test drags tree rows into the built app's main area, works its panels from the keyboard and moves them (`tests/smoke/panels.spec.ts`).
+- The layout, its geometry and the drag format have unit tests (`renderer/*.test.ts`); the area is rendered with a fake bridge, a panel that asks before it closes among its panels (`renderer/panel-area.test.tsx`); dropped items are checked on real folders (`main/items.test.ts`); and a smoke test drags tree rows into the built app's main area, works its panels from the keyboard and moves them (`tests/smoke/panels.spec.ts`).

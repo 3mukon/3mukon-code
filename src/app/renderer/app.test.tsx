@@ -51,6 +51,13 @@ function fakeBridge(
       onEvent: () => () => undefined,
     },
     panels: { itemsAt: () => Promise.resolve([]) },
+    files: {
+      open: () => Promise.resolve({ kind: 'text', text: '', bom: false }),
+      save: () => Promise.resolve({ saved: true }),
+      watch: () => Promise.resolve(),
+      onChange: () => () => undefined,
+      confirmClose: () => Promise.resolve('cancel'),
+    },
   };
 }
 

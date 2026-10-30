@@ -1,6 +1,9 @@
 import { homedir } from 'node:os';
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
+import type { FileService } from '../../files/main/files';
+import type { FilesUi } from '../../files/main/native';
+import { MAX_EDITABLE_BYTES } from '../../files/shared/files';
 import { droppedItems } from '../../panels/main/items';
 import type { RememberedChoices } from '../../sessions/main/choices';
 import type { SessionHost } from '../../sessions/main/host';
@@ -20,6 +23,10 @@ interface BridgeServices {
   workspacesUi: (window: BrowserWindow) => WorkspacesUi;
   // The confirmations the sessions ask for, attached to the window that asked.
   sessionsUi: (window: BrowserWindow) => SessionsUi;
+  // The files the editors read, write and watch.
+  files: FileService;
+  // The question the editors ask, attached to the window that asked.
+  filesUi: (window: BrowserWindow) => FilesUi;
   // The page the app's windows show.
   page: string;
 }
@@ -33,6 +40,9 @@ const sandbox = z.enum(['read-only', 'workspace-write', 'full-access']);
 const name = z.string().min(1).max(200);
 const effort = z.string().min(1).max(50);
 const text = z.string().max(200_000);
+// A file's name, and the text an editor saves, which may have grown from what the editor opens.
+const fileName = z.string().min(1).max(1024);
+const fileText = z.string().max(2 * MAX_EDITABLE_BYTES);
 const base64 = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/);
 // An image the user sends with a message, of a type and size every provider takes.
 const sentImage = z
@@ -80,6 +90,8 @@ export function serveBridge({
   choices,
   workspacesUi,
   sessionsUi,
+  files,
+  filesUi,
   page,
 }: BridgeServices): void {
   function handle<Values extends unknown[]>(
@@ -181,8 +193,31 @@ export function serveBridge({
   handle(channels.sessions.snapshot, z.tuple([id]), (_window, session) =>
     sessions.snapshot(session),
   );
-  handle(channels.panels.itemsAt, z.tuple([z.array(path).max(100)]), (_window, paths) =>
-    droppedItems(paths),
+  handle(channels.panels.itemsAt, z.tuple([z.array(path).max(100)]), async (_window, paths) => {
+    const items = await droppedItems(paths);
+    files.grant(items.filter((item) => item.kind === 'file').map((item) => item.path));
+    return items;
+  });
+  handle(channels.files.open, z.tuple([path]), (_window, file) => files.open(file));
+  handle(channels.files.save, z.tuple([path, fileText]), (_window, file, content) =>
+    files.save(file, content),
+  );
+  // A window's files are watched until it lists others, or until it goes.
+  const watching = new Set<number>();
+  handle(channels.files.watch, z.tuple([z.array(path).max(500)]), (window, paths) => {
+    const contents = window.webContents;
+    const id = contents.id;
+    if (!watching.has(id)) {
+      watching.add(id);
+      contents.once('destroyed', () => {
+        watching.delete(id);
+        files.forget(id);
+      });
+    }
+    files.watch(id, paths);
+  });
+  handle(channels.files.confirmClose, z.tuple([fileName]), (window, file) =>
+    filesUi(window).confirmClose(file),
   );
 
   workspaces.onChange((list) => {
@@ -193,6 +228,9 @@ export function serveBridge({
   });
   sessions.onEvent((session, seq, event) => {
     broadcast(channels.sessions.event, { id: session, seq, event });
+  });
+  files.onChange((file) => {
+    broadcast(channels.files.changed, file);
   });
 }
 

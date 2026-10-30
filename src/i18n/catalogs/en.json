@@ -125,7 +125,72 @@
   "panels": {
     "sessionPage": "New session",
     "close": "Close panel",
-    "resize": "Resize panels"
+    "resize": "Resize panels",
+    "unsaved": "Unsaved changes"
+  },
+  "files": {
+    "notice": {
+      "binary": "{{name}} isn’t a text file, so it can’t be edited here.",
+      "tooLarge": "{{name}} is larger than {{size}}, too large to edit here.",
+      "missing": "{{name}} no longer exists.",
+      "unreadable": "{{name}} can’t be read.",
+      "outside": "{{name}} isn’t in a workspace, so it can’t be opened here."
+    },
+    "changed": {
+      "message": "This file changed on disk.",
+      "reload": "Reload",
+      "keep": "Keep Editing"
+    },
+    "deleted": "This file was removed from disk. Saving writes it again.",
+    "failed": {
+      "denied": "The file couldn’t be saved: you don’t have permission to write it.",
+      "outside": "The file couldn’t be saved: it isn’t in a workspace.",
+      "failed": "The file couldn’t be saved."
+    },
+    "bar": {
+      "dismiss": "OK"
+    },
+    "close": {
+      "message": "Do you want to save the changes you made to “{{name}}”?",
+      "detail": "Your changes will be lost if you don’t save them.",
+      "save": "Save",
+      "cancel": "Cancel",
+      "discard": "Don’t Save"
+    },
+    "leave": {
+      "message": "Discard your unsaved changes?",
+      "detail": "Some open files have changes that haven’t been saved. They will be lost.",
+      "cancel": "Cancel",
+      "discard": "Discard Changes"
+    },
+    "editor": {
+      "controlCharacter": "Control character",
+      "close": "close",
+      "find": "Find",
+      "replace": "Replace",
+      "next": "next",
+      "previous": "previous",
+      "all": "all",
+      "matchCase": "match case",
+      "regexp": "regexp",
+      "byWord": "by word",
+      "replaceOne": "replace",
+      "replaceAll": "replace all",
+      "currentMatch": "current match",
+      "onLine": "on line",
+      "replacedMatches": "replaced $ matches",
+      "replacedMatchOnLine": "replaced match on line $",
+      "goToLine": "Go to line",
+      "go": "go",
+      "selectionDeleted": "Selection deleted",
+      "foldedCode": "folded code",
+      "unfold": "unfold",
+      "to": "to",
+      "foldedLines": "Folded lines",
+      "unfoldedLines": "Unfolded lines",
+      "foldLine": "Fold line",
+      "unfoldLine": "Unfold line"
+    }
   },
   "providers": {
     "claude-code": "Claude Code",

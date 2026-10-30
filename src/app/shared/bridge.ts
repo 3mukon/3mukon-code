@@ -1,3 +1,4 @@
+import type { FilesBridge } from '../../files/shared/files';
 import type { PanelsBridge } from '../../panels/shared/panels';
 import type { SessionsBridge } from '../../sessions/shared/sessions';
 import type { WorkspacesBridge } from '../../workspaces/shared/workspaces';
@@ -8,6 +9,7 @@ export interface Bridge {
   workspaces: WorkspacesBridge;
   sessions: SessionsBridge;
   panels: PanelsBridge;
+  files: FilesBridge;
 }
 
 // The bridge's IPC channels: one per call the main process answers, and one per notification it sends.
@@ -48,5 +50,12 @@ export const channels = {
   },
   panels: {
     itemsAt: 'panels:items-at',
+  },
+  files: {
+    open: 'files:open',
+    save: 'files:save',
+    watch: 'files:watch',
+    changed: 'files:changed',
+    confirmClose: 'files:confirm-close',
   },
 } as const;

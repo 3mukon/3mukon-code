@@ -1,6 +1,8 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
+import { FileService } from '../../files/main/files';
+import { keepUnsavedChanges, nativeFilesUi } from '../../files/main/native';
 import { mainTranslator } from '../../i18n/main/i18n';
 import { createClaudeCodeProvider } from '../../providers/claude-code/main/adapter';
 import { createCodexProvider } from '../../providers/codex/main/adapter';
@@ -31,15 +33,25 @@ void app
     const toolset = await startToolsetIfPossible(version);
     const sessions = new SessionHost(providers(data, version, toolset));
     const workspaces = new Workspaces(fileStorage(data));
+    // The editors' files: those in the workspaces, and those dropped on a window.
+    const files = new FileService(() =>
+      workspaces.list().workspaces.map((workspace) => workspace.path),
+    );
     serveBridge({
       workspaces,
       sessions,
       choices: new RememberedChoices(choiceStorage(data), dayRoot(homedir())),
       workspacesUi: (window) => nativeWorkspacesUi(window, t),
       sessionsUi: (window) => nativeSessionsUi(window, t),
+      files,
+      filesUi: (window) => nativeFilesUi(window, t),
       page: pageUrl(),
     });
     closeBeforeQuitting(sessions, toolset);
+    // A window whose editors hold unsaved changes asks before it closes.
+    app.on('browser-window-created', (_event, window) => {
+      keepUnsavedChanges(window, t);
+    });
 
     createMainWindow();
     // Clicking the Dock icon of a running app without windows opens a new one.

@@ -1,3 +1,4 @@
+import type { CloseAnswer, OpenedFile, SaveResult } from '../../files/shared/files';
 import type { DroppedItem } from '../../panels/shared/panels';
 import type { ModelOption, ProviderId, SessionEvent } from '../../sessions/shared/events';
 import type {
@@ -94,6 +95,16 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
           channels.panels.itemsAt,
           items.map((item) => pathForFile(item)),
         ) as Promise<DroppedItem[]>,
+    },
+    files: {
+      open: (path) => invoke(channels.files.open, path) as Promise<OpenedFile>,
+      save: (path, text) => invoke(channels.files.save, path, text) as Promise<SaveResult>,
+      watch: (paths) => invoke(channels.files.watch, paths) as Promise<void>,
+      onChange: (listener) =>
+        subscribe(channels.files.changed, (value) => {
+          listener(value as string);
+        }),
+      confirmClose: (name) => invoke(channels.files.confirmClose, name) as Promise<CloseAnswer>,
     },
   };
 }

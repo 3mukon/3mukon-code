@@ -26,14 +26,17 @@ import {
 import type { Panels } from './use-panels';
 
 // What a panel shows, as whoever composes the area decides: its header's title, detail, the detail's
-// tooltip and status, and its body. What is left out keeps the area's own: the panel's name and
-// folder, and an empty body.
+// tooltip and status, whether it holds unsaved changes, and its body. What is left out keeps the
+// area's own: the panel's name and folder, and an empty body. A panel may also be asked before it
+// closes or something else takes its place, and stays when the answer is no.
 export interface PanelView {
   title?: string;
   detail?: string;
   detailTitle?: string;
   status?: Status;
   statusLabel?: string;
+  unsaved?: boolean;
+  confirmClose?: () => Promise<boolean>;
   body?: ReactNode;
 }
 
@@ -70,7 +73,8 @@ const panelDragType = 'application/x-3mukon-code-panel';
 // A folder or file dropped from a tree or the Finder fills the empty area; near a panel's edge it
 // splits that panel and opens on that side, and in a panel's middle it takes the panel's place. A
 // panel dragged by its title onto another panel moves beside it near its edge, and in its middle the
-// two swap places.
+// two swap places. A panel that asks before it closes is asked first, also before a drop takes its
+// place.
 //
 // The keyboard, from anywhere in the window: ⌘D splits the focused panel to the right and ⇧⌘D
 // downwards, opening a session page in its folder; ⌘W closes the focused panel; ⌘1 to ⌘9 focus the
@@ -90,6 +94,18 @@ export function PanelArea({ panels, bridge, view, clearsWindowButtons }: PanelAr
   const arrangement = arrange(panels.layout);
   const focused = ordered.find((panel) => panel.id === panels.focusedId);
 
+  // Runs what closes a panel, or puts something else in its place, once the panel lets it.
+  const whenClosable = (panel: Panel | undefined, then: () => void) => {
+    const confirmClose = panel === undefined ? undefined : view?.(panel).confirmClose;
+    if (confirmClose === undefined) {
+      then();
+      return;
+    }
+    confirmClose().then((closable) => {
+      if (closable) then();
+    }, reportClose);
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const command = commandFor(event);
@@ -104,7 +120,9 @@ export function PanelArea({ panels, bridge, view, clearsWindowButtons }: PanelAr
           });
           break;
         case 'close':
-          panels.close(focused.id);
+          whenClosable(focused, () => {
+            panels.close(focused.id);
+          });
           break;
         case 'focus-index':
           nextFocus = ordered[command.index]?.id;
@@ -187,15 +205,22 @@ export function PanelArea({ panels, bridge, view, clearsWindowButtons }: PanelAr
       return;
     }
     const at = openingAt(target);
+    const replaced =
+      at.kind === 'replace' ? ordered.find((panel) => panel.id === at.panelId) : undefined;
+    const openThere = (contents: PanelContent[]) => {
+      whenClosable(replaced, () => {
+        panels.open(contents, at);
+      });
+    };
     const dragged = readItemDrag(event.dataTransfer);
     if (dragged !== null) {
-      panels.open([contentOf(dragged)], at);
+      openThere([contentOf(dragged)]);
       return;
     }
     const files = [...event.dataTransfer.files];
     if (files.length === 0) return;
     bridge.itemsAt(files).then((items) => {
-      if (items.length > 0) panels.open(items.map(contentOf), at);
+      if (items.length > 0) openThere(items.map(contentOf));
     }, report);
   };
 
@@ -244,6 +269,8 @@ export function PanelArea({ panels, bridge, view, clearsWindowButtons }: PanelAr
               detailTitle={shown.detailTitle ?? own.path}
               {...(shown.status === undefined ? {} : { status: shown.status })}
               {...(shown.statusLabel === undefined ? {} : { statusLabel: shown.statusLabel })}
+              unsaved={shown.unsaved ?? false}
+              unsavedLabel={t('panels.unsaved')}
               focused={panel.id === panels.focusedId}
               inTitleBar={box.y === 0}
               clearsWindowButtons={clearsWindowButtons && box.x === 0 && box.y === 0}
@@ -251,7 +278,9 @@ export function PanelArea({ panels, bridge, view, clearsWindowButtons }: PanelAr
                 panels.focus(panel.id);
               }}
               onClose={() => {
-                panels.close(panel.id);
+                whenClosable(panel, () => {
+                  panels.close(panel.id);
+                });
               }}
               onDragStart={(event) => {
                 moving.current = panel.id;
@@ -403,4 +432,8 @@ function dividerPlace(direction: 'row' | 'column', ratio: number, box: Box): CSS
 
 function report(error: unknown): void {
   console.error('The dropped items could not be opened:', error);
+}
+
+function reportClose(error: unknown): void {
+  console.error('The panel could not be asked whether it may close:', error);
 }

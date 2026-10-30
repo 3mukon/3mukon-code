@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useFileEditors } from '../../files/renderer/use-file-editors';
 import { writeItemDrag } from '../../panels/renderer/item-drag';
 import { contentOf, panelsOf, type Panel } from '../../panels/renderer/layout';
 import { PanelArea, type PanelView } from '../../panels/renderer/panel-area';
@@ -11,6 +12,7 @@ import { statusDots } from '../../sessions/renderer/timeline';
 import { preloadOffers } from '../../sessions/renderer/use-offers';
 import { useSessions } from '../../sessions/renderer/use-sessions';
 import { useWorkspaces } from '../../workspaces/renderer/use-workspaces';
+import type { TreeItem } from '../../workspaces/renderer/workspace-tree';
 import { WorkspacesSection } from '../../workspaces/renderer/workspaces-section';
 import type { Bridge } from '../shared/bridge';
 
@@ -23,15 +25,17 @@ import type { Bridge } from '../shared/bridge';
 // the panel area, blank until something opens in it. The workspaces' tree rows drag into the panel
 // area, and open in it from the keyboard. New session opens a session page in the selected
 // workspace's folder, or while there is none in the day's folder in ~/3mukon-code; a session in the list shows in its
-// panel, or opens in one. Session pages and sessions fill their panels, titled by the session once it
-// runs. As the window opens, it asks for what session pages offer, each provider's models among them,
-// so that a page has them when it opens.
+// panel, or opens in one, and so does a file opened from a tree. Session pages and sessions fill their
+// panels, titled by the session once it runs, and files open in editors, which mark unsaved changes
+// and ask about them before their panels close. As the window opens, it asks for what session pages
+// offer, each provider's models among them, so that a page has them when it opens.
 export function App({ bridge }: { bridge: Bridge }) {
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const workspaces = useWorkspaces(bridge.workspaces);
   const sessions = useSessions(bridge.sessions);
   const panels = usePanels();
+  const fileEditors = useFileEditors(bridge.files);
 
   const openNewSession = () => {
     const selected = workspaces.workspaces.find(
@@ -52,9 +56,20 @@ export function App({ bridge }: { bridge: Bridge }) {
     else panels.open([{ kind: 'session', id: session.id, folder: session.cwd }]);
   };
 
+  const openItem = (item: TreeItem) => {
+    const shown = panelsOf(panels.layout).find(
+      (panel) => panel.content.kind === 'file' && panel.content.path === item.path,
+    );
+    if (item.kind === 'file' && shown !== undefined) panels.focus(shown.id);
+    else panels.open([contentOf(item)]);
+  };
+
   const view = (panel: Panel): PanelView => {
     const { content } = panel;
-    if (content.kind === 'file') return {};
+    if (content.kind === 'file') {
+      const file = fileEditors.panel(panel.id, content.path);
+      return { body: file.body, unsaved: file.unsaved, confirmClose: file.confirmClose };
+    }
     const sessionId = content.kind === 'session' ? content.id : null;
     const summary = sessions.find((session) => session.id === sessionId);
     return {
@@ -119,9 +134,7 @@ export function App({ bridge }: { bridge: Bridge }) {
               onDragItem={(item, dataTransfer) => {
                 writeItemDrag(dataTransfer, item);
               }}
-              onOpenItem={(item) => {
-                panels.open([contentOf(item)]);
-              }}
+              onOpenItem={openItem}
             />
             {/* A thin line between the two sections, as wide as their rows, halfway between them. */}
             <div aria-hidden="true" className="-my-1 shrink-0 border-t border-line" />

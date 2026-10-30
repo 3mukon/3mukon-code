@@ -3,7 +3,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { DroppedItem, PanelsBridge } from '../shared/panels';
 import { itemDragType } from './item-drag';
-import { PanelArea } from './panel-area';
+import type { Panel } from './layout';
+import { PanelArea, type PanelView } from './panel-area';
 import { usePanels } from './use-panels';
 
 beforeAll(() => {
@@ -43,18 +44,35 @@ afterEach(() => {
 function Area({
   bridge,
   clearsWindowButtons,
+  view,
 }: {
   bridge: PanelsBridge;
   clearsWindowButtons: boolean;
+  view?: (panel: Panel) => PanelView;
 }) {
   return (
-    <PanelArea panels={usePanels()} bridge={bridge} clearsWindowButtons={clearsWindowButtons} />
+    <PanelArea
+      panels={usePanels()}
+      bridge={bridge}
+      clearsWindowButtons={clearsWindowButtons}
+      {...(view === undefined ? {} : { view })}
+    />
   );
 }
 
-function renderArea(found: DroppedItem[] = [], clearsWindowButtons = false) {
+function renderArea(
+  found: DroppedItem[] = [],
+  clearsWindowButtons = false,
+  view?: (panel: Panel) => PanelView,
+) {
   const bridge = { itemsAt: vi.fn<PanelsBridge['itemsAt']>(() => Promise.resolve(found)) };
-  const { container } = render(<Area bridge={bridge} clearsWindowButtons={clearsWindowButtons} />);
+  const { container } = render(
+    <Area
+      bridge={bridge}
+      clearsWindowButtons={clearsWindowButtons}
+      {...(view === undefined ? {} : { view })}
+    />,
+  );
   return { bridge, area: container.firstElementChild as HTMLElement };
 }
 
@@ -180,6 +198,37 @@ describe('PanelArea', () => {
     expect(screen.queryByRole('region', { name: 'a.ts' })).toBeNull();
     expect(panel('New session').getAttribute('aria-current')).toBe('true');
     expect(screen.queryByRole('separator')).toBeNull();
+  });
+
+  it('marks a panel’s unsaved changes, and asks it before it closes or a drop takes its place', async () => {
+    const confirmClose = vi.fn<() => Promise<boolean>>(() => Promise.resolve(false));
+    const { area } = renderArea([], false, (shown) =>
+      shown.content.kind === 'file' ? { unsaved: true, confirmClose } : {},
+    );
+    drag('drop', area, fromTree({ kind: 'file', path: '/Users/me/a.ts' }));
+    within(panel('a.ts')).getByText('Unsaved changes');
+    const close = within(panel('a.ts')).getByRole('button', { name: 'Close panel' });
+    expect(close.querySelector('.rounded-full')).not.toBeNull();
+
+    // While the panel says no, it stays: closed from its header or with ⌘W, or replaced by a drop.
+    fireEvent.click(close);
+    await settle();
+    fireEvent.keyDown(window, { key: 'w', metaKey: true });
+    await settle();
+    drag('drop', panel('a.ts'), fromTree({ kind: 'file', path: '/Users/me/b.ts' }), 500, 300);
+    await settle();
+    expect(confirmClose).toHaveBeenCalledTimes(3);
+    expect(
+      screen.getAllByRole('region').map((region) => region.getAttribute('aria-label')),
+    ).toEqual(['a.ts']);
+
+    // Once it says yes, the drop takes its place, and the next close closes it.
+    confirmClose.mockResolvedValue(true);
+    drag('drop', panel('a.ts'), fromTree({ kind: 'file', path: '/Users/me/b.ts' }), 500, 300);
+    await settle();
+    fireEvent.click(within(panel('b.ts')).getByRole('button', { name: 'Close panel' }));
+    await settle();
+    expect(screen.queryByRole('region')).toBeNull();
   });
 
   it('splits, focuses and closes panels from the keyboard, and the keyboard focus follows', () => {

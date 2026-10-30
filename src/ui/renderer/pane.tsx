@@ -11,6 +11,11 @@ interface PaneProps {
   status?: Status;
   // The status in words, for VoiceOver.
   statusLabel?: string;
+  // The pane holds unsaved changes: its close button shows a dot until the pointer or the keyboard
+  // reaches it, as the close buttons of macOS's documents do, and VoiceOver hears the label after the
+  // title.
+  unsaved?: boolean;
+  unsavedLabel?: string;
   // The other panes are dimmed while this one has focus.
   focused: boolean;
   onFocus: () => void;
@@ -40,6 +45,8 @@ export function Pane({
   detailTitle,
   status,
   statusLabel,
+  unsaved = false,
+  unsavedLabel,
   focused,
   onFocus,
   onClose,
@@ -73,6 +80,7 @@ export function Pane({
           className="flex min-w-0 items-center gap-2.5 [-webkit-app-region:no-drag]"
         >
           <span className="truncate">{title}</span>
+          {unsaved && unsavedLabel !== undefined && <span className="sr-only">{unsavedLabel}</span>}
           {detail !== undefined && (
             <small title={detailTitle} className="truncate text-xs font-normal text-faint">
               {detail}
@@ -85,9 +93,19 @@ export function Pane({
             aria-label={closeLabel}
             title={closeLabel}
             onClick={onClose}
-            className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-faint [-webkit-app-region:no-drag] hover:bg-hover hover:text-ink"
+            className="group/close ml-auto grid size-5 shrink-0 place-items-center rounded-md text-faint [-webkit-app-region:no-drag] hover:bg-hover hover:text-ink"
           >
-            <X className="size-3.5" />
+            {unsaved ? (
+              <>
+                <span
+                  aria-hidden="true"
+                  className="size-2 rounded-full bg-muted group-hover/close:hidden group-focus-visible/close:hidden"
+                />
+                <X className="hidden size-3.5 group-hover/close:block group-focus-visible/close:block" />
+              </>
+            ) : (
+              <X className="size-3.5" />
+            )}
           </button>
         )}
       </header>

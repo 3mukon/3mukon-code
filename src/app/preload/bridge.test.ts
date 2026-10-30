@@ -58,6 +58,10 @@ describe('createBridge', () => {
     await bridge.sessions.copyImage(image);
     await bridge.sessions.saveImage(image);
     await bridge.sessions.imageMenu();
+    await bridge.files.open('/Users/me/web/a.ts');
+    await bridge.files.save('/Users/me/web/a.ts', 'a');
+    await bridge.files.watch(['/Users/me/web/a.ts']);
+    await bridge.files.confirmClose('a.ts');
     expect(ipc.invoke.mock.calls).toEqual([
       ['workspaces:get'],
       ['workspaces:add'],
@@ -99,6 +103,10 @@ describe('createBridge', () => {
       ['sessions:copy-image', image],
       ['sessions:save-image', image],
       ['sessions:image-menu'],
+      ['files:open', '/Users/me/web/a.ts'],
+      ['files:save', '/Users/me/web/a.ts', 'a'],
+      ['files:watch', ['/Users/me/web/a.ts']],
+      ['files:confirm-close', 'a.ts'],
     ]);
   });
 
@@ -120,16 +128,20 @@ describe('createBridge', () => {
     const workspaces = vi.fn();
     const sessions = vi.fn();
     const events = vi.fn();
+    const files = vi.fn();
     const stop = bridge.workspaces.onChange(workspaces);
     bridge.sessions.onChange(sessions);
     bridge.sessions.onEvent(events);
+    bridge.files.onChange(files);
     send('workspaces:changed', { workspaces: [], selectedId: null });
     send('sessions:changed', []);
     send('sessions:event', { id: 's1', seq: 1, event: { type: 'turn-started' } });
+    send('files:changed', '/Users/me/web/a.ts');
     stop();
     send('workspaces:changed', { workspaces: [], selectedId: null });
     expect(workspaces.mock.calls).toEqual([[{ workspaces: [], selectedId: null }]]);
     expect(sessions.mock.calls).toEqual([[[]]]);
     expect(events.mock.calls).toEqual([['s1', 1, { type: 'turn-started' }]]);
+    expect(files.mock.calls).toEqual([['/Users/me/web/a.ts']]);
   });
 });
