@@ -11,6 +11,7 @@ import type {
   ToolKind,
 } from '@agentclientprotocol/sdk';
 import type {
+  MessageImage,
   MessageRole,
   PermissionMode,
   ReasoningEffort,
@@ -102,11 +103,24 @@ export class Translator {
     }
   }
 
+  // A chunk of text, or an image, in the message being streamed.
   private chunk(role: MessageRole, content: ContentBlock): SessionEvent[] {
     const text = content.type === 'text' ? content.text : '';
-    if (text === '') return [];
+    const images =
+      content.type === 'image' && content.data !== ''
+        ? [{ mediaType: content.mimeType, data: content.data }]
+        : [];
+    if (text === '' && images.length === 0) return [];
     if (this.message?.role !== role) this.message = { id: randomUUID(), role };
-    return [{ type: 'message-delta', id: this.message.id, role, text }];
+    return [
+      {
+        type: 'message-delta',
+        id: this.message.id,
+        role,
+        text,
+        ...(images.length === 0 ? {} : { images }),
+      },
+    ];
   }
 
   // A tool call as it starts, and each update after. Grok sends a starting call without a status while
@@ -128,6 +142,7 @@ export class Translator {
     const status = toolStatus(update.status) ?? (started ? 'running' : undefined);
     const command = commandOf(update.rawInput);
     const output = outputOf(content);
+    const images = imagesOf(content);
     const events: SessionEvent[] = [
       {
         type: 'tool',
@@ -138,6 +153,7 @@ export class Translator {
         ...(command === undefined ? {} : { command }),
         ...(paths.length === 0 ? {} : { paths: call.paths }),
         ...(output === undefined ? {} : { output }),
+        ...(images.length === 0 ? {} : { images }),
       },
     ];
     if (status === 'completed') {
@@ -145,6 +161,7 @@ export class Translator {
         ...call.diffs.map((diff, index): SessionEvent => ({
           type: 'file-change',
           change: fileChange(`${id}:${String(index)}`, diff, kind === 'delete', this.cwd),
+          toolId: id,
         })),
       );
     }
@@ -209,6 +226,15 @@ function outputOf(content: readonly ToolCallContent[]): string | undefined {
     item.type === 'content' && item.content.type === 'text' ? [item.content.text] : [],
   );
   return texts.length === 0 ? undefined : texts.join('\n').slice(0, OUTPUT_LIMIT);
+}
+
+// The images a tool call shows.
+function imagesOf(content: readonly ToolCallContent[]): MessageImage[] {
+  return content.flatMap((item) =>
+    item.type === 'content' && item.content.type === 'image'
+      ? [{ mediaType: item.content.mimeType, data: item.content.data }]
+      : [],
+  );
 }
 
 function modeOf(modeId: string): PermissionMode | undefined {

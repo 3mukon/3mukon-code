@@ -1,4 +1,5 @@
 import type {
+  MessageImage,
   ModelOption,
   PermissionMode,
   ProviderId,
@@ -35,8 +36,31 @@ export interface StartRequest {
   model: string | null;
   effort: ReasoningEffort | null;
   sandbox: SandboxLevel;
-  // The first message, which starts the session's first turn.
+  // The first message, which starts the session's first turn, and its images.
   message: string;
+  images: MessageImage[];
+}
+
+// What the user can do with an image the timeline shows, from its menu.
+export type ImageAction = 'copy' | 'save';
+
+// The settings a folder's sessions last used, which a session page opened there starts with. The
+// permission mode is not among them: a session starts in auto unless the user chooses yolo on its page
+// (ADR-0006).
+export interface RememberedChoice {
+  provider: ProviderId;
+  gateway: string | null;
+  model: string | null;
+  effort: ReasoningEffort | null;
+  sandbox: SandboxLevel;
+}
+
+// The settings sessions last used, for the providers the app offers: each folder's, by the folder's
+// absolute path, and those the day folders share, which hold for every day folder in the day root.
+export interface FolderChoices {
+  folders: Record<string, RememberedChoice>;
+  dayRoot: string;
+  dayFolders?: RememberedChoice;
 }
 
 // A session's state as the main process has folded it, after this many of its events.
@@ -64,13 +88,18 @@ export interface SessionsBridge {
   gateways(provider: ProviderId): Promise<string[]>;
   // The models a session through the gateway, or the provider's own configuration, could use.
   models(provider: ProviderId, gateway: string | null): Promise<ModelOption[]>;
+  // The settings sessions last used, each folder's and the day folders'.
+  choices(): Promise<FolderChoices>;
+  // Remembers the settings a session in the folder started with or switched to, for all the day
+  // folders when it is one.
+  rememberChoice(folder: string, choice: RememberedChoice): Promise<void>;
   // Asks the user to confirm yolo for a session page whose session has not started; resolves with
   // whether they did.
   confirmYolo(): Promise<boolean>;
   // Starts a session with its first message, and resolves with the app's id for it.
   start(request: StartRequest): Promise<string>;
-  // Sends a message, starting a turn; only while no turn runs.
-  send(id: string, text: string): Promise<void>;
+  // Sends a message and its images, starting a turn; only while no turn runs.
+  send(id: string, text: string, images: MessageImage[]): Promise<void>;
   // Stops the running turn.
   interrupt(id: string): Promise<void>;
   // Switches the permission mode, to yolo only once the user confirms; resolves with whether it
@@ -84,4 +113,12 @@ export interface SessionsBridge {
   snapshot(id: string): Promise<SessionSnapshot | null>;
   // Calls the listener with every event of every open session, and returns a function that stops it.
   onEvent(listener: SessionEventsListener): () => void;
+  // Puts a message's text, or a PNG image, on the clipboard.
+  copyText(text: string): Promise<void>;
+  copyImage(image: MessageImage): Promise<void>;
+  // Saves an image where the user chooses, and resolves with whether they chose a place.
+  saveImage(image: MessageImage): Promise<boolean>;
+  // Offers what can be done with an image, in a menu at the pointer, and resolves with the user's
+  // choice, or null.
+  imageMenu(): Promise<ImageAction | null>;
 }

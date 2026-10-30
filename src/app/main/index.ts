@@ -1,9 +1,12 @@
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
 import { mainTranslator } from '../../i18n/main/i18n';
 import { createClaudeCodeProvider } from '../../providers/claude-code/main/adapter';
 import { createCodexProvider } from '../../providers/codex/main/adapter';
 import { createGrokBuildProvider } from '../../providers/grok-build/main/adapter';
+import { choiceStorage, RememberedChoices } from '../../sessions/main/choices';
+import { dayRoot } from '../../sessions/main/folders';
 import { SessionHost } from '../../sessions/main/host';
 import { nativeSessionsUi } from '../../sessions/main/native';
 import type { Provider } from '../../sessions/main/provider';
@@ -31,6 +34,7 @@ void app
     serveBridge({
       workspaces,
       sessions,
+      choices: new RememberedChoices(choiceStorage(data), dayRoot(homedir())),
       workspacesUi: (window) => nativeWorkspacesUi(window, t),
       sessionsUi: (window) => nativeSessionsUi(window, t),
       page: pageUrl(),

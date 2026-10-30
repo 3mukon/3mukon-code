@@ -1,6 +1,7 @@
 import type {
   ApprovalAnswer,
   HistoryEntry,
+  MessageImage,
   ModelOption,
   PermissionMode,
   ProviderId,
@@ -59,9 +60,9 @@ export interface Provider {
 export interface ProviderSession {
   // The provider's id for the session.
   readonly id: string;
-  // Starts a turn with the user's message, and resolves once the provider has accepted it; the turn's
-  // progress and end arrive as events. Called only while no turn is running.
-  send(text: string): Promise<void>;
+  // Starts a turn with the user's message and its images, and resolves once the provider has accepted
+  // it; the turn's progress and end arrive as events. Called only while no turn is running.
+  send(text: string, images?: MessageImage[]): Promise<void>;
   // Stops the running turn. Approvals and questions still open resolve as cancelled.
   interrupt(): Promise<void>;
   answerApproval(requestId: string, answer: ApprovalAnswer): Promise<void>;

@@ -404,6 +404,16 @@ describe('starting a session', () => {
 });
 
 describe('turns', () => {
+  it('sends a message’s images in the prompt after its text', async () => {
+    const { session } = await open((onEvent) => provider.start({ cwd: '/work' }, onEvent));
+    await session.send('', [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }]);
+    await fake().prompted();
+    expect(fake().paramsOf('session/prompt')[0]).toEqual({
+      sessionId: 'grok-1',
+      prompt: [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' }],
+    });
+  });
+
   it('sends the message and streams the turn until Grok answers the prompt', async () => {
     const { session, events, until } = await open((onEvent) =>
       provider.start({ cwd: '/work' }, onEvent),

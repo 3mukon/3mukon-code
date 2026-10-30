@@ -1,6 +1,11 @@
 import type { DroppedItem } from '../../panels/shared/panels';
 import type { ModelOption, ProviderId, SessionEvent } from '../../sessions/shared/events';
-import type { SessionSnapshot, SessionSummary } from '../../sessions/shared/sessions';
+import type {
+  FolderChoices,
+  ImageAction,
+  SessionSnapshot,
+  SessionSummary,
+} from '../../sessions/shared/sessions';
 import type { FolderListing, WorkspaceList } from '../../workspaces/shared/workspaces';
 import { channels, type Bridge } from '../shared/bridge';
 
@@ -58,9 +63,12 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
       gateways: (provider) => invoke(channels.sessions.gateways, provider) as Promise<string[]>,
       models: (provider, gateway) =>
         invoke(channels.sessions.models, provider, gateway) as Promise<ModelOption[]>,
+      choices: () => invoke(channels.sessions.choices) as Promise<FolderChoices>,
+      rememberChoice: (folder, choice) =>
+        invoke(channels.sessions.rememberChoice, folder, choice) as Promise<void>,
       confirmYolo: () => invoke(channels.sessions.confirmYolo) as Promise<boolean>,
       start: (request) => invoke(channels.sessions.start, request) as Promise<string>,
-      send: (id, text) => invoke(channels.sessions.send, id, text) as Promise<void>,
+      send: (id, text, images) => invoke(channels.sessions.send, id, text, images) as Promise<void>,
       interrupt: (id) => invoke(channels.sessions.interrupt, id) as Promise<void>,
       setMode: (id, mode) => invoke(channels.sessions.setMode, id, mode) as Promise<boolean>,
       setGateway: (id, gateway) =>
@@ -75,6 +83,10 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
           const { id, seq, event } = value as { id: string; seq: number; event: SessionEvent };
           listener(id, seq, event);
         }),
+      copyText: (text) => invoke(channels.sessions.copyText, text) as Promise<void>,
+      copyImage: (image) => invoke(channels.sessions.copyImage, image) as Promise<void>,
+      saveImage: (image) => invoke(channels.sessions.saveImage, image) as Promise<boolean>,
+      imageMenu: () => invoke(channels.sessions.imageMenu) as Promise<ImageAction | null>,
     },
     panels: {
       itemsAt: (items) =>

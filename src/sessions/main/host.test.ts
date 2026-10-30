@@ -164,7 +164,7 @@ describe('SessionHost', () => {
     await host.setSandbox(id, 'read-only');
     const session = claude.sessions[0];
     if (session === undefined) throw new Error('no session');
-    expect(session.send.mock.calls).toEqual([['Fix the build']]);
+    expect(session.send.mock.calls).toEqual([['Fix the build', []]]);
     expect(session.interrupt).toHaveBeenCalledOnce();
     expect(session.setMode.mock.calls).toEqual([['yolo']]);
     expect(session.setGateway.mock.calls).toEqual([['work']]);

@@ -51,7 +51,7 @@
       "yolo": "Yolo"
     },
     "page": {
-      "message": "给 {{provider}} 发消息",
+      "message": "输入消息",
       "send": "发送",
       "stop": "停止",
       "working": "工作中",
@@ -65,6 +65,10 @@
       "defaultModel": "默认模型",
       "defaultEffort": "默认强度",
       "loadingModels": "正在加载模型…",
+      "settings": "会话设置",
+      "settingsSummary": "会话设置：{{summary}}",
+      "fromUser": "你：",
+      "fromAgent": "{{agent}}：",
       "failed": "本轮失败。",
       "startFailed": "无法启动会话。",
       "approval": "等待你的批准",
@@ -73,7 +77,49 @@
       "activity": "活动",
       "context": "{{used}} / {{size}}（{{share}}）",
       "contextDetail": "上下文窗口已用 {{used}} / {{size}} 个令牌（{{share}}）",
-      "contextTokens": "上下文已用 {{tokens}} 个令牌"
+      "contextTokens": "上下文已用 {{tokens}} 个令牌",
+      "showPlain": "以纯文本显示",
+      "showMarkdown": "以 Markdown 显示",
+      "copy": "拷贝消息",
+      "copied": "已拷贝"
+    },
+    "tool": {
+      "named": "{{kind}}：",
+      "kind": {
+        "read": "读取",
+        "edit": "编辑",
+        "delete": "删除",
+        "move": "移动",
+        "search": "搜索",
+        "execute": "运行",
+        "think": "思考",
+        "fetch": "获取",
+        "switch_mode": "切换模式",
+        "other": "工具"
+      },
+      "status": {
+        "pending": "等待中",
+        "running": "运行中",
+        "completed": "已完成",
+        "failed": "失败"
+      }
+    },
+    "diff": {
+      "notShown": "未显示的行：{{lines}}"
+    },
+    "image": {
+      "copy": "拷贝图像",
+      "save": "将图像存储为…",
+      "fileName": "图像",
+      "alt": "图像 {{index}}",
+      "attached": "要发送的图像",
+      "remove": "移除{{image}}",
+      "refused": {
+        "type": "只能发送 PNG、JPEG、GIF 和 WebP 图像。",
+        "size": "图像太大，缩小后仍无法发送。",
+        "unreadable": "无法读取图像。",
+        "count": "一条消息最多附带 {{limit}} 张图像。"
+      }
     }
   },
   "panels": {
@@ -83,7 +129,7 @@
   },
   "providers": {
     "claude-code": "Claude Code",
-    "codex": "Codex",
+    "codex": "Codex CLI",
     "grok-build": "Grok Build"
   }
 }

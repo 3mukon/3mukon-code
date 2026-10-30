@@ -51,7 +51,7 @@
       "yolo": "Yolo"
     },
     "page": {
-      "message": "Message {{provider}}",
+      "message": "Message",
       "send": "Send",
       "stop": "Stop",
       "working": "Working",
@@ -65,6 +65,10 @@
       "defaultModel": "Default model",
       "defaultEffort": "Default effort",
       "loadingModels": "Loading models…",
+      "settings": "Session settings",
+      "settingsSummary": "Session settings: {{summary}}",
+      "fromUser": "You:",
+      "fromAgent": "{{agent}}:",
       "failed": "The turn failed.",
       "startFailed": "The session couldn’t start.",
       "approval": "Waiting for your approval",
@@ -73,7 +77,49 @@
       "activity": "Activity",
       "context": "{{used}} / {{size}} ({{share}})",
       "contextDetail": "{{used}} of {{size}} tokens of the context window in use ({{share}})",
-      "contextTokens": "{{tokens}} tokens of context"
+      "contextTokens": "{{tokens}} tokens of context",
+      "showPlain": "Show as plain text",
+      "showMarkdown": "Show as Markdown",
+      "copy": "Copy message",
+      "copied": "Copied"
+    },
+    "tool": {
+      "named": "{{kind}}:",
+      "kind": {
+        "read": "Read",
+        "edit": "Edit",
+        "delete": "Delete",
+        "move": "Move",
+        "search": "Search",
+        "execute": "Run",
+        "think": "Think",
+        "fetch": "Fetch",
+        "switch_mode": "Switch mode",
+        "other": "Tool"
+      },
+      "status": {
+        "pending": "Waiting",
+        "running": "Running",
+        "completed": "Done",
+        "failed": "Failed"
+      }
+    },
+    "diff": {
+      "notShown": "Lines not shown: {{lines}}"
+    },
+    "image": {
+      "copy": "Copy Image",
+      "save": "Save Image As…",
+      "fileName": "Image",
+      "alt": "Image {{index}}",
+      "attached": "Images to send",
+      "remove": "Remove {{image}}",
+      "refused": {
+        "type": "Only PNG, JPEG, GIF and WebP images can be sent.",
+        "size": "An image is too large to send, even scaled down.",
+        "unreadable": "An image couldn’t be read.",
+        "count": "A message takes at most {{limit}} images."
+      }
     }
   },
   "panels": {
@@ -83,7 +129,7 @@
   },
   "providers": {
     "claude-code": "Claude Code",
-    "codex": "Codex",
+    "codex": "Codex CLI",
     "grok-build": "Grok Build"
   }
 }

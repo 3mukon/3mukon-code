@@ -25,6 +25,7 @@ import type {
 } from '../../../sessions/main/provider';
 import type {
   ApprovalAnswer,
+  MessageImage,
   ModelOption,
   PermissionMode,
   QuestionAnswer,
@@ -32,6 +33,7 @@ import type {
   SandboxLevel,
   SessionEvent,
 } from '../../../sessions/shared/events';
+import type { SendableImageType } from '../../../sessions/shared/images';
 import { defaultGatewaysDir, existingGatewayPath, gatewayPath, listGateways } from './gateways';
 import { approvalResult, questionResult, toRequest, type ClaudeRequest } from './requests';
 import { sandboxFolders, sandboxSettings, type SandboxFolders } from './sandbox';
@@ -292,17 +294,23 @@ class ClaudeCodeSession implements ProviderSession {
     this.connection = this.connect();
   }
 
-  async send(text: string): Promise<void> {
+  async send(text: string, images: MessageImage[] = []): Promise<void> {
     if (this.switching !== null) await this.switching;
     if (this.closed) throw new Error('The session is closed.');
     this.turnRunning = true;
     // From its first message on, Claude Code keeps a transcript that a new process can continue.
     this.settings.resume = true;
     this.onEvent({ type: 'turn-started' });
-    this.onEvent({ type: 'message', id: randomUUID(), role: 'user', text });
+    this.onEvent({
+      type: 'message',
+      id: randomUUID(),
+      role: 'user',
+      text,
+      ...(images.length === 0 ? {} : { images }),
+    });
     this.connection.input.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content: images.length === 0 ? text : withImages(text, images) },
       parent_tool_use_id: null,
     });
   }
@@ -398,6 +406,9 @@ class ClaudeCodeSession implements ProviderSession {
           allowDangerouslySkipPermissions: true,
           // Text and thinking arrive as they are written.
           includePartialMessages: true,
+          // Claude's thinking as summaries, which recent models leave out unless asked for; where the
+          // API refuses them, Claude Code falls back to none.
+          extraArgs: { 'thinking-display': 'summarized' },
           // Claude Code's own system prompt, as in the CLI; its settings and CLAUDE.md files load as
           // they do there.
           systemPrompt: { type: 'preset', preset: 'claude_code' },
@@ -605,4 +616,20 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
       }
     }
   }
+}
+
+// A message with images as Claude's content blocks: the images first, as Anthropic advises, then the
+// text.
+function withImages(text: string, images: readonly MessageImage[]) {
+  return [
+    ...images.map((image) => ({
+      type: 'image' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: image.mediaType as SendableImageType,
+        data: image.data,
+      },
+    })),
+    ...(text === '' ? [] : [{ type: 'text' as const, text }]),
+  ];
 }

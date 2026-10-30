@@ -90,14 +90,75 @@ describe('applyEvent', () => {
         status: 'completed',
         command: 'pnpm test',
         output: 'ok 1\nok 2\n',
+        changes: [],
       },
+    ]);
+  });
+
+  it('keeps a message’s images, the streamed ones added at its end, and a tool call’s', () => {
+    const png = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
+    const jpeg = { mediaType: 'image/jpeg', data: '/9j/4AAQ' };
+    const state = fold([
+      { type: 'message', id: 'u1', role: 'user', text: 'Look', images: [png] },
+      { type: 'message-delta', id: 'a1', role: 'agent', text: 'Here', images: [png] },
+      { type: 'message-delta', id: 'a1', role: 'agent', text: ' it is', images: [jpeg] },
+      { type: 'message-delta', id: 'a1', role: 'agent', text: '.' },
+      { type: 'tool', id: 't1', kind: 'read', title: 'shot.png', status: 'running' },
+      { type: 'tool', id: 't1', status: 'completed', images: [png] },
+    ]);
+    expect(state.timeline).toEqual([
+      { type: 'message', id: 'u1', role: 'user', text: 'Look', images: [png] },
+      { type: 'message', id: 'a1', role: 'agent', text: 'Here it is.', images: [png, jpeg] },
+      {
+        type: 'tool',
+        id: 't1',
+        kind: 'read',
+        title: 'shot.png',
+        status: 'completed',
+        output: '',
+        changes: [],
+        images: [png],
+      },
+    ]);
+  });
+
+  it('shows the files a tool call changed with the call, and other changes on their own', () => {
+    const change = (id: string, diff: string) =>
+      ({ id, path: 'src/a.ts', kind: 'update', diff }) as const;
+    const state = fold([
+      { type: 'tool', id: 't1', kind: 'edit', title: 'src/a.ts', status: 'running' },
+      { type: 'tool', id: 't1', status: 'completed' },
+      { type: 'file-change', change: change('t1:0', '@@ -1 +1 @@\n-a\n+b\n'), toolId: 't1' },
+      { type: 'file-change', change: change('t1:1', '@@ -1 +1 @@\n-c\n+d\n'), toolId: 't1' },
+      { type: 'file-change', change: change('t1:0', '@@ -1 +1 @@\n-a\n+e\n'), toolId: 't1' },
+      { type: 'file-change', change: change('c9', '@@ -1 +1 @@\n-x\n+y\n'), toolId: 'gone' },
+    ]);
+    expect(state.timeline).toEqual([
+      {
+        type: 'tool',
+        id: 't1',
+        kind: 'edit',
+        title: 'src/a.ts',
+        status: 'completed',
+        output: '',
+        changes: [change('t1:0', '@@ -1 +1 @@\n-a\n+e\n'), change('t1:1', '@@ -1 +1 @@\n-c\n+d\n')],
+      },
+      { type: 'file-change', change: change('c9', '@@ -1 +1 @@\n-x\n+y\n') },
     ]);
   });
 
   it('gives a tool call first seen through its output neutral defaults', () => {
     const state = applyEvent(initialSessionState(), { type: 'tool-output', id: 't9', text: 'x' });
     expect(state.timeline).toEqual([
-      { type: 'tool', id: 't9', kind: 'other', title: '', status: 'pending', output: 'x' },
+      {
+        type: 'tool',
+        id: 't9',
+        kind: 'other',
+        title: '',
+        status: 'pending',
+        output: 'x',
+        changes: [],
+      },
     ]);
   });
 

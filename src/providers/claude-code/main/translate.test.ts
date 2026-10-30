@@ -62,18 +62,15 @@ describe('Translator.live', () => {
     expect(translator.live(init('plan'))).toEqual([]);
   });
 
-  it('reports the model in use from the init message', () => {
+  it('leaves the model to the session’s choice, which the init message names only as resolved', () => {
     const translator = new Translator(cwd);
     const init = {
       type: 'system',
       subtype: 'init',
       permissionMode: 'auto',
-      model: 'claude-opus-5',
+      model: 'claude-opus-5-5',
     } as unknown as SDKMessage;
-    expect(translator.live(init)).toEqual([
-      { type: 'mode', mode: 'auto' },
-      { type: 'settings', model: 'claude-opus-5' },
-    ]);
+    expect(translator.live(init)).toEqual([{ type: 'mode', mode: 'auto' }]);
   });
 
   it('streams text and thinking as deltas, and does not repeat them from the complete message', () => {
@@ -195,6 +192,7 @@ describe('Translator.live', () => {
         kind: 'update',
         diff: '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-old\n+new\n',
       },
+      toolId: 't1',
     });
   });
 
@@ -401,5 +399,43 @@ describe('Translator.history', () => {
     });
     const change = events[5];
     expect(change?.type === 'file-change' ? change.change.diff : '').toContain('+y');
+  });
+});
+
+describe('images', () => {
+  const png = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
+  const block = {
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/png', data: png.data },
+  };
+
+  it('shows the images a tool call returns, such as an image file it read', () => {
+    const translator = new Translator(cwd);
+    translator.live(
+      assistant('u1', [
+        { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/work/app/shot.png' } },
+      ]),
+    );
+    const read = {
+      type: 'user',
+      session_id: 's1',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 't1', content: [block] }],
+      },
+    } as unknown as SDKMessage;
+    expect(translator.live(read)).toEqual([
+      { type: 'tool', id: 't1', status: 'completed', output: '', images: [png] },
+    ]);
+  });
+
+  it('replays the user’s images with their message', () => {
+    const translator = new Translator(cwd);
+    expect(
+      translator.history(
+        historyMessage('user', 'h1', [block, { type: 'text', text: 'What is it?' }]),
+      ),
+    ).toEqual([{ type: 'message', id: 'h1', role: 'user', text: 'What is it?', images: [png] }]);
   });
 });

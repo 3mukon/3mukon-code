@@ -1,6 +1,7 @@
 import type { SDKMessage, SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type {
   FileChange,
+  MessageImage,
   MessageRole,
   PermissionMode,
   SessionEvent,
@@ -119,14 +120,12 @@ export class Translator {
   live(message: SDKMessage): SessionEvent[] {
     switch (message.type) {
       case 'system': {
-        // Each turn starts with an init message, which names the mode and the model in use.
+        // Each turn starts with an init message, which names the mode. It names the model too, but as
+        // Claude Code resolved it, such as claude-opus-5-5 for opus, and the session's model stays the
+        // one it chose, which its list knows.
         if (message.subtype !== 'init') return [];
         const mode = APP_MODES[message.permissionMode];
-        const model = str(message.model);
-        return [
-          ...(mode === undefined ? [] : [{ type: 'mode' as const, mode }]),
-          ...(model === '' ? [] : [{ type: 'settings' as const, model }]),
-        ];
+        return mode === undefined ? [] : [{ type: 'mode', mode }];
       }
       case 'stream_event':
         return message.parent_tool_use_id === null ? this.stream(message.event) : [];
@@ -177,7 +176,10 @@ export class Translator {
     if (!Array.isArray(content)) return [];
     const blocks = content as Exclude<UserContent, string>;
     const text = blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n');
-    return [...userText(message.uuid, text), ...this.toolResults(blocks, undefined)];
+    return [
+      ...userText(message.uuid, text, imagesOf(blocks)),
+      ...this.toolResults(blocks, undefined),
+    ];
   }
 
   // Text and thinking that already arrived streamed are left out of the complete message.
@@ -255,14 +257,18 @@ export class Translator {
         this.taskCreated(block.tool_use_id, output, resultText(block.content));
       if (HIDDEN_TOOLS.has(tool.name)) return [];
       const change = failed ? null : this.fileChange(block.tool_use_id, tool, output);
+      const images = imagesOf(block.content);
       return [
         {
           type: 'tool',
           id: block.tool_use_id,
           status: failed ? 'failed' : 'completed',
           output: resultText(block.content).slice(0, OUTPUT_LIMIT),
+          ...(images.length === 0 ? {} : { images }),
         },
-        ...(change === null ? [] : [{ type: 'file-change' as const, change }]),
+        ...(change === null
+          ? []
+          : [{ type: 'file-change' as const, change, toolId: block.tool_use_id }]),
       ];
     });
   }
@@ -332,8 +338,23 @@ function taskStatus(value: unknown): Task['status'] {
   return value === 'in_progress' || value === 'completed' ? value : 'pending';
 }
 
-function userText(id: string, text: string): SessionEvent[] {
-  return text.trim() === '' ? [] : [{ type: 'message', id, role: 'user', text }];
+function userText(id: string, text: string, images: MessageImage[] = []): SessionEvent[] {
+  if (text.trim() === '' && images.length === 0) return [];
+  return [{ type: 'message', id, role: 'user', text, ...(images.length === 0 ? {} : { images }) }];
+}
+
+// The images among content blocks, as Claude's API gives them in base64.
+function imagesOf(content: unknown): MessageImage[] {
+  if (!Array.isArray(content)) return [];
+  return content.map(asRecord).flatMap((block) => {
+    const source = asRecord(block.source);
+    return block.type === 'image' &&
+      source.type === 'base64' &&
+      typeof source.media_type === 'string' &&
+      typeof source.data === 'string'
+      ? [{ mediaType: source.media_type, data: source.data }]
+      : [];
+  });
 }
 
 function assistantText(content: readonly AssistantBlock[]): string {

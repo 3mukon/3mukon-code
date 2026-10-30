@@ -7,6 +7,7 @@ import {
   client,
   PROTOCOL_VERSION,
   type ClientConnection,
+  type ContentBlock,
   type InitializeResponse,
   type NewSessionRequest,
   type PermissionOption,
@@ -26,6 +27,7 @@ import type {
 import type {
   ApprovalAnswer,
   HistoryEntry,
+  MessageImage,
   ModelOption,
   PermissionMode,
   QuestionAnswer,
@@ -425,27 +427,40 @@ class GrokSession implements ProviderSession {
     this.translator = new Translator(settings.cwd);
   }
 
-  async send(text: string): Promise<void> {
+  async send(text: string, images: MessageImage[] = []): Promise<void> {
     if (this.switching !== null) await this.switching;
     if (this.closed) throw new Error('The session is closed.');
     this.turnRunning = true;
     this.translator.endMessage();
     this.onEvent({ type: 'turn-started' });
-    this.onEvent({ type: 'message', id: randomUUID(), role: 'user', text });
+    this.onEvent({
+      type: 'message',
+      id: randomUUID(),
+      role: 'user',
+      text,
+      ...(images.length === 0 ? {} : { images }),
+    });
+    // Grok takes images in prompts, as its answer to initialize says.
+    const prompt: ContentBlock[] = [
+      ...(text === '' ? [] : [{ type: 'text' as const, text }]),
+      ...images.map((image) => ({
+        type: 'image' as const,
+        mimeType: image.mediaType,
+        data: image.data,
+      })),
+    ];
     // ACP answers a prompt when its turn ends; the turn's progress comes before as session updates. A
     // connection that closes first is the session's end, which closed reports.
     const { connection } = this.agent;
-    connection.agent
-      .request('session/prompt', { sessionId: this.sessionId, prompt: [{ type: 'text', text }] })
-      .then(
-        (response) => {
-          this.endTurn(turnEndedBy(response.stopReason));
-        },
-        (error: unknown) => {
-          if (connection.signal.aborted) return;
-          this.endTurn({ type: 'turn-ended', outcome: 'failed', error: errorMessage(error) });
-        },
-      );
+    connection.agent.request('session/prompt', { sessionId: this.sessionId, prompt }).then(
+      (response) => {
+        this.endTurn(turnEndedBy(response.stopReason));
+      },
+      (error: unknown) => {
+        if (connection.signal.aborted) return;
+        this.endTurn({ type: 'turn-ended', outcome: 'failed', error: errorMessage(error) });
+      },
+    );
   }
 
   // ACP has the client answer what is still open as cancelled once it cancels the turn.

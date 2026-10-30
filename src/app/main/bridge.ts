@@ -2,9 +2,11 @@ import { homedir } from 'node:os';
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import { droppedItems } from '../../panels/main/items';
+import type { RememberedChoices } from '../../sessions/main/choices';
 import type { SessionHost } from '../../sessions/main/host';
 import { dayFolder, makeDayFolder } from '../../sessions/main/folders';
-import type { SessionsUi } from '../../sessions/main/native';
+import { copyImage, copyText, type SessionsUi } from '../../sessions/main/native';
+import { MAX_IMAGE_BASE64, MAX_IMAGES, SENDABLE_IMAGE_TYPES } from '../../sessions/shared/images';
 import type { Workspaces, WorkspacesUi } from '../../workspaces/main/workspaces';
 import { channels } from '../shared/bridge';
 import { isAppPage } from './links';
@@ -12,6 +14,8 @@ import { isAppPage } from './links';
 interface BridgeServices {
   workspaces: Workspaces;
   sessions: SessionHost;
+  // The settings each folder's sessions last used.
+  choices: RememberedChoices;
   // The dialogs and menus the workspaces show, attached to the window that asked.
   workspacesUi: (window: BrowserWindow) => WorkspacesUi;
   // The confirmations the sessions ask for, attached to the window that asked.
@@ -28,7 +32,21 @@ const sandbox = z.enum(['read-only', 'workspace-write', 'full-access']);
 // A gateway's or a model's name, as the provider gave it.
 const name = z.string().min(1).max(200);
 const effort = z.string().min(1).max(50);
-const message = z.string().min(1).max(200_000);
+const text = z.string().max(200_000);
+const base64 = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/);
+// An image the user sends with a message, of a type and size every provider takes.
+const sentImage = z
+  .object({ mediaType: z.enum(SENDABLE_IMAGE_TYPES), data: base64.min(1).max(MAX_IMAGE_BASE64) })
+  .strict();
+const sentImages = z.array(sentImage).max(MAX_IMAGES);
+// An image the timeline shows, which may have come from a provider, to save, or as a PNG to copy.
+const shownImage = z
+  .object({ mediaType: z.string().regex(/^image\/[\w.+-]+$/), data: base64.min(1).max(64_000_000) })
+  .strict();
+const pngImage = shownImage.extend({ mediaType: z.literal('image/png') });
+// A message has text, images or both.
+const hasContent = (message: string, images: unknown[]) =>
+  message.trim() !== '' || images.length > 0;
 const startRequest = z
   .object({
     provider,
@@ -38,7 +56,18 @@ const startRequest = z
     model: name.nullable(),
     effort: effort.nullable(),
     sandbox,
-    message,
+    message: text,
+    images: sentImages,
+  })
+  .strict()
+  .refine((request) => hasContent(request.message, request.images));
+const choice = z
+  .object({
+    provider,
+    gateway: name.nullable(),
+    model: name.nullable(),
+    effort: effort.nullable(),
+    sandbox,
   })
   .strict();
 
@@ -48,6 +77,7 @@ const startRequest = z
 export function serveBridge({
   workspaces,
   sessions,
+  choices,
   workspacesUi,
   sessionsUi,
   page,
@@ -87,10 +117,32 @@ export function serveBridge({
     z.tuple([provider, name.nullable()]),
     (_window, chosen, gateway) => sessions.models(chosen, gateway),
   );
+  handle(channels.sessions.choices, z.tuple([]), () => choices.all(sessions.providerIds()));
+  handle(
+    channels.sessions.rememberChoice,
+    z.tuple([path.startsWith('/'), choice]),
+    (_window, folder, remembered) => {
+      choices.remember(folder, remembered);
+    },
+  );
   handle(channels.sessions.confirmYolo, z.tuple([]), (window) => sessionsUi(window).confirmYolo());
+  handle(channels.sessions.copyText, z.tuple([text]), (_window, value) => copyText(value));
+  handle(channels.sessions.copyImage, z.tuple([pngImage]), (_window, image) => copyImage(image));
+  handle(channels.sessions.saveImage, z.tuple([shownImage]), (window, image) =>
+    sessionsUi(window).saveImage(image),
+  );
+  handle(channels.sessions.imageMenu, z.tuple([]), (window) => sessionsUi(window).imageMenu());
   // A page asks for yolo's confirmation when the user chooses it, before its session starts.
   handle(channels.sessions.start, z.tuple([startRequest]), async (_window, request) => {
-    const { provider: chosen, message: first, gateway, model, effort: level, ...options } = request;
+    const {
+      provider: chosen,
+      message: first,
+      images: attached,
+      gateway,
+      model,
+      effort: level,
+      ...options
+    } = request;
     await makeDayFolder(homedir(), options.cwd);
     const session = await sessions.start(chosen, {
       ...options,
@@ -98,11 +150,13 @@ export function serveBridge({
       ...(model === null ? {} : { model }),
       ...(level === null ? {} : { effort: level }),
     });
-    await sessions.send(session, first);
+    await sessions.send(session, first, attached);
     return session;
   });
-  handle(channels.sessions.send, z.tuple([id, message]), (_window, session, text) =>
-    sessions.send(session, text),
+  handle(
+    channels.sessions.send,
+    z.tuple([id, text, sentImages]).refine(([, message, images]) => hasContent(message, images)),
+    (_window, session, message, images) => sessions.send(session, message, images),
   );
   handle(channels.sessions.interrupt, z.tuple([id]), (_window, session) =>
     sessions.interrupt(session),

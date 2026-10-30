@@ -31,6 +31,14 @@ describe('createBridge', () => {
     await bridge.workspaces.listFolder('w1', 'src/app');
     await bridge.sessions.list();
     await bridge.sessions.models('codex', null);
+    await bridge.sessions.choices();
+    await bridge.sessions.rememberChoice('/Users/me/web', {
+      provider: 'codex',
+      gateway: null,
+      model: 'gpt-6-astra',
+      effort: 'medium',
+      sandbox: 'read-only',
+    });
     await bridge.sessions.start({
       provider: 'codex',
       cwd: '/Users/me/web',
@@ -40,9 +48,16 @@ describe('createBridge', () => {
       effort: null,
       sandbox: 'workspace-write',
       message: 'Hi',
+      images: [],
     });
+    const image = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
+    await bridge.sessions.send('s1', 'Look', [image]);
     await bridge.sessions.setSandbox('s1', 'read-only');
     await bridge.sessions.snapshot('s1');
+    await bridge.sessions.copyText('Hi');
+    await bridge.sessions.copyImage(image);
+    await bridge.sessions.saveImage(image);
+    await bridge.sessions.imageMenu();
     expect(ipc.invoke.mock.calls).toEqual([
       ['workspaces:get'],
       ['workspaces:add'],
@@ -51,6 +66,18 @@ describe('createBridge', () => {
       ['workspaces:list-folder', 'w1', 'src/app'],
       ['sessions:list'],
       ['sessions:models', 'codex', null],
+      ['sessions:choices'],
+      [
+        'sessions:remember-choice',
+        '/Users/me/web',
+        {
+          provider: 'codex',
+          gateway: null,
+          model: 'gpt-6-astra',
+          effort: 'medium',
+          sandbox: 'read-only',
+        },
+      ],
       [
         'sessions:start',
         {
@@ -62,10 +89,16 @@ describe('createBridge', () => {
           effort: null,
           sandbox: 'workspace-write',
           message: 'Hi',
+          images: [],
         },
       ],
+      ['sessions:send', 's1', 'Look', [image]],
       ['sessions:set-sandbox', 's1', 'read-only'],
       ['sessions:snapshot', 's1'],
+      ['sessions:copy-text', 'Hi'],
+      ['sessions:copy-image', image],
+      ['sessions:save-image', image],
+      ['sessions:image-menu'],
     ]);
   });
 

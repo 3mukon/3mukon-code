@@ -1,14 +1,17 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import type { ModelOption, ProviderId } from '../shared/events';
-import type { SessionsBridge } from '../shared/sessions';
+import { choiceIn, withChoice } from '../shared/folders';
+import type { FolderChoices, RememberedChoice, SessionsBridge } from '../shared/sessions';
 
 // What session pages offer to choose from: the providers, each provider's gateways, and the models
-// of each provider through each gateway, keyed as `modelsKey` gives them. Missing until it comes; a
-// list that could not be found is empty.
+// of each provider through each gateway, keyed as `modelsKey` gives them; and the settings sessions
+// last used, each folder's and the day folders', which a page in the folder starts with. Missing until
+// it comes; a list that could not be found is empty.
 interface Lists {
   providers?: ProviderId[];
   gateways: Partial<Record<ProviderId, string[]>>;
   models: Partial<Record<string, ModelOption[]>>;
+  remembered?: FolderChoices;
 }
 
 const NONE: string[] = [];
@@ -64,6 +67,30 @@ class Offers {
       (lists, gateways) => ({ ...lists, gateways: { ...lists.gateways, [provider]: gateways } }),
       [],
     );
+  }
+
+  // Without an answer, pages start with the defaults until one comes.
+  loadRemembered(): void {
+    this.ask<FolderChoices | undefined>(
+      'remembered',
+      true,
+      () => this.bridge.choices(),
+      (lists, remembered) => (remembered === undefined ? lists : { ...lists, remembered }),
+      undefined,
+    );
+  }
+
+  // Keeps the folder's settings, or the day folders' for a day folder, for this window's pages at
+  // once, and in the app's data.
+  remember(folder: string, choice: RememberedChoice): void {
+    this.update((lists) =>
+      lists.remembered === undefined
+        ? lists
+        : { ...lists, remembered: withChoice(lists.remembered, folder, choice) },
+    );
+    this.bridge.rememberChoice(folder, choice).catch((error: unknown) => {
+      console.error('A session’s settings could not be remembered:', error);
+    });
   }
 
   loadModels(provider: ProviderId, gateway: string | null): void {
@@ -124,7 +151,42 @@ function offersOf(bridge: SessionsBridge): Offers {
 // Asks ahead of time for what session pages offer, as the window opens, so that a page shows its
 // provider's models as soon as it opens.
 export function preloadOffers(bridge: SessionsBridge): void {
-  offersOf(bridge).loadProviders();
+  const offers = offersOf(bridge);
+  offers.loadProviders();
+  offers.loadRemembered();
+}
+
+// The settings the folder's sessions last used, or the day folders' in a day folder, as a page there
+// starts with them, or nothing while there are none. A provider the app no longer offers leaves
+// nothing, and a gateway that is gone leaves the provider's own configuration, with its default model
+// and the page's starting effort.
+export function useRemembered(
+  bridge: SessionsBridge,
+  folder: string,
+): RememberedChoice | undefined {
+  const offers = offersOf(bridge);
+  const lists = useSyncExternalStore(offers.subscribe, offers.current);
+  useEffect(() => {
+    offers.loadRemembered();
+  }, [offers]);
+  const remembered =
+    lists.remembered === undefined ? undefined : choiceIn(lists.remembered, folder);
+  if (remembered === undefined) return undefined;
+  if (lists.providers?.includes(remembered.provider) === false) return undefined;
+  const gateways = lists.gateways[remembered.provider];
+  if (remembered.gateway !== null && gateways?.includes(remembered.gateway) === false) {
+    return { ...remembered, gateway: null, model: null, effort: null };
+  }
+  return remembered;
+}
+
+// Remembers the settings a session in the folder started with or switched to.
+export function rememberChoice(
+  bridge: SessionsBridge,
+  folder: string,
+  choice: RememberedChoice,
+): void {
+  offersOf(bridge).remember(folder, choice);
 }
 
 // What a session page offers for its provider and gateway: the providers, the provider's gateways

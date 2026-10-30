@@ -1,6 +1,7 @@
 import type {
   ApprovalRequest,
   FileChange,
+  MessageImage,
   MessageRole,
   ModelOption,
   PermissionMode,
@@ -15,7 +16,7 @@ import type {
 
 export type SessionStatus = 'idle' | 'running' | 'waiting' | 'closed';
 
-interface ToolItem {
+export interface ToolItem {
   type: 'tool';
   id: string;
   kind: ToolKind;
@@ -24,11 +25,15 @@ interface ToolItem {
   command?: string;
   paths?: string[];
   output: string;
+  // The files the call changed, in the order it reported them.
+  changes: FileChange[];
+  images?: MessageImage[];
 }
 
 export type TimelineItem =
-  | { type: 'message'; id: string; role: MessageRole; text: string }
+  | { type: 'message'; id: string; role: MessageRole; text: string; images?: MessageImage[] }
   | ToolItem
+  // A change no tool call in the timeline made.
   | { type: 'file-change'; change: FileChange }
   | { type: 'approval'; request: ApprovalRequest; resolution?: 'answered' | 'cancelled' }
   | { type: 'question'; request: QuestionRequest; resolution?: 'answered' | 'cancelled' }
@@ -95,19 +100,27 @@ export function applyEvent(state: SessionState, event: SessionEvent): SessionSta
         id: event.id,
         role: event.role,
         text: event.text,
+        ...withImages(event.images),
       });
     }
     case 'message-delta': {
       const index = find(state, 'message', event.id);
       const previous = state.timeline[index];
-      const text = (previous?.type === 'message' ? previous.text : '') + event.text;
-      return put(state, index, { type: 'message', id: event.id, role: event.role, text });
+      const before = previous?.type === 'message' ? previous : undefined;
+      return put(state, index, {
+        type: 'message',
+        id: event.id,
+        role: event.role,
+        text: (before?.text ?? '') + event.text,
+        ...withImages([...(before?.images ?? []), ...(event.images ?? [])]),
+      });
     }
     case 'tool': {
       const index = find(state, 'tool', event.id);
       const base = toolAt(state, index, event.id);
       const command = event.command ?? base.command;
       const paths = event.paths ?? base.paths;
+      const images = event.images ?? base.images;
       return put(state, index, {
         type: 'tool',
         id: event.id,
@@ -115,8 +128,10 @@ export function applyEvent(state: SessionState, event: SessionEvent): SessionSta
         title: event.title ?? base.title,
         status: event.status ?? base.status,
         output: event.output ?? base.output,
+        changes: base.changes,
         ...(command === undefined ? {} : { command }),
         ...(paths === undefined ? {} : { paths }),
+        ...withImages(images),
       });
     }
     case 'tool-output': {
@@ -126,11 +141,23 @@ export function applyEvent(state: SessionState, event: SessionEvent): SessionSta
     }
     case 'tasks':
       return { ...state, tasks: event.tasks };
-    case 'file-change':
-      return put(state, find(state, 'file-change', event.change.id), {
-        type: 'file-change',
-        change: event.change,
-      });
+    case 'file-change': {
+      // A change goes with the tool call that made it, so that the timeline shows the call once.
+      const index = event.toolId === undefined ? -1 : find(state, 'tool', event.toolId);
+      const call = state.timeline[index];
+      if (call?.type !== 'tool') {
+        return put(state, find(state, 'file-change', event.change.id), {
+          type: 'file-change',
+          change: event.change,
+        });
+      }
+      const known = call.changes.findIndex((change) => change.id === event.change.id);
+      const changes =
+        known < 0
+          ? [...call.changes, event.change]
+          : call.changes.map((change, at) => (at === known ? event.change : change));
+      return put(state, index, { ...call, changes });
+    }
     case 'approval-requested':
       return put(state, find(state, 'approval', event.request.id), {
         type: 'approval',
@@ -214,7 +241,12 @@ function toolAt(state: SessionState, index: number, id: string): ToolItem {
   const item = state.timeline[index];
   return item?.type === 'tool'
     ? item
-    : { type: 'tool', id, kind: 'other', title: '', status: 'pending', output: '' };
+    : { type: 'tool', id, kind: 'other', title: '', status: 'pending', output: '', changes: [] };
+}
+
+// A message's or a tool call's images, left out while there are none.
+function withImages(images: MessageImage[] | undefined): { images?: MessageImage[] } {
+  return images === undefined || images.length === 0 ? {} : { images };
 }
 
 function errorItem(message: string | undefined): TimelineItem {

@@ -11,11 +11,28 @@
     height: 100%;
   }
 
+  /* The window's page never scrolls: its panes and lists scroll within themselves. */
+  html {
+    overflow: hidden;
+  }
+
   body {
     background: var(--color-frame);
     color: var(--color-ink);
     font: 13px/1.6 var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+
+  /* The paper's grain over the window's background, behind everything on it (DOC-mod-ui). */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: url('../../ui/renderer/grain.svg');
+    opacity: var(--grain-opacity);
+    filter: var(--grain-filter);
   }
 
   :focus-visible {

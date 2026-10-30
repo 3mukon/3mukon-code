@@ -7,6 +7,18 @@ import type { SessionEventsListener, SessionsBridge } from '../shared/sessions';
 import { SessionPage } from './session-page';
 import { preloadOffers } from './use-offers';
 
+// Images read as the composer takes them, without a canvas, which the test's document lacks: every
+// PNG becomes the same small one, and a TIFF is refused.
+vi.mock('./image-input', () => ({
+  readImage: (file: Blob) =>
+    Promise.resolve(
+      file.type === 'image/tiff'
+        ? { refused: 'type' }
+        : { mediaType: file.type, data: 'iVBORw0KGgo=' },
+    ),
+  pngOf: (image: unknown) => Promise.resolve(image),
+}));
+
 beforeAll(() => {
   initI18n(['en-US']);
 });
@@ -26,6 +38,10 @@ function fakeBridge(state: SessionState | null = null) {
     models: vi.fn<SessionsBridge['models']>(() =>
       Promise.resolve([{ id: 'opus', label: 'Opus', efforts: ['high', 'max'] }]),
     ),
+    choices: vi.fn<SessionsBridge['choices']>(() =>
+      Promise.resolve({ folders: {}, dayRoot: '/Users/me/3mukon-code' }),
+    ),
+    rememberChoice: vi.fn<SessionsBridge['rememberChoice']>(() => Promise.resolve()),
     confirmYolo: vi.fn<SessionsBridge['confirmYolo']>(() => Promise.resolve(false)),
     start: vi.fn<SessionsBridge['start']>(() => Promise.resolve('s1')),
     send: vi.fn<SessionsBridge['send']>(() => Promise.resolve()),
@@ -44,6 +60,10 @@ function fakeBridge(state: SessionState | null = null) {
         listeners.delete(listener);
       };
     },
+    copyText: vi.fn<SessionsBridge['copyText']>(() => Promise.resolve()),
+    copyImage: vi.fn<SessionsBridge['copyImage']>(() => Promise.resolve()),
+    saveImage: vi.fn<SessionsBridge['saveImage']>(() => Promise.resolve(true)),
+    imageMenu: vi.fn<SessionsBridge['imageMenu']>(() => Promise.resolve(null)),
   } satisfies SessionsBridge;
   const emit = (seq: number, event: SessionEvent) => {
     act(() => {
@@ -57,7 +77,7 @@ const settle = () => act(() => Promise.resolve());
 const choose = (name: string, value: string) => {
   fireEvent.change(screen.getByRole('combobox', { name }), { target: { value } });
 };
-const composer = () => screen.getByRole('textbox', { name: 'Message Claude Code' });
+const composer = () => screen.getByRole('textbox', { name: 'Message' });
 const chooser = (name: string) => screen.getByRole<HTMLSelectElement>('combobox', { name });
 const options = (name: string) =>
   [...chooser(name).options].map((option) => [option.value, option.textContent]);
@@ -108,6 +128,7 @@ describe('SessionPage', () => {
           sandbox: 'read-only',
           cwd: '/Users/me/web',
           message: 'Fix the build',
+          images: [],
         },
       ],
     ]);
@@ -129,11 +150,12 @@ describe('SessionPage', () => {
       ['mono', 'Mono'],
     ]);
     expect(chooser('Model').value).toBe('');
-    // Medium, although the model's own default is high.
+    // Medium, although the model's own default is high; each level with a capital, as the other
+    // settings have.
     expect(options('Reasoning effort')).toEqual([
-      ['low', 'low'],
-      ['medium', 'medium'],
-      ['high', 'high'],
+      ['low', 'Low'],
+      ['medium', 'Medium'],
+      ['high', 'High'],
     ]);
     expect(chooser('Reasoning effort').value).toBe('medium');
     fireEvent.change(composer(), { target: { value: 'Hi' } });
@@ -148,15 +170,15 @@ describe('SessionPage', () => {
     await settle();
     choose('Model', 'luna');
     expect(options('Reasoning effort')).toEqual([
-      ['low', 'low'],
-      ['high', 'high'],
+      ['low', 'Low'],
+      ['high', 'High'],
     ]);
     expect(chooser('Reasoning effort').value).toBe('low');
     choose('Model', 'terra');
     expect(options('Reasoning effort')).toEqual([
       ['', 'Default effort'],
-      ['low', 'low'],
-      ['max', 'max'],
+      ['low', 'Low'],
+      ['max', 'Max'],
     ]);
     expect(chooser('Reasoning effort').value).toBe('');
     choose('Model', 'mono');
@@ -202,6 +224,71 @@ describe('SessionPage', () => {
     ]);
   });
 
+  it('starts with the settings the folder’s sessions last used, but in auto, and remembers its own', async () => {
+    const { bridge } = fakeBridge();
+    bridge.models.mockResolvedValue(MODELS);
+    bridge.choices.mockResolvedValue({
+      folders: {
+        '/Users/me/web': {
+          provider: 'codex',
+          gateway: null,
+          model: 'luna',
+          effort: 'high',
+          sandbox: 'read-only',
+        },
+      },
+      dayRoot: '/Users/me/3mukon-code',
+    });
+    render(page(bridge));
+    await settle();
+    expect(chooser('Provider').value).toBe('codex');
+    expect(chooser('Model').value).toBe('luna');
+    expect(chooser('Reasoning effort').value).toBe('high');
+    expect(chooser('Permission mode').value).toBe('auto');
+    expect(chooser('Sandbox').value).toBe('read-only');
+    const message = screen.getByRole('textbox', { name: 'Message' });
+    fireEvent.change(message, { target: { value: 'Hi' } });
+    fireEvent.keyDown(message, { key: 'Enter' });
+    expect(bridge.start.mock.calls[0]?.[0]).toMatchObject({
+      provider: 'codex',
+      model: 'luna',
+      effort: 'high',
+      mode: 'auto',
+      sandbox: 'read-only',
+    });
+    await settle();
+    expect(bridge.rememberChoice.mock.calls).toEqual([
+      [
+        '/Users/me/web',
+        { provider: 'codex', gateway: null, model: 'luna', effort: 'high', sandbox: 'read-only' },
+      ],
+    ]);
+  });
+
+  it('lets a remembered model or effort that is no longer offered give way to the default', async () => {
+    const { bridge } = fakeBridge();
+    bridge.models.mockResolvedValue(MODELS);
+    bridge.choices.mockResolvedValue({
+      folders: {
+        '/Users/me/web': {
+          provider: 'claude-code',
+          gateway: null,
+          model: 'gone',
+          effort: 'ultra',
+          sandbox: 'workspace-write',
+        },
+      },
+      dayRoot: '/Users/me/3mukon-code',
+    });
+    render(page(bridge));
+    await settle();
+    expect(chooser('Model').value).toBe('');
+    expect(chooser('Reasoning effort').value).toBe('medium');
+    fireEvent.change(composer(), { target: { value: 'Hi' } });
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+    expect(bridge.start.mock.calls[0]?.[0]).toMatchObject({ model: null, effort: 'medium' });
+  });
+
   it('asks before yolo, and keeps auto when the user does not confirm', async () => {
     const { bridge } = fakeBridge();
     render(
@@ -220,6 +307,54 @@ describe('SessionPage', () => {
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Permission mode' }).value).toBe(
       'yolo',
     );
+  });
+
+  it('sends the images pasted into the composer or dropped on it, each of which it can take out', async () => {
+    const { bridge } = fakeBridge();
+    render(page(bridge));
+    await settle();
+    const shot = new File(['png'], 'shot.png', { type: 'image/png' });
+    // A paste of images alone pastes no text; a drop of images stays in the composer.
+    expect(
+      fireEvent.paste(composer(), { clipboardData: { files: [shot], getData: () => '' } }),
+    ).toBe(false);
+    await settle();
+    const outside = vi.fn();
+    document.addEventListener('drop', outside);
+    const zone = composer().closest('.mx-5');
+    if (zone === null) throw new Error('No composer.');
+    const transfer = {
+      items: [{ kind: 'file', type: 'image/png' }],
+      files: [shot],
+      dropEffect: '',
+    };
+    expect(fireEvent.dragOver(zone, { dataTransfer: transfer })).toBe(false);
+    expect(fireEvent.drop(zone, { dataTransfer: transfer })).toBe(false);
+    await settle();
+    document.removeEventListener('drop', outside);
+    expect(outside).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('button', { name: /^Image \d$/ })).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Image 2' }));
+    // A message of images alone goes too.
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+    expect(bridge.start.mock.calls[0]?.[0]).toMatchObject({
+      message: '',
+      images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }],
+    });
+    expect(screen.queryByRole('button', { name: 'Remove Image 1' })).toBeNull();
+  });
+
+  it('says why an image cannot go with the message', async () => {
+    const { bridge } = fakeBridge();
+    render(page(bridge));
+    await settle();
+    const scan = new File(['tiff'], 'scan.tiff', { type: 'image/tiff' });
+    fireEvent.paste(composer(), { clipboardData: { files: [scan], getData: () => 'scan' } });
+    await settle();
+    expect(screen.getByRole('status').textContent).toBe(
+      'Only PNG, JPEG, GIF and WebP images can be sent.',
+    );
+    expect(screen.queryByRole('button', { name: 'Image 1' })).toBeNull();
   });
 
   it('leaves Shift-Return to a new line, and shows that a session could not start', async () => {
@@ -277,6 +412,20 @@ describe('SessionPage', () => {
     choose('Sandbox', 'full-access');
     expect(bridge.setMode.mock.calls).toEqual([['s1', 'yolo']]);
     expect(bridge.setSandbox.mock.calls).toEqual([['s1', 'full-access']]);
+    // A switch that has taken is remembered for the folder; the permission mode is not.
+    await settle();
+    expect(bridge.rememberChoice.mock.calls).toEqual([
+      [
+        '/Users/me/web',
+        {
+          provider: 'claude-code',
+          gateway: null,
+          model: null,
+          effort: null,
+          sandbox: 'full-access',
+        },
+      ],
+    ]);
     // How much of the context the conversation takes shows at the composer's end.
     emit(2, { type: 'context', used: 30_000, size: 200_000 });
     expect(screen.getByText('30,000 / 200,000 (15.0%)').title).toBe(
@@ -289,6 +438,6 @@ describe('SessionPage', () => {
     expect(screen.queryByText('Working')).toBeNull();
     fireEvent.change(composer(), { target: { value: 'Thanks' } });
     fireEvent.keyDown(composer(), { key: 'Enter' });
-    expect(bridge.send.mock.calls).toEqual([['s1', 'Thanks']]);
+    expect(bridge.send.mock.calls).toEqual([['s1', 'Thanks', []]]);
   });
 });

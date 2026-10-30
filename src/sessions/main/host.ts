@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import type {
+  MessageImage,
   ModelOption,
   PermissionMode,
   ProviderId,
@@ -108,8 +109,8 @@ export class SessionHost {
     return hosted.id;
   }
 
-  send(id: string, text: string): Promise<void> {
-    return this.session(id).send(text);
+  send(id: string, text: string, images: MessageImage[] = []): Promise<void> {
+    return this.session(id).send(text, images);
   }
 
   interrupt(id: string): Promise<void> {

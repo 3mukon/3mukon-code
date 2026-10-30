@@ -32,6 +32,8 @@ function fakeBridge(
       dayFolder: () => Promise.resolve('/Users/me/3mukon-code/2026-10-28'),
       gateways: () => Promise.resolve([]),
       models: () => Promise.resolve([]),
+      choices: () => Promise.resolve({ folders: {}, dayRoot: '/Users/me/3mukon-code' }),
+      rememberChoice: () => Promise.resolve(),
       confirmYolo: () => Promise.resolve(false),
       start: () => Promise.resolve('s9'),
       send: () => Promise.resolve(),
@@ -41,6 +43,10 @@ function fakeBridge(
       setModel: () => Promise.resolve(),
       setEffort: () => Promise.resolve(),
       setSandbox: () => Promise.resolve(),
+      copyText: () => Promise.resolve(),
+      copyImage: () => Promise.resolve(),
+      saveImage: () => Promise.resolve(false),
+      imageMenu: () => Promise.resolve(null),
       snapshot: () => Promise.resolve(null),
       onEvent: () => () => undefined,
     },
@@ -144,7 +150,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New session' }));
     const page = within(screen.getByRole('main')).getByRole('region', { name: 'New session' });
     expect(within(page).getByText('web').title).toBe('/Users/me/web');
-    within(page).getByRole('textbox', { name: 'Message Claude Code' });
+    within(page).getByRole('textbox', { name: 'Message' });
     cleanup();
     await renderApp();
     await act(async () => {

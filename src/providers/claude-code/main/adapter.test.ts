@@ -176,6 +176,8 @@ describe('the Claude Code provider', () => {
       settings: join(gatewaysDir, 'work.json'),
       model: 'opus',
       effort: 'high',
+      // Thinking shows as summaries.
+      extraArgs: { 'thinking-display': 'summarized' },
     });
     expect(events).toContainEqual({
       type: 'settings',
@@ -385,6 +387,26 @@ describe('a Claude Code session', () => {
     expect(current().params.options).toMatchObject({ sessionId: session.id });
     expect(current().params.options).not.toHaveProperty('resume');
     expect(current().params.options).not.toHaveProperty('settings');
+  });
+
+  it('sends a message’s images as content blocks before its text, and shows them with it', async () => {
+    const { session, events } = await startSession();
+    const image = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
+    await session.send('What is this?', [image]);
+    await waitFor(() => current().inputs.length === 1);
+    expect(current().inputs[0]).toMatchObject({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: image.data } },
+          { type: 'text', text: 'What is this?' },
+        ],
+      },
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'message', role: 'user', images: [image] }),
+    );
   });
 
   it('reports closed once when closed', async () => {

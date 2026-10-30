@@ -54,7 +54,7 @@ describe('SessionsSection', () => {
     render(<SessionsSection sessions={sessions} folders={folders} />);
     expect(rows()).toEqual([
       'RunningFix the buildweb',
-      'Waiting for youCodexui',
+      'Waiting for youCodex CLIui',
       'ClosedLanding pagewebsite',
       // Without a title, a session goes by its provider.
       'IdleGrok Buildapi',
@@ -74,7 +74,7 @@ describe('SessionsSection', () => {
     const newSession = within(region()).getByRole('button', { name: 'New session' });
     expect(newSession.nextElementSibling?.contains(filter)).toBe(true);
     fireEvent.change(filter, { target: { value: 'w1' } });
-    expect(rows()).toEqual(['RunningFix the buildweb', 'Waiting for youCodexui']);
+    expect(rows()).toEqual(['RunningFix the buildweb', 'Waiting for youCodex CLIui']);
     fireEvent.change(filter, { target: { value: 'w2' } });
     expect(rows()).toEqual(['IdleGrok Buildapi']);
     fireEvent.change(filter, { target: { value: '' } });

@@ -43,7 +43,7 @@ describe('messages', () => {
     );
   });
 
-  it('keeps only text', () => {
+  it('keeps text and images, without empty ones', () => {
     expect(
       translate([
         {
@@ -53,6 +53,18 @@ describe('messages', () => {
         { sessionUpdate: 'agent_message_chunk', content: text('') },
       ]),
     ).toEqual([]);
+    const [image] = translate([
+      {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+      },
+    ]);
+    expect(image).toMatchObject({
+      type: 'message-delta',
+      role: 'agent',
+      text: '',
+      images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }],
+    });
   });
 });
 
@@ -160,6 +172,7 @@ describe('tool calls', () => {
     ]);
     expect(events.find((event) => event.type === 'file-change')).toMatchObject({
       change: { path: 'notes.txt', kind: 'add' },
+      toolId: 'n1',
     });
   });
 
@@ -260,5 +273,30 @@ describe('the rest of a session', () => {
       ]),
     ).toEqual({ model: 'grok-4.7', effort: 'high' });
     expect(currentChoices([])).toEqual({});
+  });
+});
+
+describe('images', () => {
+  it('shows the images a tool call returns', () => {
+    const [event] = translate([
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'i1',
+        title: 'Screenshot',
+        kind: 'other',
+        status: 'completed',
+        content: [
+          {
+            type: 'content',
+            content: { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+          },
+        ],
+      },
+    ]);
+    expect(event).toMatchObject({
+      type: 'tool',
+      id: 'i1',
+      images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }],
+    });
   });
 });

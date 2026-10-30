@@ -50,6 +50,13 @@ export type ToolStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 export type MessageRole = 'user' | 'agent' | 'thinking';
 
+// An image in a message, or in what a tool call returned: its media type, such as image/png, and its
+// bytes in base64.
+export interface MessageImage {
+  mediaType: string;
+  data: string;
+}
+
 // A row of the agent's own task list.
 export interface Task {
   text: string;
@@ -145,10 +152,10 @@ export interface HistoryEntry {
 export type SessionEvent =
   | { type: 'turn-started' }
   | { type: 'turn-ended'; outcome: 'completed' | 'interrupted' | 'failed'; error?: string }
-  // Sets the whole text of a message.
-  | { type: 'message'; id: string; role: MessageRole; text: string }
-  // Adds streamed text to the end of a message.
-  | { type: 'message-delta'; id: string; role: MessageRole; text: string }
+  // Sets the whole text of a message, and its images.
+  | { type: 'message'; id: string; role: MessageRole; text: string; images?: MessageImage[] }
+  // Adds streamed text, and images, to the end of a message.
+  | { type: 'message-delta'; id: string; role: MessageRole; text: string; images?: MessageImage[] }
   // Starts or updates a tool call; fields left out keep their value.
   | {
       type: 'tool';
@@ -159,12 +166,15 @@ export type SessionEvent =
       command?: string;
       paths?: string[];
       output?: string;
+      // The images the call returned, such as an image file it read.
+      images?: MessageImage[];
     }
   // Adds streamed output to the end of a tool call's output.
   | { type: 'tool-output'; id: string; text: string }
   // Replaces the agent's task list.
   | { type: 'tasks'; tasks: Task[] }
-  | { type: 'file-change'; change: FileChange }
+  // A file the agent changed, with the tool call that changed it, which shows the change.
+  | { type: 'file-change'; change: FileChange; toolId?: string }
   | { type: 'approval-requested'; request: ApprovalRequest }
   | { type: 'question-asked'; request: QuestionRequest }
   // An approval or question was answered, or the provider withdrew it.

@@ -1,8 +1,9 @@
 import { useTranslation } from 'react-i18next';
 import { StatusDot, type Status } from '../../ui/renderer/status-dot';
-import type { Task, ToolStatus } from '../shared/events';
+import type { MessageImage, Task } from '../shared/events';
 import type { SessionState, SessionStatus, TimelineItem } from '../shared/session-state';
-import { Markdown } from './markdown';
+import { Message } from './message';
+import { FileChangeEntry, ToolCall } from './tool-call';
 
 // How a session's status shows as a dot: a closed session as done.
 export const statusDots: Record<SessionStatus, Status> = {
@@ -10,13 +11,6 @@ export const statusDots: Record<SessionStatus, Status> = {
   waiting: 'waiting',
   idle: 'idle',
   closed: 'done',
-};
-
-const toolDots: Record<ToolStatus, Status> = {
-  pending: 'idle',
-  running: 'running',
-  completed: 'done',
-  failed: 'idle',
 };
 
 const taskDots: Record<Task['status'], Status> = {
@@ -28,22 +22,27 @@ const taskDots: Record<Task['status'], Status> = {
 interface TimelineProps {
   // The session's state, or null before it has one.
   state: SessionState | null;
-  // A first message on its way, shown as the prompt while the session starts.
-  starting?: string;
+  // A first message on its way, with its images, shown as the user's while the session starts.
+  starting?: { text: string; images: MessageImage[] };
+  // The provider's name, which VoiceOver reads before each of the agent's messages.
+  agent: string;
 }
 
-// A session's activity, as the reference's panes show it: the user's messages as prompts, the agent's
-// as Markdown, its thinking quieter, its tool calls and file changes as rows with their state, the
+// A session's activity, oldest first, as the reference's panes show it: the messages (Message), the
+// user's at the right and the agent's at the left, so that the two never read alike, and the agent's
+// thinking quieter; each tool call as one entry, with the files it changed and their diffs; the
 // approvals and questions waiting for the user, errors, then the agent's task list with finished rows
 // struck through and the current one bright, and Working while a turn runs.
-export function Timeline({ state, starting }: TimelineProps) {
+export function Timeline({ state, starting, agent }: TimelineProps) {
   const { t } = useTranslation();
   const working = starting !== undefined || state?.turnRunning === true;
   return (
     <>
-      {starting !== undefined && <Prompt text={starting} />}
+      {starting !== undefined && (
+        <Message role="user" text={starting.text} images={starting.images} agent={agent} />
+      )}
       {state?.timeline.map((item, index) => (
-        <Item key={keyOf(item, index)} item={item} />
+        <Item key={keyOf(item, index)} item={item} agent={agent} />
       ))}
       {state !== null && state.tasks.length > 0 && (
         <ul className="my-3">
@@ -76,37 +75,15 @@ const taskLook: Record<Task['status'], string> = {
   completed: 'text-faint line-through decoration-line',
 };
 
-function Item({ item }: { item: TimelineItem }) {
+function Item({ item, agent }: { item: TimelineItem; agent: string }) {
   const { t } = useTranslation();
   switch (item.type) {
     case 'message':
-      if (item.role === 'user') return <Prompt text={item.text} />;
-      if (item.role === 'thinking') {
-        return <p className="my-3 whitespace-pre-wrap text-faint italic">{item.text}</p>;
-      }
-      return (
-        <div className="my-3 text-ink">
-          <Markdown text={item.text} />
-        </div>
-      );
+      return <Message role={item.role} text={item.text} images={item.images} agent={agent} />;
     case 'tool':
-      return (
-        <Row status={toolDots[item.status]} failed={item.status === 'failed'}>
-          {item.title === '' ? (item.command ?? item.kind) : item.title}
-        </Row>
-      );
-    case 'file-change': {
-      const { added, removed } = linesChanged(item.change.diff);
-      return (
-        <p className="my-0.5 flex min-w-0 gap-2">
-          <span className="min-w-0 truncate text-ink">
-            {item.change.newPath ?? item.change.path}
-          </span>
-          <span className="text-add">+{added}</span>
-          <span className="text-del">−{removed}</span>
-        </p>
-      );
-    }
+      return <ToolCall item={item} />;
+    case 'file-change':
+      return <FileChangeEntry change={item.change} />;
     case 'approval':
     case 'question': {
       const waiting = item.resolution === undefined;
@@ -127,21 +104,9 @@ function Item({ item }: { item: TimelineItem }) {
   }
 }
 
-function Prompt({ text }: { text: string }) {
-  return <p className="my-4 whitespace-pre-wrap text-ink first:mt-0">{text}</p>;
-}
-
-function Row({
-  status,
-  failed = false,
-  children,
-}: {
-  status: Status;
-  failed?: boolean;
-  children: string;
-}) {
+function Row({ status, children }: { status: Status; children: string }) {
   return (
-    <p className={`my-0.5 flex min-w-0 items-baseline gap-3 ${failed ? 'text-del' : ''}`}>
+    <p className="my-0.5 flex min-w-0 items-baseline gap-3">
       <span className="-translate-y-0.5">
         <StatusDot status={status} />
       </span>
@@ -163,16 +128,4 @@ function keyOf(item: TimelineItem, index: number): string {
     case 'error':
       return `error:${String(index)}`;
   }
-}
-
-// How many lines a unified diff adds and removes, leaving out its file headers.
-export function linesChanged(diff: string): { added: number; removed: number } {
-  let added = 0;
-  let removed = 0;
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+++') || line.startsWith('---')) continue;
-    if (line.startsWith('+')) added += 1;
-    else if (line.startsWith('-')) removed += 1;
-  }
-  return { added, removed };
 }

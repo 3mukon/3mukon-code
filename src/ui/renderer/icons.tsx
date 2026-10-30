@@ -1,8 +1,20 @@
 import {
+  Brain as LucideBrain,
+  Check as LucideCheck,
   ChevronDown as LucideChevronDown,
   ChevronRight as LucideChevronRight,
+  Copy as LucideCopy,
+  FileText as LucideFileText,
+  FolderInput as LucideFolderInput,
+  Globe as LucideGlobe,
+  Pencil as LucidePencil,
   Plus as LucidePlus,
+  Search as LucideSearch,
   ShieldOff as LucideShieldOff,
+  Terminal as LucideTerminal,
+  ToggleRight as LucideToggleRight,
+  Trash as LucideTrash,
+  Wrench as LucideWrench,
   X as LucideX,
   type LucideIcon,
   type LucideProps,
@@ -22,3 +34,15 @@ export const ChevronRight = decorative(LucideChevronRight);
 export const ChevronDown = decorative(LucideChevronDown);
 export const ShieldOff = decorative(LucideShieldOff);
 export const X = decorative(LucideX);
+export const FileText = decorative(LucideFileText);
+export const Pencil = decorative(LucidePencil);
+export const Trash = decorative(LucideTrash);
+export const FolderInput = decorative(LucideFolderInput);
+export const Search = decorative(LucideSearch);
+export const Terminal = decorative(LucideTerminal);
+export const Brain = decorative(LucideBrain);
+export const Globe = decorative(LucideGlobe);
+export const ToggleRight = decorative(LucideToggleRight);
+export const Wrench = decorative(LucideWrench);
+export const Copy = decorative(LucideCopy);
+export const Check = decorative(LucideCheck);

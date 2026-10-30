@@ -51,6 +51,15 @@ describe('Translator.live', () => {
         summaryIndex: 0,
       }),
     ).toEqual([{ type: 'message-delta', id: 'r1', role: 'thinking', text: 'Look' }]);
+    // A new part of the summary starts a paragraph of its own.
+    expect(
+      translator.live('item/reasoning/summaryTextDelta', {
+        ...turn,
+        itemId: 'r1',
+        delta: 'Then',
+        summaryIndex: 1,
+      }),
+    ).toEqual([{ type: 'message-delta', id: 'r1', role: 'thinking', text: '\n\nThen' }]);
     expect(
       translator.live('item/completed', {
         ...turn,
@@ -166,6 +175,7 @@ describe('Translator.live', () => {
           kind: 'add',
           diff: '--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1,1 @@\n+hi\n',
         },
+        toolId: 'f1',
       },
     ]);
     expect(translator.fileChangeOf('nope')).toBeUndefined();
@@ -287,6 +297,61 @@ describe('Translator.history', () => {
     const agent = { type: 'agentMessage', id: 'm1', text: 'Hi' } as unknown as ThreadItem;
     expect(translator.history(agent)).toEqual([
       { type: 'message', id: 'm1', role: 'agent', text: 'Hi' },
+    ]);
+  });
+});
+
+describe('images', () => {
+  const png = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
+
+  it('shows a generated image as the agent’s, and the images an MCP tool returns with its call', () => {
+    const translator = new Translator(cwd);
+    expect(
+      translator.live('item/completed', {
+        ...turn,
+        item: {
+          type: 'imageGeneration',
+          id: 'g1',
+          status: 'completed',
+          revisedPrompt: null,
+          failure: null,
+          result: png.data,
+        },
+      }),
+    ).toEqual([{ type: 'message', id: 'g1', role: 'agent', text: '', images: [png] }]);
+    expect(
+      translator.live('item/completed', {
+        ...turn,
+        item: {
+          type: 'mcpToolCall',
+          id: 'm1',
+          server: 'shots',
+          tool: 'grab',
+          status: 'completed',
+          arguments: {},
+          result: {
+            content: [{ type: 'image', data: png.data, mimeType: 'image/png' }],
+            structuredContent: null,
+            _meta: null,
+          },
+          error: null,
+        },
+      }),
+    ).toMatchObject([{ type: 'tool', id: 'm1', images: [png] }]);
+  });
+
+  it('replays the user’s images, which the app sent as data URLs', () => {
+    const translator = new Translator(cwd);
+    const user = {
+      type: 'userMessage',
+      id: 'u1',
+      content: [
+        { type: 'text', text: 'Look', text_elements: [] },
+        { type: 'image', url: 'data:image/png;base64,iVBORw0KGgo=' },
+      ],
+    } as unknown as ThreadItem;
+    expect(translator.history(user)).toEqual([
+      { type: 'message', id: 'u1', role: 'user', text: 'Look', images: [png] },
     ]);
   });
 });

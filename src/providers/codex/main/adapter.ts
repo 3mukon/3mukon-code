@@ -14,6 +14,7 @@ import type {
 import type {
   ApprovalAnswer,
   HistoryEntry,
+  MessageImage,
   ModelOption,
   PermissionMode,
   Question,
@@ -22,6 +23,7 @@ import type {
   SandboxLevel,
   SessionEvent,
 } from '../../../sessions/shared/events';
+import { imageUrl } from '../../../sessions/shared/images';
 import { bundledCodexBinary } from './binary';
 import { defaultGatewaysDir, listGateways, readGateway, redact } from './gateways';
 import type { InitializeParams } from './protocol/InitializeParams';
@@ -403,16 +405,22 @@ class CodexSession implements ProviderSession {
     this.effortChanged = settings.effort !== null;
   }
 
-  async send(text: string): Promise<void> {
+  async send(text: string, images: MessageImage[] = []): Promise<void> {
     if (this.switching !== null) await this.switching;
     if (this.closed) throw new Error('The session is closed.');
     this.turnRunning = true;
     this.onEvent({ type: 'turn-started' });
-    this.onEvent({ type: 'message', id: randomUUID(), role: 'user', text });
+    this.onEvent({
+      type: 'message',
+      id: randomUUID(),
+      role: 'user',
+      text,
+      ...(images.length === 0 ? {} : { images }),
+    });
     try {
       const { turn } = await this.rpc.request<TurnStartResponse>(
         'turn/start',
-        this.turnParams(text),
+        this.turnParams(text, images),
       );
       this.turnId = turn.id;
       this.modeChanged = false;
@@ -628,14 +636,17 @@ class CodexSession implements ProviderSession {
 
   // The turn's input, with whatever changed since the last turn. A model or an effort set back to the
   // default goes as Codex's default, since a turn cannot unset what an earlier one chose.
-  private turnParams(text: string): TurnStartParams {
+  private turnParams(text: string, images: readonly MessageImage[]): TurnStartParams {
     const model = this.settings.model ?? this.models.find((entry) => entry.isDefault)?.model;
     const effort =
       this.settings.effort ??
       this.models.find((entry) => entry.model === model)?.defaultReasoningEffort;
     return {
       threadId: this.threadId,
-      input: [{ type: 'text', text, text_elements: [] }],
+      input: [
+        ...(text === '' ? [] : [{ type: 'text' as const, text, text_elements: [] }]),
+        ...images.map((image) => ({ type: 'image' as const, url: imageUrl(image) })),
+      ],
       ...(this.modelChanged && model !== undefined ? { model } : {}),
       ...(this.effortChanged && effort !== undefined ? { effort } : {}),
       ...(this.modeChanged ? approvals(this.settings.mode) : {}),

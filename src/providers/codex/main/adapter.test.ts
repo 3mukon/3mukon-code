@@ -488,6 +488,21 @@ describe('the Codex provider', () => {
 });
 
 describe('a Codex session', () => {
+  it('sends a message’s images as data URLs after its text, and shows them with it', async () => {
+    const { session, events } = await startSession();
+    const image = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
+    await session.send('Look', [image]);
+    expect(current().params('turn/start')).toMatchObject({
+      input: [
+        { type: 'text', text: 'Look', text_elements: [] },
+        { type: 'image', url: 'data:image/png;base64,iVBORw0KGgo=' },
+      ],
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'message', role: 'user', images: [image] }),
+    );
+  });
+
   it('sends a chosen effort with the first turn, and ends the turn when Codex says so', async () => {
     const { session, events } = await startSession({ effort: 'high' });
     await session.send('hi');

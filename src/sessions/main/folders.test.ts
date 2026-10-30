@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { dayFolder, isDayFolder, makeDayFolder } from './folders';
+import { dayFolder, dayRoot, makeDayFolder } from './folders';
 
 let home: string;
 beforeEach(() => {
@@ -14,23 +14,11 @@ afterEach(() => {
 
 describe('day folders', () => {
   it('names a folder for each day in the 3mukon-code folder of the home folder', () => {
+    expect(dayRoot('/Users/me')).toBe('/Users/me/3mukon-code');
     expect(dayFolder('/Users/me', new Date(2026, 9, 28, 23, 59))).toBe(
       '/Users/me/3mukon-code/2026-10-28',
     );
     expect(dayFolder('/Users/me', new Date(2027, 0, 3))).toBe('/Users/me/3mukon-code/2027-01-03');
-  });
-
-  it('knows a day’s folder from any other', () => {
-    expect(isDayFolder('/Users/me', '/Users/me/3mukon-code/2026-10-28')).toBe(true);
-    for (const path of [
-      '/Users/me/3mukon-code',
-      '/Users/me/3mukon-code/2026-10-28/src',
-      '/Users/me/3mukon-code/../2026-10-28',
-      '/Users/me/3mukon-code/notes',
-      '/Users/other/3mukon-code/2026-10-28',
-    ]) {
-      expect(isDayFolder('/Users/me', path)).toBe(false);
-    }
   });
 
   it('makes a day’s folder when its first session starts, and no other', async () => {

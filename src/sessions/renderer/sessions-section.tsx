@@ -75,7 +75,8 @@ export function SessionsSection({
         )}
       </div>
       {shown.length > 0 && (
-        <ul aria-labelledby={heading} className="min-h-0 overflow-y-auto">
+        // Positioned, so that the statuses for VoiceOver alone stay inside the scroll area.
+        <ul aria-labelledby={heading} className="relative min-h-0 overflow-y-auto">
           {shown.map((session) => (
             <li key={session.id}>
               <button

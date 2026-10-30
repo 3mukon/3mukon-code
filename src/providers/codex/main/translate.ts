@@ -1,4 +1,11 @@
-import type { SessionEvent, Task, ToolKind, ToolStatus } from '../../../sessions/shared/events';
+import type {
+  MessageImage,
+  SessionEvent,
+  Task,
+  ToolKind,
+  ToolStatus,
+} from '../../../sessions/shared/events';
+import { imageTypeOf } from '../../../sessions/shared/images';
 import { displayPath, fileChange } from './patch';
 import type { AgentMessageDeltaNotification } from './protocol/v2/AgentMessageDeltaNotification';
 import type { CommandAction } from './protocol/v2/CommandAction';
@@ -27,6 +34,8 @@ const OUTPUT_LIMIT = 20_000;
 export class Translator {
   private readonly fileChanges = new Map<string, FileUpdateChange[]>();
   private readonly streamedOutput = new Map<string, number>();
+  // The summary part of each reasoning item last streamed, so that a new part starts a paragraph.
+  private readonly summaryParts = new Map<string, number>();
   // An error Codex reported during the turn without retrying, for the turn's end.
   private turnError: string | undefined;
 
@@ -46,10 +55,12 @@ export class Translator {
           : [{ type: 'message-delta', id: itemId, role: 'agent', text: delta }];
       }
       case 'item/reasoning/summaryTextDelta': {
-        const { itemId, delta } = params as ReasoningSummaryTextDeltaNotification;
-        return delta === ''
-          ? []
-          : [{ type: 'message-delta', id: itemId, role: 'thinking', text: delta }];
+        const { itemId, delta, summaryIndex } = params as ReasoningSummaryTextDeltaNotification;
+        if (delta === '') return [];
+        const part = this.summaryParts.get(itemId);
+        this.summaryParts.set(itemId, summaryIndex);
+        const text = part !== undefined && summaryIndex > part ? `\n\n${delta}` : delta;
+        return [{ type: 'message-delta', id: itemId, role: 'thinking', text }];
       }
       case 'item/commandExecution/outputDelta':
         return this.output(params as CommandExecutionOutputDeltaNotification);
@@ -108,7 +119,19 @@ export class Translator {
     const text = item.content
       .flatMap((input) => (input.type === 'text' ? [input.text] : []))
       .join('\n');
-    return text.trim() === '' ? [] : [{ type: 'message', id: item.id, role: 'user', text }];
+    const images = item.content.flatMap((input) =>
+      input.type === 'image' && 'url' in input ? imagesOfUrl(input.url) : [],
+    );
+    if (text.trim() === '' && images.length === 0) return [];
+    return [
+      {
+        type: 'message',
+        id: item.id,
+        role: 'user',
+        text,
+        ...(images.length === 0 ? {} : { images }),
+      },
+    ];
   }
 
   // The paths and the diff of a file change item, for an approval that refers to it.
@@ -131,6 +154,7 @@ export class Translator {
           ? [{ type: 'message', id: item.id, role: 'agent', text: item.text }]
           : [];
       case 'reasoning': {
+        if (completed) this.summaryParts.delete(item.id);
         const text = (item.summary.length > 0 ? item.summary : item.content).join('\n\n');
         return completed && text.trim() !== ''
           ? [{ type: 'message', id: item.id, role: 'thinking', text }]
@@ -140,7 +164,8 @@ export class Translator {
         return [this.command(item, completed)];
       case 'fileChange':
         return this.fileChangeItem(item, completed);
-      case 'mcpToolCall':
+      case 'mcpToolCall': {
+        const images = completed ? mcpImages(item.result) : [];
         return [
           {
             type: 'tool',
@@ -149,8 +174,17 @@ export class Translator {
             title: `${item.server}: ${item.tool}`,
             status: completed ? itemStatus(item.status) : 'running',
             ...(completed ? { output: mcpOutput(item.result, item.error) } : {}),
+            ...(images.length === 0 ? {} : { images }),
           },
         ];
+      }
+      // A generated image is the agent's, as a message of its own.
+      case 'imageGeneration': {
+        const data = 'result' in item ? item.result : '';
+        if (!completed || data === '') return [];
+        const image = { mediaType: imageTypeOf(data) ?? 'image/png', data };
+        return [{ type: 'message', id: item.id, role: 'agent', text: '', images: [image] }];
+      }
       case 'dynamicToolCall':
         return [
           {
@@ -226,6 +260,7 @@ export class Translator {
         ? item.changes.map((change, index): SessionEvent => ({
             type: 'file-change',
             change: fileChange(`${item.id}:${String(index)}`, change, this.cwd),
+            toolId: item.id,
           }))
         : []),
     ];
@@ -299,6 +334,28 @@ function commandKind(actions: readonly CommandAction[]): ToolKind {
     return 'search';
   }
   return 'execute';
+}
+
+// The images an MCP tool returned, as MCP gives them in base64.
+function mcpImages(result: McpToolCallResult | null): MessageImage[] {
+  return (result?.content ?? []).flatMap((block) =>
+    typeof block === 'object' &&
+    block !== null &&
+    !Array.isArray(block) &&
+    block.type === 'image' &&
+    typeof block.data === 'string' &&
+    typeof block.mimeType === 'string'
+      ? [{ mediaType: block.mimeType, data: block.data }]
+      : [],
+  );
+}
+
+// An image given as a data URL, as the app sends the user's.
+function imagesOfUrl(url: string): MessageImage[] {
+  const match = /^data:(image\/[\w.+-]+);base64,(.+)$/.exec(url);
+  return match?.[1] === undefined || match[2] === undefined
+    ? []
+    : [{ mediaType: match[1], data: match[2] }];
 }
 
 function mcpOutput(result: McpToolCallResult | null, error: McpToolCallError | null): string {
