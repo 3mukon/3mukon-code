@@ -264,7 +264,8 @@ export function SessionPage({ bridge, folder, sessionId, summary, onStarted }: S
       ? [
           {
             label: t('sessions.page.gateway'),
-            summary: false,
+            // Named in the compact settings only once one is chosen.
+            summary: settings.gateway !== null,
             value: settings.gateway ?? '',
             options: withChosen(
               [

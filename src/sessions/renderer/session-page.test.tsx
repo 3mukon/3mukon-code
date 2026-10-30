@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { ModelOption, SessionEvent } from '../shared/events';
@@ -104,7 +104,7 @@ const MODELS: ModelOption[] = [
 ];
 
 describe('SessionPage', () => {
-  it('names the provider first in the one button that holds the settings in a narrow panel', async () => {
+  it('names the provider first in the one button that holds the settings in a narrow panel, then a chosen gateway', async () => {
     // The row of settings is wider than the panel; the test environment lays out nothing.
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(600);
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300);
@@ -113,6 +113,14 @@ describe('SessionPage', () => {
     await settle();
     const button = screen.getByRole('button', { name: /^Session settings: / });
     expect(button.textContent).toMatch(/^Claude Code · /);
+    expect(button.textContent).not.toContain('No gateway');
+    const dropdown = document.getElementById(button.getAttribute('popovertarget') ?? '');
+    if (dropdown === null) throw new Error('no dropdown');
+    fireEvent.change(within(dropdown).getByRole('combobox', { name: 'Gateway' }), {
+      target: { value: 'work' },
+    });
+    await settle();
+    expect(button.textContent).toMatch(/^Claude Code · work · /);
     cleanup();
 
     const { bridge: running } = fakeBridge({ ...initialSessionState(), mode: 'auto' });
