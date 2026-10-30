@@ -1,13 +1,14 @@
 /* Design tokens: an e-ink look after the Ink Paper theme, on its Flexoki palette. In macOS's light
    appearance, near-black ink on a warm grey paper; in the dark one, pale ink on dark paper. Both papers
-   carry a faint grain (grain.svg, which the app module lays over the window with the grain tokens),
+   carry a faint grain (grain.svg, and grain-pale.svg with pale specks for the dark paper, which the
+   app module lays over the window with the grain tokens, and the paper utility lays under what opens
+   over it),
    and colour is kept for states, changes and the accent. Components reach the tokens through the Tailwind theme at the end (bg-frame,
    text-muted, border-line and so on); Tailwind's default palette is removed, so that no colour
    bypasses the tokens. */
 :root {
   color-scheme: light dark;
   --frame: #e9e7e0;
-  --pane: #f1efe9;
   --line: rgb(16 15 15 / 0.14);
   --hover: rgb(16 15 15 / 0.05);
   --selected: rgb(16 15 15 / 0.08);
@@ -30,10 +31,9 @@
   --placeholder: #aba9a2;
   /* Behind an image enlarged over the window. */
   --scrim: rgb(16 15 15 / 0.55);
-  /* Lists that open over the window, such as a select's: a lighter paper raised by a soft shadow. */
-  --menu: #f2f0ea;
-  --menu-line: rgb(16 15 15 / 0.14);
-  --menu-shadow: 0 10px 28px -10px rgb(16 15 15 / 0.28), 0 2px 6px -2px rgb(16 15 15 / 0.12);
+  /* The dashed ink line around a sheet that opens over the window, such as a select's list, which is
+     the window's own paper (the paper utility below) and casts no shadow, as e-ink draws it. */
+  --menu-line: rgb(16 15 15 / 0.32);
   /* Code, highlighted as Flexoki has it: comments faint, keywords green, functions orange, constants
      yellow, strings cyan, variables and attributes blue, numbers purple, language features magenta,
      what is invalid red. */
@@ -46,15 +46,20 @@
   --syntax-number: #5e409d;
   --syntax-feature: #a02f6f;
   --syntax-invalid: #af3029;
-  /* The grain's strength: dark specks on the light paper. */
+  /* The grain: dark specks on the light paper, and how strongly they show. */
+  --grain-image: url('./grain.svg');
   --grain-opacity: 0.1;
-  --grain-filter: none;
+  /* The paper at the strength the grain leaves it, laid over the grain under the paper utility. */
+  --paper-veil: color-mix(
+    in srgb,
+    var(--frame) calc(100% - var(--grain-opacity) * 100%),
+    transparent
+  );
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --frame: #161615;
-    --pane: #1c1b1a;
     --line: rgb(206 205 195 / 0.12);
     --hover: rgb(206 205 195 / 0.05);
     --selected: rgb(206 205 195 / 0.08);
@@ -73,10 +78,7 @@
     --well: #1c1b1a;
     --placeholder: #4e4d4a;
     --scrim: rgb(0 0 0 / 0.7);
-    /* Lighter than the paper, as raised surfaces are in the dark. */
-    --menu: #232220;
-    --menu-line: rgb(206 205 195 / 0.12);
-    --menu-shadow: 0 12px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px -2px rgb(0 0 0 / 0.4);
+    --menu-line: rgb(206 205 195 / 0.28);
     --syntax-keyword: #879a39;
     --syntax-function: #da702c;
     --syntax-constant: #d0a215;
@@ -85,16 +87,23 @@
     --syntax-number: #8b7ec8;
     --syntax-feature: #ce5d97;
     --syntax-invalid: #d14d41;
-    /* Pale specks on the dark paper: the grain's specks inverted. */
+    /* Pale specks on the dark paper. */
+    --grain-image: url('./grain-pale.svg');
     --grain-opacity: 0.08;
-    --grain-filter: invert(1);
   }
+}
+
+/* A sheet of the window's paper, grain and all, for what opens over the window and so covers the
+   grain laid over it: the paper, the grain, and the paper again over them, which leaves the grain as
+   strong as the window shows it. */
+@utility paper {
+  background-color: var(--frame);
+  background-image: linear-gradient(var(--paper-veil), var(--paper-veil)), var(--grain-image);
 }
 
 @theme inline {
   --color-*: initial;
   --color-frame: var(--frame);
-  --color-pane: var(--pane);
   --color-line: var(--line);
   --color-hover: var(--hover);
   --color-selected: var(--selected);
@@ -113,9 +122,7 @@
   --color-well: var(--well);
   --color-placeholder: var(--placeholder);
   --color-scrim: var(--scrim);
-  --color-menu: var(--menu);
   --color-menu-line: var(--menu-line);
-  --shadow-menu: var(--menu-shadow);
   /* The ellipsis after Working, blinking as the reference's does. */
   --animate-blink: blink 1.4s steps(2) infinite;
   @keyframes blink {

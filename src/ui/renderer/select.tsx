@@ -33,7 +33,7 @@ export function Select({ label, value, options, onChange }: SelectProps) {
         onChange={(event) => {
           onChange(event.target.value);
         }}
-        className="absolute inset-0 m-0 min-h-0 min-w-0 rounded-md border-0 bg-transparent p-0 text-transparent [appearance:base-select] [&_option]:block [&_option]:truncate [&_option]:rounded-[4px] [&_option]:px-2 [&_option]:text-[13px] [&_option]:leading-6 [&_option]:text-ink [&_option:focus-visible]:bg-selected [&_option:focus-visible]:outline-none [&_option:hover]:bg-hover [&_option::checkmark]:mr-1.5 [&::picker-icon]:hidden [&::picker(select)]:mt-1 [&::picker(select)]:max-w-60 [&::picker(select)]:rounded-md [&::picker(select)]:border [&::picker(select)]:border-menu-line [&::picker(select)]:bg-menu [&::picker(select)]:p-1 [&::picker(select)]:shadow-menu [&::picker(select)]:[appearance:base-select]"
+        className="absolute inset-0 m-0 min-h-0 min-w-0 rounded-md border-0 bg-transparent p-0 text-transparent [appearance:base-select] [&_option]:block [&_option]:truncate [&_option]:rounded-[4px] [&_option]:px-2 [&_option]:text-[13px] [&_option]:leading-6 [&_option]:text-ink [&_option:focus-visible]:bg-selected [&_option:focus-visible]:outline-none [&_option:hover]:bg-hover [&_option::checkmark]:mr-1.5 [&::picker-icon]:hidden [&::picker(select)]:mt-1 [&::picker(select)]:max-w-60 [&::picker(select)]:rounded-md [&::picker(select)]:border [&::picker(select)]:border-dashed [&::picker(select)]:border-menu-line [&::picker(select)]:paper [&::picker(select)]:p-1 [&::picker(select)]:shadow-none [&::picker(select)]:[appearance:base-select]"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

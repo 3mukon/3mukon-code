@@ -117,7 +117,7 @@ function Enlarged({
           event.preventDefault();
           actions.imageMenu(image);
         }}
-        className="block max-h-[92vh] max-w-[92vw] rounded-md object-contain shadow-menu"
+        className="block max-h-[92vh] max-w-[92vw] rounded-md object-contain"
       />
     </dialog>
   );

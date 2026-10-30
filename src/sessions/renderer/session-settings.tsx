@@ -69,7 +69,7 @@ export function SessionSettings({ settings }: { settings: Setting[] }) {
             popover="auto"
             role="group"
             aria-label={t('sessions.page.settings')}
-            className="inset-auto m-0 mb-1 rounded-md border border-menu-line bg-menu px-2 py-1.5 shadow-menu [position-area:top_span-right] [position-try-fallbacks:flip-block]"
+            className="inset-auto m-0 mb-1 w-max max-w-[calc(100vw-16px)] rounded-md border border-dashed border-menu-line paper px-2 py-1.5 [position-area:top_span-right] [position-try-fallbacks:flip-block,flip-inline,flip-block_flip-inline]"
           >
             {/* The grid inside, since a display of the dropdown's own would show it while closed. */}
             <div className="grid grid-cols-[auto_auto] items-center gap-x-6 gap-y-1">

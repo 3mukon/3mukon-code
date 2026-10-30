@@ -30,9 +30,8 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background-image: url('../../ui/renderer/grain.svg');
+    background-image: var(--grain-image);
     opacity: var(--grain-opacity);
-    filter: var(--grain-filter);
   }
 
   :focus-visible {

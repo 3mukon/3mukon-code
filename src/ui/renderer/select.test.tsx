@@ -26,6 +26,18 @@ describe('Select', () => {
     expect(shown?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('opens its list as e-ink draws it: a sheet of paper under a dashed line, without a shadow', () => {
+    render(<Select label="Show" value="one" options={options} onChange={vi.fn()} />);
+    const classes = screen.getByRole('combobox', { name: 'Show' }).className.split(' ');
+    expect(classes).toEqual(
+      expect.arrayContaining([
+        '[&::picker(select)]:border-dashed',
+        '[&::picker(select)]:paper',
+        '[&::picker(select)]:shadow-none',
+      ]),
+    );
+  });
+
   it('reports the option chosen', () => {
     const onChange = vi.fn<(value: string) => void>();
     render(<Select label="Show" value="" options={options} onChange={onChange} />);

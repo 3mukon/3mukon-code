@@ -61,6 +61,13 @@ describe('SessionSettings', () => {
     const dropdown = document.getElementById(button.getAttribute('popovertarget') ?? '');
     if (dropdown === null) throw new Error('no dropdown');
     expect(dropdown.getAttribute('popover')).toBe('auto');
+    // As e-ink draws it, under a dashed line without a shadow, as wide as the settings, and to the
+    // left of its button where the window has no room on its right.
+    expect(dropdown.className.split(' ')).toEqual(
+      expect.arrayContaining(['border-dashed', 'paper', 'w-max']),
+    );
+    expect(dropdown.className).not.toMatch(/shadow/);
+    expect(dropdown.className).toContain('flip-inline');
     // A display of the dropdown's own would show it while closed.
     expect(dropdown.className).not.toMatch(/(^|\s)(grid|flex|block|inline[-\w]*)(\s|$)/);
     const inside = within(dropdown);

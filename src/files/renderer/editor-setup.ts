@@ -101,7 +101,7 @@ const theme = EditorView.theme({
   },
   '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: tinted('--accent', 30) },
   '.cm-specialChar': { color: 'var(--del)' },
-  '.cm-panels': { backgroundColor: 'var(--pane)', color: 'var(--ink)' },
+  '.cm-panels': { backgroundColor: 'transparent', color: 'var(--ink)' },
   '.cm-panels.cm-panels-top': { borderBottom: '1px dashed var(--line)' },
   '.cm-panels.cm-panels-bottom': { borderTop: '1px dashed var(--line)' },
   '.cm-panel.cm-search, .cm-panel.cm-gotoLine': { padding: '6px 20px', fontSize: '11.5px' },
@@ -124,10 +124,12 @@ const theme = EditorView.theme({
   },
   '.cm-button:hover': { backgroundColor: 'var(--hover)' },
   '.cm-button:active': { backgroundImage: 'none', backgroundColor: 'var(--selected)' },
+  // A sheet of the window's paper, as the ui module's paper utility draws one.
   '.cm-tooltip': {
-    backgroundColor: 'var(--menu)',
-    border: '1px solid var(--menu-line)',
-    boxShadow: 'var(--menu-shadow)',
+    backgroundColor: 'var(--frame)',
+    backgroundImage: 'linear-gradient(var(--paper-veil), var(--paper-veil)), var(--grain-image)',
+    border: '1px dashed var(--menu-line)',
+    boxShadow: 'none',
     color: 'var(--ink)',
   },
 });
