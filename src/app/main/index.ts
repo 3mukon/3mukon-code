@@ -48,6 +48,8 @@ void app
       page: pageUrl(),
     });
     closeBeforeQuitting(sessions, toolset);
+    // A packaged app's bundle carries its icon; unpackaged, the app shows it in the Dock itself.
+    if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'resources', 'dock-icon.png'));
     // A window whose editors hold unsaved changes asks before it closes.
     app.on('browser-window-created', (_event, window) => {
       keepUnsavedChanges(window, t);
