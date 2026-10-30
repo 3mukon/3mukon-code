@@ -13,7 +13,8 @@ afterEach(() => {
 
 function settings(onModel = vi.fn()): Setting[] {
   return [
-    { label: 'Provider', summary: false, text: 'Claude Code' },
+    { label: 'Provider', summary: true, text: 'Claude Code' },
+    { label: 'Gateway', summary: false, text: 'work' },
     {
       label: 'Model',
       summary: true,
@@ -53,8 +54,10 @@ describe('SessionSettings', () => {
     widths(600, 300);
     const onModel = vi.fn();
     render(<SessionSettings settings={settings(onModel)} />);
-    const button = screen.getByRole('button', { name: 'Session settings: Opus · Auto' });
-    expect(button.textContent).toBe('Opus · Auto');
+    const button = screen.getByRole('button', {
+      name: 'Session settings: Claude Code · Opus · Auto',
+    });
+    expect(button.textContent).toBe('Claude Code · Opus · Auto');
     const dropdown = document.getElementById(button.getAttribute('popovertarget') ?? '');
     if (dropdown === null) throw new Error('no dropdown');
     expect(dropdown.getAttribute('popover')).toBe('auto');
@@ -63,6 +66,7 @@ describe('SessionSettings', () => {
     const inside = within(dropdown);
     expect(inside.getByText('Provider')).toBeDefined();
     expect(inside.getByText('Claude Code')).toBeDefined();
+    expect(inside.getByText('work')).toBeDefined();
     fireEvent.change(inside.getByRole('combobox', { name: 'Model' }), {
       target: { value: 'sonnet' },
     });

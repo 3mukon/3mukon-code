@@ -22,7 +22,10 @@ vi.mock('./image-input', () => ({
 beforeAll(() => {
   initI18n(['en-US']);
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 // A bridge to sessions in the main process, whose answers the test sets, and whose events it sends.
 function fakeBridge(state: SessionState | null = null) {
@@ -101,6 +104,40 @@ const MODELS: ModelOption[] = [
 ];
 
 describe('SessionPage', () => {
+  it('names the provider first in the one button that holds the settings in a narrow panel', async () => {
+    // The row of settings is wider than the panel; the test environment lays out nothing.
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300);
+    const { bridge } = fakeBridge();
+    render(page(bridge));
+    await settle();
+    const button = screen.getByRole('button', { name: /^Session settings: / });
+    expect(button.textContent).toMatch(/^Claude Code · /);
+    cleanup();
+
+    const { bridge: running } = fakeBridge({ ...initialSessionState(), mode: 'auto' });
+    render(
+      <SessionPage
+        bridge={running}
+        folder="/Users/me/web"
+        sessionId="s1"
+        summary={{
+          id: 's1',
+          provider: 'codex',
+          sessionId: 'p1',
+          cwd: '/Users/me/web',
+          status: 'idle',
+          openedAt: 0,
+        }}
+        onStarted={vi.fn()}
+      />,
+    );
+    await settle();
+    expect(screen.getByRole('button', { name: /^Session settings: / }).textContent).toMatch(
+      /^Codex CLI · /,
+    );
+  });
+
   it('chooses the session’s settings before its first message, and starts it with that message', async () => {
     const { bridge } = fakeBridge();
     const onStarted = vi.fn();

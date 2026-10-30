@@ -250,7 +250,7 @@ export function SessionPage({ bridge, folder, sessionId, summary, onStarted }: S
     sessionId === null
       ? {
           label: t('sessions.page.provider'),
-          summary: false,
+          summary: true,
           value: provider,
           // The chosen provider alone until the app's providers come.
           options: (offers.providers ?? [provider]).map((id) => ({
@@ -259,7 +259,7 @@ export function SessionPage({ bridge, folder, sessionId, summary, onStarted }: S
           })),
           onChange: switchTo.provider,
         }
-      : { label: t('sessions.page.provider'), summary: false, text: providerName },
+      : { label: t('sessions.page.provider'), summary: true, text: providerName },
     ...(offers.gateways.length > 0 || settings.gateway !== null
       ? [
           {
