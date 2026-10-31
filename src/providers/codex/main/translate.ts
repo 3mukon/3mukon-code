@@ -7,6 +7,7 @@ import type {
 } from '../../../sessions/shared/events';
 import { imageTypeOf } from '../../../sessions/shared/images';
 import { displayPath, fileChange } from './patch';
+import type { JsonValue } from './protocol/serde_json/JsonValue';
 import type { AgentMessageDeltaNotification } from './protocol/v2/AgentMessageDeltaNotification';
 import type { CommandAction } from './protocol/v2/CommandAction';
 import type { CommandExecutionOutputDeltaNotification } from './protocol/v2/CommandExecutionOutputDeltaNotification';
@@ -196,15 +197,7 @@ export class Translator {
           },
         ];
       case 'webSearch':
-        return [
-          {
-            type: 'tool',
-            id: item.id,
-            kind: 'search',
-            title: item.query,
-            status: completed ? 'completed' : 'running',
-          },
-        ];
+        return [webSearch(item, completed)];
       case 'imageView': {
         const path = displayPath(item.path, this.cwd);
         return [
@@ -334,6 +327,78 @@ function commandKind(actions: readonly CommandAction[]): ToolKind {
     return 'search';
   }
   return 'execute';
+}
+
+// A web search by what it did. A search shows its first query, and all of them in its output when it
+// ran several, where Codex's own query is the first followed by an ellipsis. Opening a page shows the
+// page, and finding text in one the text and the page. Anything else, such as opening pages the
+// search found, which Codex reports without a query, shows the pages it got back by their domains,
+// with their titles in its output; a search still running has none of these yet.
+function webSearch(
+  item: Extract<ThreadItem, { type: 'webSearch' }>,
+  completed: boolean,
+): SessionEvent {
+  const call = { type: 'tool', id: item.id, status: completed ? 'completed' : 'running' } as const;
+  const { action } = item;
+  switch (action?.type) {
+    case 'search': {
+      const queries = action.queries ?? (action.query === null ? [] : [action.query]);
+      return {
+        ...call,
+        kind: 'search',
+        title: queries[0] ?? item.query,
+        ...(queries.length > 1 ? { output: queries.join('\n') } : {}),
+      };
+    }
+    case 'openPage':
+      return { ...call, kind: 'fetch', title: action.url ?? item.query };
+    case 'findInPage': {
+      const found = [action.pattern, action.url].filter((part) => part !== null && part !== '');
+      return { ...call, kind: 'search', title: found.length > 0 ? found.join(' · ') : item.query };
+    }
+    default: {
+      const pages = pagesOf(item.results);
+      if (item.query !== '' || pages.length === 0) {
+        return { ...call, kind: 'search', title: item.query };
+      }
+      const domains = [
+        ...new Set(pages.flatMap((page) => (page.domain === '' ? [] : [page.domain]))),
+      ];
+      return {
+        ...call,
+        kind: 'fetch',
+        title: domains.join(', '),
+        output: pages
+          .map((page) => [page.title, page.domain].filter((part) => part !== '').join(' · '))
+          .join('\n'),
+      };
+    }
+  }
+}
+
+// The pages a web search got back, from the results Codex passes on as they come: each one's title
+// and its domain, without www.
+function pagesOf(results: JsonValue[] | null): { title: string; domain: string }[] {
+  return (results ?? []).flatMap((result) => {
+    if (typeof result !== 'object' || result === null || Array.isArray(result)) return [];
+    const title = typeof result.title === 'string' ? result.title.trim() : '';
+    const domain = (
+      typeof result.domain === 'string'
+        ? result.domain
+        : typeof result.url === 'string'
+          ? hostOf(result.url)
+          : ''
+    ).replace(/^www\./, '');
+    return title === '' && domain === '' ? [] : [{ title, domain }];
+  });
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
 }
 
 // The images an MCP tool returned, as MCP gives them in base64.

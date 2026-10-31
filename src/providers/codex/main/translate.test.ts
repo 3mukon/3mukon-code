@@ -301,6 +301,88 @@ describe('Translator.history', () => {
   });
 });
 
+describe('web searches', () => {
+  const search = (action: unknown, query: string, results: unknown[] | null = null) =>
+    ({ type: 'webSearch', id: 'w1', query, action, results }) as unknown as ThreadItem;
+  const completed = (item: ThreadItem) =>
+    new Translator(cwd).live('item/completed', { ...turn, item });
+
+  it('shows a search by its first query, with all of them as its output when it ran several', () => {
+    expect(new Translator(cwd).live('item/started', { ...turn, item: search(null, '') })).toEqual([
+      { type: 'tool', id: 'w1', status: 'running', kind: 'search', title: '' },
+    ]);
+    expect(
+      completed(
+        search(
+          {
+            type: 'search',
+            query: null,
+            queries: ['AI news today', 'AI news this week', 'AI funding'],
+          },
+          'AI news today ...',
+        ),
+      ),
+    ).toEqual([
+      {
+        type: 'tool',
+        id: 'w1',
+        status: 'completed',
+        kind: 'search',
+        title: 'AI news today',
+        output: 'AI news today\nAI news this week\nAI funding',
+      },
+    ]);
+    expect(
+      completed(search({ type: 'search', query: 'one query', queries: null }, 'one query')),
+    ).toEqual([
+      { type: 'tool', id: 'w1', status: 'completed', kind: 'search', title: 'one query' },
+    ]);
+  });
+
+  it('shows a page it opened by its address, and text it found in one with the page', () => {
+    expect(completed(search({ type: 'openPage', url: 'https://example.com/a' }, ''))).toMatchObject(
+      [{ kind: 'fetch', title: 'https://example.com/a' }],
+    );
+    expect(
+      completed(
+        search({ type: 'findInPage', url: 'https://example.com/a', pattern: 'pricing' }, ''),
+      ),
+    ).toMatchObject([{ kind: 'search', title: 'pricing · https://example.com/a' }]);
+  });
+
+  it('shows pages it opened without a query by their domains, with their titles as its output', () => {
+    const results = [
+      {
+        type: 'text_result',
+        domain: 'www.crowdstrike.com',
+        title: 'Espionage report',
+        url: 'https://www.crowdstrike.com/r',
+      },
+      {
+        type: 'text_result',
+        domain: 'mistral.ai',
+        title: 'Latest news',
+        url: 'https://mistral.ai/news',
+      },
+      { type: 'text_result', domain: null, title: 'Internal Error', url: null },
+      { type: 'text_result', domain: null, title: 'More news', url: 'https://mistral.ai/more' },
+      'unexpected',
+    ];
+    expect(completed(search({ type: 'other' }, '', results))).toEqual([
+      {
+        type: 'tool',
+        id: 'w1',
+        status: 'completed',
+        kind: 'fetch',
+        title: 'crowdstrike.com, mistral.ai',
+        output:
+          'Espionage report · crowdstrike.com\nLatest news · mistral.ai\nInternal Error\nMore news · mistral.ai',
+      },
+    ]);
+    expect(completed(search({ type: 'other' }, ''))).toMatchObject([{ kind: 'search', title: '' }]);
+  });
+});
+
 describe('images', () => {
   const png = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
 
