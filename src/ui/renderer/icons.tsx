@@ -3,6 +3,7 @@ import {
   Check as LucideCheck,
   ChevronDown as LucideChevronDown,
   ChevronRight as LucideChevronRight,
+  CircleQuestionMark as LucideCircleQuestionMark,
   Copy as LucideCopy,
   FileText as LucideFileText,
   FolderInput as LucideFolderInput,
@@ -10,6 +11,7 @@ import {
   Pencil as LucidePencil,
   Plus as LucidePlus,
   Search as LucideSearch,
+  ShieldCheck as LucideShieldCheck,
   ShieldOff as LucideShieldOff,
   Terminal as LucideTerminal,
   ToggleRight as LucideToggleRight,
@@ -46,3 +48,5 @@ export const ToggleRight = decorative(LucideToggleRight);
 export const Wrench = decorative(LucideWrench);
 export const Copy = decorative(LucideCopy);
 export const Check = decorative(LucideCheck);
+export const ShieldCheck = decorative(LucideShieldCheck);
+export const CircleQuestionMark = decorative(LucideCircleQuestionMark);

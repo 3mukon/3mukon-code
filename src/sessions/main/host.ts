@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import type {
+  ApprovalAnswer,
   MessageImage,
   ModelOption,
   PermissionMode,
   ProviderId,
+  QuestionAnswer,
+  QuestionRequest,
   ReasoningEffort,
   SandboxLevel,
   SessionEvent,
@@ -12,6 +15,7 @@ import type {
 import {
   applyEvent,
   initialSessionState,
+  openRequests,
   sessionStatus,
   type SessionState,
 } from '../shared/session-state';
@@ -117,6 +121,18 @@ export class SessionHost {
     return this.session(id).interrupt();
   }
 
+  // Passes the user's answer to the session's provider, and records it in the session's state once
+  // the provider has taken it; a question's typed answers to secrets are not recorded.
+  async answerApproval(id: string, requestId: string, answer: ApprovalAnswer): Promise<void> {
+    await this.session(id).answerApproval(requestId, answer);
+    this.recordAnswer(id, requestId, answer);
+  }
+
+  async answerQuestion(id: string, requestId: string, answer: QuestionAnswer): Promise<void> {
+    await this.session(id).answerQuestion(requestId, answer);
+    this.recordAnswer(id, requestId, answer);
+  }
+
   setMode(id: string, mode: PermissionMode): Promise<void> {
     return this.session(id).setMode(mode);
   }
@@ -184,6 +200,23 @@ export class SessionHost {
     return session;
   }
 
+  private recordAnswer(
+    id: string,
+    requestId: string,
+    answer: ApprovalAnswer | QuestionAnswer,
+  ): void {
+    const hosted = this.sessions.get(id);
+    if (hosted === undefined) return;
+    const asked = hosted.state.timeline.find(
+      (item) => item.type === 'question' && item.request.id === requestId,
+    );
+    this.apply(hosted, {
+      type: 'request-answered',
+      requestId,
+      answer: asked?.type === 'question' ? withoutSecrets(asked.request, answer) : answer,
+    });
+  }
+
   private apply(hosted: Hosted, event: SessionEvent): void {
     hosted.state = applyEvent(hosted.state, event);
     hosted.seq += 1;
@@ -196,20 +229,25 @@ export class SessionHost {
   private report(hosted: Hosted): void {
     if (hosted.session === undefined) return;
     const title = hosted.state.title ?? firstPrompt(hosted.state);
+    const status = sessionStatus(hosted.state);
+    const waitingSince =
+      status === 'waiting' ? openRequests(hosted.state)[0]?.requestedAt : undefined;
     const summary: SessionSummary = {
       id: hosted.id,
       provider: hosted.provider,
       sessionId: hosted.session.id,
       cwd: hosted.cwd,
       ...(title === undefined ? {} : { title }),
-      status: sessionStatus(hosted.state),
+      status,
       openedAt: hosted.openedAt,
+      ...(waitingSince === undefined ? {} : { waitingSince }),
     };
     const before = hosted.summary;
     if (
       before !== undefined &&
       before.title === summary.title &&
-      before.status === summary.status
+      before.status === summary.status &&
+      before.waitingSince === summary.waitingSince
     ) {
       return;
     }
@@ -241,4 +279,24 @@ function firstPrompt(state: SessionState): string | undefined {
     return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line;
   }
   return undefined;
+}
+
+// An answer to questions without what the user typed for those that ask for a secret.
+function withoutSecrets(
+  request: QuestionRequest,
+  answer: ApprovalAnswer | QuestionAnswer,
+): ApprovalAnswer | QuestionAnswer {
+  if (answer.decision !== 'answer') return answer;
+  const secret = new Set(
+    request.questions.flatMap((question) => (question.secret ? [question.id] : [])),
+  );
+  return {
+    decision: 'answer',
+    answers: Object.fromEntries(
+      Object.entries(answer.answers).map(([id, given]) => [
+        id,
+        secret.has(id) ? { selected: given.selected } : given,
+      ]),
+    ),
+  };
 }

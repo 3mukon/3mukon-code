@@ -25,6 +25,8 @@ const ROOTS = [
   'v2/ThreadTurnsListResponse',
   'v2/TurnStartParams',
   'v2/TurnStartResponse',
+  'v2/TurnSteerParams',
+  'v2/TurnSteerResponse',
   'v2/TurnInterruptParams',
   'v2/ModelListParams',
   'v2/ModelListResponse',

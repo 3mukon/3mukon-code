@@ -112,13 +112,16 @@ interface EntryProps {
   // The title in the ink colour, as for a call still running and for files changed.
   bright: boolean;
   counts?: { added: number; removed: number };
+  // What came of it, in words after the title, in place of the state.
+  note?: string;
   // What the entry shows opened; without it, the entry does not open.
   body?: ReactNode;
 }
 
 // An entry's line, which opens and closes the entry from the pointer and the keyboard, with a chevron
-// at its end shown while the entry is open or the pointer or the focus is on it.
-function Entry({ icon: Icon, kind, status, title, bright, counts, body }: EntryProps) {
+// at its end shown while the entry is open or the pointer or the focus is on it. Tool calls and file
+// changes are entries, and so are the approvals module's answered requests.
+export function Entry({ icon: Icon, kind, status, title, bright, counts, note, body }: EntryProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const bodyId = useId();
@@ -131,7 +134,9 @@ function Entry({ icon: Icon, kind, status, title, bright, counts, body }: EntryP
         {title}
       </span>
       {counts !== undefined && <Counts {...counts} />}
-      {failed ? (
+      {note !== undefined ? (
+        <span className="shrink-0 text-faint">{note}</span>
+      ) : failed ? (
         <span className="shrink-0 text-del">{t('sessions.tool.status.failed')}</span>
       ) : (
         <span className="sr-only">{t(`sessions.tool.status.${status}`)}</span>

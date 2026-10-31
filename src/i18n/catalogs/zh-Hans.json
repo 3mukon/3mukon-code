@@ -71,8 +71,6 @@
       "fromAgent": "{{agent}}：",
       "failed": "本轮失败。",
       "startFailed": "无法启动会话。",
-      "approval": "等待你的批准",
-      "question": "等待你的回答",
       "ended": "会话已结束。",
       "activity": "活动",
       "context": "{{used}} / {{size}}（{{share}}）",
@@ -121,6 +119,42 @@
         "count": "一条消息最多附带 {{limit}} 张图像。"
       }
     }
+  },
+  "approvals": {
+    "heading": {
+      "command": "运行此命令？",
+      "edit": "进行这些更改？",
+      "permissions": "授予这些权限？",
+      "plan": "执行此计划？",
+      "tool": "使用 {{tool}}？"
+    },
+    "allowOnce": "允许一次",
+    "allowForSession": "在此会话中允许",
+    "deny": "拒绝",
+    "asks": "代理提问",
+    "answer": "回答",
+    "skip": "跳过",
+    "otherAnswer": "其他回答",
+    "yourAnswer": "你的回答",
+    "failed": "无法发送回答。",
+    "waiting": "等你回应的会话：{{count}} 个。显示等待最久的一个（⇧⌘A）。",
+    "kind": {
+      "approval": "批准",
+      "question": "提问"
+    },
+    "outcome": {
+      "allow-once": "已允许一次",
+      "allow-for-session": "已在此会话中允许",
+      "deny": "已拒绝",
+      "answer": "已回答",
+      "decline": "已跳过",
+      "answered": "已回答",
+      "withdrawn": "已撤回"
+    },
+    "chosen": "已选",
+    "hidden": "回答已隐藏",
+    "message": "“{{message}}”",
+    "denialMessage": "告诉代理改做什么"
   },
   "panels": {
     "sessionPage": "新建会话",

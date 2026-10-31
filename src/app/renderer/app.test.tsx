@@ -1,6 +1,7 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
+import { initialSessionState } from '../../sessions/shared/session-state';
 import type { SessionSummary } from '../../sessions/shared/sessions';
 import type { WorkspaceList } from '../../workspaces/shared/workspaces';
 import type { Bridge } from '../shared/bridge';
@@ -57,6 +58,10 @@ function fakeBridge(
       watch: () => Promise.resolve(),
       onChange: () => () => undefined,
       confirmClose: () => Promise.resolve('cancel'),
+    },
+    approvals: {
+      answerApproval: () => Promise.resolve(),
+      answerQuestion: () => Promise.resolve(),
     },
   };
 }
@@ -166,6 +171,94 @@ describe('App', () => {
     });
     const day = within(screen.getByRole('main')).getByRole('region', { name: 'New session' });
     expect(within(day).getByText('2026-10-28').title).toBe('/Users/me/3mukon-code/2026-10-28');
+  });
+
+  it('counts the sessions waiting on the user beside the window buttons, and shows the one that has waited longest', async () => {
+    const waiting = (id: string, title: string, waitingSince: number) => ({
+      id,
+      provider: 'codex' as const,
+      sessionId: `thread-${id}`,
+      cwd: '/Users/me/web',
+      title,
+      status: 'waiting' as const,
+      openedAt: 1,
+      waitingSince,
+    });
+    await renderApp(
+      fakeBridge({ workspaces: [], selectedId: null }, [
+        waiting('s1', 'Fix the build', 300),
+        waiting('s2', 'Update the docs', 100),
+      ]),
+    );
+    const label = 'Sessions waiting on you: 2. Show the one waiting longest (⇧⌘A).';
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: label }));
+    within(screen.getByRole('main')).getByRole('region', { name: 'Update the docs' });
+    // With the sidebar hidden, it lies in the top-left panel's header, just after the window buttons.
+    fireEvent.keyDown(window, { key: 'b', metaKey: true });
+    const header = within(screen.getByRole('main'))
+      .getByRole('region', { name: 'Update the docs' })
+      .querySelector('header');
+    expect(header?.firstElementChild?.getAttribute('aria-label')).toBe(label);
+  });
+
+  it('shows the request that has waited longest with ⇧⌘A, with the focus on it, and the next waiting session’s at the next press', async () => {
+    const waiting = (id: string, title: string, waitingSince: number): SessionSummary => ({
+      id,
+      provider: 'codex',
+      sessionId: `thread-${id}`,
+      cwd: '/Users/me/web',
+      title,
+      status: 'waiting',
+      openedAt: 1,
+      waitingSince,
+    });
+    const since: Record<string, number> = { s1: 300, s2: 100 };
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      waiting('s1', 'Fix the build', 300),
+      waiting('s2', 'Update the docs', 100),
+    ]);
+    bridge.sessions.snapshot = (id) =>
+      Promise.resolve({
+        seq: 0,
+        state: {
+          ...initialSessionState(),
+          turnRunning: true,
+          timeline: [
+            {
+              type: 'approval',
+              request: {
+                id: `r-${id}`,
+                action: 'command',
+                command: `run ${id}`,
+                canAllowForSession: false,
+                denyByDefault: false,
+                requestedAt: since[id] ?? 0,
+              },
+            },
+          ],
+        },
+      });
+    await renderApp(bridge);
+    const press = () =>
+      act(async () => {
+        fireEvent.keyDown(window, { key: 'A', metaKey: true, shiftKey: true });
+        await Promise.resolve();
+      });
+    const focusedIn = (title: string) =>
+      within(screen.getByRole('main'))
+        .getByRole('region', { name: title })
+        .contains(document.activeElement);
+    await press();
+    await waitFor(() => {
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('Run this command?');
+    });
+    expect(focusedIn('Update the docs')).toBe(true);
+    await press();
+    await waitFor(() => {
+      expect(focusedIn('Fix the build')).toBe(true);
+    });
+    expect(document.activeElement?.textContent).toContain('run s1');
   });
 
   it('shows a session clicked in the list in a panel of its own, titled by the session', async () => {

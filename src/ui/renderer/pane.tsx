@@ -27,6 +27,9 @@ interface PaneProps {
   inTitleBar?: boolean;
   // The header leaves room at its start for macOS's window buttons, which lie over it.
   clearsWindowButtons?: boolean;
+  // Shown at the start of the header, before the status and title, such as what lies beside the
+  // window buttons while the header clears them.
+  start?: ReactNode;
   // Dragging the pane by its title and detail, to move it.
   onDragStart?: (event: DragEvent<HTMLElement>) => void;
   onDragEnd?: () => void;
@@ -53,6 +56,7 @@ export function Pane({
   closeLabel,
   inTitleBar = false,
   clearsWindowButtons = false,
+  start,
   onDragStart,
   onDragEnd,
   ref,
@@ -71,6 +75,7 @@ export function Pane({
       <header
         className={`flex min-w-0 items-center gap-2.5 pr-3 font-medium ${inTitleBar ? '[-webkit-app-region:drag]' : ''} ${clearsWindowButtons ? 'pl-[84px]' : 'pl-5'}`}
       >
+        {start}
         {status !== undefined && <StatusDot status={status} />}
         {statusLabel !== undefined && <span className="sr-only">{statusLabel}</span>}
         <span

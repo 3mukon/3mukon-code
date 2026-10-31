@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ModelOption, ProviderId, SessionEvent } from '../shared/events';
+import type { ModelOption, ProviderId, QuestionAnswer, SessionEvent } from '../shared/events';
 import type { SessionSummary } from '../shared/sessions';
 import { SessionHost } from './host';
 import type { Provider, ProviderSession, SessionEventListener } from './provider';
@@ -29,6 +29,8 @@ function sessionCalls() {
     setEffort: vi.fn<ProviderSession['setEffort']>(() => Promise.resolve()),
     setSandbox: vi.fn<ProviderSession['setSandbox']>(() => Promise.resolve()),
     setGateway: vi.fn<ProviderSession['setGateway']>(() => Promise.resolve()),
+    answerApproval: vi.fn<ProviderSession['answerApproval']>(() => Promise.resolve()),
+    answerQuestion: vi.fn<ProviderSession['answerQuestion']>(() => Promise.resolve()),
   };
 }
 
@@ -51,8 +53,6 @@ function fakeProvider(id: ProviderId, fail = false) {
       return Promise.resolve({
         id: sessionId,
         ...calls,
-        answerApproval: vi.fn(),
-        answerQuestion: vi.fn(),
         close: () => {
           closed.push(sessionId);
           return Promise.resolve();
@@ -106,6 +106,81 @@ describe('SessionHost', () => {
       ['running', 'Greeting'],
       ['idle', 'Greeting'],
       ['closed', 'Greeting'],
+    ]);
+  });
+
+  it('passes answers to the provider’s session, and reports since when a session waits on the user', async () => {
+    const codex = fakeProvider('codex');
+    const host = new SessionHost([codex.provider]);
+    const id = await host.start('codex', { cwd: folder('api') });
+    const changes: SessionSummary[][] = [];
+    host.onChange((sessions) => changes.push(sessions));
+    const emit = codex.listeners[0];
+    const session = codex.sessions[0];
+    if (emit === undefined || session === undefined) throw new Error('no session');
+    emit({
+      type: 'approval-requested',
+      request: {
+        id: 'r1',
+        action: 'command',
+        canAllowForSession: false,
+        denyByDefault: false,
+        requestedAt: 200,
+      },
+    });
+    emit({
+      type: 'question-asked',
+      request: {
+        id: 'q1',
+        questions: [
+          {
+            id: 'name',
+            text: 'Name?',
+            options: [],
+            multiSelect: false,
+            freeText: true,
+            secret: false,
+          },
+          {
+            id: 'token',
+            text: 'Token?',
+            options: [],
+            multiSelect: false,
+            freeText: true,
+            secret: true,
+          },
+        ],
+        requestedAt: 100,
+      },
+    });
+    await host.answerApproval(id, 'r1', { decision: 'allow-once' });
+    const answer: QuestionAnswer = {
+      decision: 'answer',
+      answers: { name: { selected: [], text: 'web' }, token: { selected: [], text: 's3cret' } },
+    };
+    await host.answerQuestion(id, 'q1', answer);
+    expect(session.answerApproval.mock.calls).toEqual([['r1', { decision: 'allow-once' }]]);
+    // The provider gets the whole answer; the session's state keeps it without the secret.
+    expect(session.answerQuestion.mock.calls).toEqual([['q1', answer]]);
+    const recorded = host
+      .snapshot(id)
+      ?.state.timeline.map((item) =>
+        item.type === 'approval' || item.type === 'question' ? item.answer : undefined,
+      );
+    expect(recorded).toEqual([
+      { decision: 'allow-once' },
+      {
+        decision: 'answer',
+        answers: { name: { selected: [], text: 'web' }, token: { selected: [] } },
+      },
+    ]);
+    emit({ type: 'request-resolved', requestId: 'q1', outcome: 'answered' });
+    emit({ type: 'request-resolved', requestId: 'r1', outcome: 'answered' });
+    expect(changes.map(([summary]) => [summary?.status, summary?.waitingSince])).toEqual([
+      ['waiting', 200],
+      ['waiting', 100],
+      ['waiting', 200],
+      ['idle', undefined],
     ]);
   });
 

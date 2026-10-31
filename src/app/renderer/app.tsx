@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Request } from '../../approvals/renderer/requests';
+import { WaitingButton } from '../../approvals/renderer/waiting-button';
+import { nextWaiting } from '../../approvals/shared/waiting';
 import { useFileEditors } from '../../files/renderer/use-file-editors';
 import { writeItemDrag } from '../../panels/renderer/item-drag';
 import { contentOf, panelsOf, type Panel } from '../../panels/renderer/layout';
@@ -19,7 +22,8 @@ import type { Bridge } from '../shared/bridge';
 // The window shell: a full-height sidebar, which ⌘B shows and hides, beside the main area. The
 // window's top 40px form its title bar, which moves the window, shows no title and has no line
 // beneath it: in the sidebar, the row of the window buttons; over the main area, the headers of the
-// panels at the top, or an empty strip while none is open. The sidebar's divider runs through it, and
+// panels at the top, or an empty strip while none is open. Just after the window buttons, wherever
+// they lie, the count of sessions waiting on the user shows the one that has waited longest. The sidebar's divider runs through it, and
 // while the sidebar is hidden, the window buttons lie over the main area. The sidebar holds the
 // Workspaces section above the Sessions section, with a thin line between them; the main area holds
 // the panel area, blank until something opens in it. The workspaces' tree rows drag into the panel
@@ -36,6 +40,8 @@ export function App({ bridge }: { bridge: Bridge }) {
   const sessions = useSessions(bridge.sessions);
   const panels = usePanels();
   const fileEditors = useFileEditors(bridge.files);
+  // The session whose oldest waiting request takes the keyboard focus, each time the key changes.
+  const [requestFocus, setRequestFocus] = useState<{ sessionId: string; key: number } | null>(null);
 
   const openNewSession = () => {
     const selected = workspaces.workspaces.find(
@@ -55,6 +61,16 @@ export function App({ bridge }: { bridge: Bridge }) {
     if (shown !== undefined) panels.focus(shown.id);
     else panels.open([{ kind: 'session', id: session.id, folder: session.cwd }]);
   };
+
+  // The count of sessions waiting on the user, beside the window buttons, which shows the one that has
+  // waited longest.
+  // Shows a waiting session in its panel, with the focus on its oldest waiting request.
+  const showWaiting = (session: SessionSummary) => {
+    openSession(session);
+    setRequestFocus((previous) => ({ sessionId: session.id, key: (previous?.key ?? 0) + 1 }));
+  };
+
+  const waitingIndicator = <WaitingButton sessions={sessions} onShow={showWaiting} />;
 
   const openItem = (item: TreeItem) => {
     const shown = panelsOf(panels.layout).find(
@@ -86,6 +102,24 @@ export function App({ bridge }: { bridge: Bridge }) {
           folder={content.folder}
           sessionId={sessionId}
           {...(summary === undefined ? {} : { summary })}
+          {...(sessionId === null
+            ? {}
+            : {
+                renderRequest: (item, place) => (
+                  <Request
+                    item={item}
+                    {...(requestFocus?.sessionId === sessionId && place.oldestWaiting
+                      ? { focusKey: requestFocus.key }
+                      : {})}
+                    answering={{
+                      approval: (requestId, answer) =>
+                        bridge.approvals.answerApproval(sessionId, requestId, answer),
+                      question: (requestId, answer) =>
+                        bridge.approvals.answerQuestion(sessionId, requestId, answer),
+                    }}
+                  />
+                ),
+              })}
           onStarted={(started) => {
             panels.open([{ kind: 'session', id: started, folder: content.folder }], {
               kind: 'replace',
@@ -100,6 +134,26 @@ export function App({ bridge }: { bridge: Bridge }) {
   useEffect(() => {
     preloadOffers(bridge.sessions);
   }, [bridge]);
+
+  // ⇧⌘A shows the request that has waited longest, and the next waiting session's at each press.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const shiftCommand = event.metaKey && event.shiftKey && !event.altKey && !event.ctrlKey;
+      if (!shiftCommand || event.key.toLowerCase() !== 'a') return;
+      const focused = panelsOf(panels.layout).find((panel) => panel.id === panels.focusedId);
+      const next = nextWaiting(
+        sessions,
+        focused?.content.kind === 'session' ? focused.content.id : undefined,
+      );
+      if (next === undefined) return;
+      event.preventDefault();
+      showWaiting(next);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  });
 
   useEffect(() => {
     const toggleSidebar = (event: KeyboardEvent) => {
@@ -122,9 +176,12 @@ export function App({ bridge }: { bridge: Bridge }) {
         className={`shrink-0 overflow-hidden select-none motion-safe:transition-[width] motion-safe:duration-200 ${sidebarOpen ? 'w-[220px]' : 'w-0'}`}
       >
         <div className="flex h-full w-[220px] flex-col border-r border-line">
-          {/* The sidebar's part of the title bar, where macOS draws the traffic lights; no line
-              separates it from the rest of the sidebar. */}
-          <div className="h-10 shrink-0 [-webkit-app-region:drag]" />
+          {/* The sidebar's part of the title bar, where macOS draws the traffic lights, with the
+              count of sessions waiting on the user just after them; no line separates it from the
+              rest of the sidebar. */}
+          <div className="flex h-10 shrink-0 items-center pl-[84px] [-webkit-app-region:drag]">
+            {sidebarOpen && waitingIndicator}
+          </div>
           <div className="flex min-h-0 flex-1 flex-col gap-4 px-2.5 pb-3.5">
             {/* The app's name, bold and compact, just below the title bar. */}
             <div className="shrink-0 truncate px-2 leading-5 font-bold">3mukon-code</div>
@@ -153,6 +210,7 @@ export function App({ bridge }: { bridge: Bridge }) {
           bridge={bridge.panels}
           view={view}
           clearsWindowButtons={!sidebarOpen}
+          besideWindowButtons={waitingIndicator}
         />
       </main>
     </div>

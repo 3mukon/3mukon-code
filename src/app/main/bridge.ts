@@ -71,6 +71,29 @@ const startRequest = z
   })
   .strict()
   .refine((request) => hasContent(request.message, request.images));
+// An approval's or question's id, as the provider gave it.
+const requestId = z.string().min(1).max(200);
+const approvalAnswer = z.discriminatedUnion('decision', [
+  z.object({ decision: z.literal('allow-once') }).strict(),
+  z.object({ decision: z.literal('allow-for-session') }).strict(),
+  z.object({ decision: z.literal('deny'), message: text.optional() }).strict(),
+]);
+// The answers by question id: the labels of the options chosen and any text typed, which a question
+// that asks for a secret masks; it passes to the provider and is never logged.
+const questionAnswer = z.discriminatedUnion('decision', [
+  z
+    .object({
+      decision: z.literal('answer'),
+      answers: z.record(
+        z.string().min(1).max(200),
+        z
+          .object({ selected: z.array(z.string().max(2_000)).max(100), text: text.optional() })
+          .strict(),
+      ),
+    })
+    .strict(),
+  z.object({ decision: z.literal('decline') }).strict(),
+]);
 const choice = z
   .object({
     provider,
@@ -169,6 +192,16 @@ export function serveBridge({
     channels.sessions.send,
     z.tuple([id, text, sentImages]).refine(([, message, images]) => hasContent(message, images)),
     (_window, session, message, images) => sessions.send(session, message, images),
+  );
+  handle(
+    channels.approvals.answerApproval,
+    z.tuple([id, requestId, approvalAnswer]),
+    (_window, session, request, answer) => sessions.answerApproval(session, request, answer),
+  );
+  handle(
+    channels.approvals.answerQuestion,
+    z.tuple([id, requestId, questionAnswer]),
+    (_window, session, request, answer) => sessions.answerQuestion(session, request, answer),
   );
   handle(channels.sessions.interrupt, z.tuple([id]), (_window, session) =>
     sessions.interrupt(session),

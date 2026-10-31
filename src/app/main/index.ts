@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
+import { dockAttention } from '../../approvals/main/dock';
 import { FileService } from '../../files/main/files';
 import { keepUnsavedChanges, nativeFilesUi } from '../../files/main/native';
 import { mainTranslator } from '../../i18n/main/i18n';
@@ -17,6 +18,7 @@ import { nativeWorkspacesUi } from '../../workspaces/main/native';
 import { fileStorage } from '../../workspaces/main/storage';
 import { Workspaces } from '../../workspaces/main/workspaces';
 import { serveBridge } from './bridge';
+
 import { createMainWindow, pageUrl } from './window';
 
 // How long quitting waits for the sessions and the toolset to close.
@@ -48,6 +50,11 @@ void app
       page: pageUrl(),
     });
     closeBeforeQuitting(sessions, toolset);
+    // The sessions waiting on the user show on the Dock icon too.
+    const dock = app.dock;
+    if (dock !== undefined) {
+      sessions.onChange(dockAttention(dock, () => BrowserWindow.getFocusedWindow() !== null));
+    }
     // A packaged app's bundle carries its icon; unpackaged, the app shows it in the Dock itself.
     if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'resources', 'dock-icon.png'));
     // A window whose editors hold unsaved changes asks before it closes.
@@ -70,8 +77,8 @@ app.on('window-all-closed', () => {
   // Without this handler Electron quits; a macOS app keeps running until the user quits it.
 });
 
-// The app's toolset (ADR-0009), which Codex's sessions ask their questions through; without it, the
-// app offers no Codex sessions.
+// The app's toolset (ADR-0012), which every Codex session connects to; without it, the app offers no
+// Codex sessions, since Codex starts no thread while it cannot reach the toolset.
 async function startToolsetIfPossible(version: string): Promise<RunningToolset | undefined> {
   try {
     return await startToolset({ version });

@@ -136,7 +136,8 @@ async function sessionSettings(
 }
 
 // The models a session would have, from a Claude Code that initializes and is closed before any message,
-// so that no session is recorded, with the model it would use marked as the default. Through a gateway
+// so that no session is recorded, with the model it would use marked as the default. Its auto-memory is
+// off, or Claude Code would leave a memory folder for the throwaway folder in its projects folder. Through a gateway
 // it reads only the gateway's file; otherwise it reads the user's own settings, with their hooks off,
 // so that the default is the model they set. It never reads a project's settings, whose hooks and
 // servers could run from a folder no one trusted yet. The app opens none of these files itself. A
@@ -150,6 +151,7 @@ async function probeModels(gatewayFile: string | null): Promise<ModelOption[]> {
     options: {
       cwd,
       persistSession: false,
+      env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
       ...(gatewayFile === null
         ? { settingSources: ['user'], settings: { disableAllHooks: true } }
         : { settingSources: [], settings: gatewayFile }),
@@ -252,6 +254,8 @@ class ClaudeCodeSession implements ProviderSession {
   >();
   private turnRunning = false;
   private interrupting = false;
+  // Whether the last result left messages in Claude Code's queue, which it runs as the next turn.
+  private followUp = false;
   private closing = false;
   private closed = false;
   // A gateway asked for during a turn, which takes over when the turn ends.
@@ -297,10 +301,14 @@ class ClaudeCodeSession implements ProviderSession {
   async send(text: string, images: MessageImage[] = []): Promise<void> {
     if (this.switching !== null) await this.switching;
     if (this.closed) throw new Error('The session is closed.');
-    this.turnRunning = true;
+    // During a turn, Claude Code takes the message into it between tool calls, or else runs it as the
+    // next turn once the running one ends.
+    if (!this.turnRunning) {
+      this.turnRunning = true;
+      this.onEvent({ type: 'turn-started' });
+    }
     // From its first message on, Claude Code keeps a transcript that a new process can continue.
     this.settings.resume = true;
-    this.onEvent({ type: 'turn-started' });
     this.onEvent({
       type: 'message',
       id: randomUUID(),
@@ -541,6 +549,7 @@ class ClaudeCodeSession implements ProviderSession {
     let error: string | undefined;
     try {
       for await (const message of connection.query) {
+        if (message.type === 'result') this.followUp = (message.queued_turn_count ?? 0) > 0;
         for (const event of this.translator.live(message)) this.emit(event);
       }
     } catch (caught) {
@@ -574,6 +583,14 @@ class ClaudeCodeSession implements ProviderSession {
       this.onEvent(event);
     }
     void this.afterTurn();
+    // Messages sent during the turn that it did not take make the next turn, which Claude Code starts
+    // by itself; a gateway asked for meanwhile waits for its end.
+    if (this.followUp) {
+      this.followUp = false;
+      this.turnRunning = true;
+      this.onEvent({ type: 'turn-started' });
+      return;
+    }
     // A gateway asked for during the turn takes over before the next turn.
     if (this.pendingGateway !== undefined) {
       const gateway = this.pendingGateway;

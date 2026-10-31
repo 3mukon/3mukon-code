@@ -50,6 +50,18 @@ import {
   type AskUserQuestionResult,
 } from './requests';
 import { currentChoices, modeIds, Translator } from './translate';
+import {
+  completedTurn,
+  INTERJECT,
+  interjectionText,
+  parseQueueChanged,
+  parseSessionNotice,
+  QUEUE_CHANGED,
+  SESSION_NOTICE,
+  type InterjectParams,
+  type QueueChanged,
+  type SessionNotice,
+} from './turns';
 
 // Grok Build's sandbox profile behind each of the app's sandbox levels. Grok applies a profile to its
 // whole process as the process starts, so each level needs a process of its own.
@@ -100,6 +112,8 @@ interface Handlers {
     signal: AbortSignal,
   ): Promise<RequestPermissionResponse>;
   question(params: AskUserQuestionParams, signal: AbortSignal): Promise<AskUserQuestionResult>;
+  queueChanged(params: QueueChanged): void;
+  notice(params: SessionNotice): void;
 }
 
 // A Grok Build process with ACP started on it, at a sandbox level.
@@ -192,6 +206,12 @@ async function connectGrok(
     .onRequest(ASK_USER_QUESTION, parseAskUserQuestion, ({ params, signal }) =>
       handlers.question(params, signal),
     )
+    .onNotification(QUEUE_CHANGED, parseQueueChanged, ({ params }) => {
+      handlers.queueChanged(params);
+    })
+    .onNotification(SESSION_NOTICE, parseSessionNotice, ({ params }) => {
+      handlers.notice(params);
+    })
     .connect(process.stream);
   try {
     // The app reads and writes no files and runs no terminals for Grok, which uses its own tools.
@@ -224,6 +244,8 @@ async function withGrok<Result>(
     update: () => undefined,
     permission: () => Promise.resolve(cancelledPermission),
     question: () => Promise.resolve(cancelledQuestion),
+    queueChanged: () => undefined,
+    notice: () => undefined,
   });
   try {
     return await use(agent);
@@ -361,6 +383,17 @@ type Pending =
     }
   | { kind: 'question'; texts: string[]; resolve: (result: AskUserQuestionResult) => void };
 
+// A message of the user's, with its images.
+interface Message {
+  text: string;
+  images: MessageImage[];
+}
+
+// An image as Grok takes it, in a prompt or an interjection.
+function imageBlock(image: MessageImage): ContentBlock {
+  return { type: 'image', mimeType: image.mediaType, data: image.data };
+}
+
 class GrokSession implements ProviderSession {
   private agent!: Agent;
   private sessionId = '';
@@ -380,6 +413,12 @@ class GrokSession implements ProviderSession {
   private closed = false;
   // A sandbox level asked for during a turn, which takes over when the turn ends.
   private sandboxPending = false;
+  // The user's messages that no turn took, which start the next one together.
+  private queued: Message[] = [];
+  // The prompt that Grok says it runs, from the notices of its queue, and a turn that Grok runs by
+  // itself, such as for an interjection that came after its turn, which Grok's notice ends.
+  private runningPrompt: string | null = null;
+  private grokTurn: string | null = null;
   // The process switch under way, which a message waits for; it never rejects.
   private switching: Promise<void> | null = null;
 
@@ -430,9 +469,12 @@ class GrokSession implements ProviderSession {
   async send(text: string, images: MessageImage[] = []): Promise<void> {
     if (this.switching !== null) await this.switching;
     if (this.closed) throw new Error('The session is closed.');
-    this.turnRunning = true;
+    const running = this.turnRunning;
     this.translator.endMessage();
-    this.onEvent({ type: 'turn-started' });
+    if (!running) {
+      this.turnRunning = true;
+      this.onEvent({ type: 'turn-started' });
+    }
     this.onEvent({
       type: 'message',
       id: randomUUID(),
@@ -440,21 +482,60 @@ class GrokSession implements ProviderSession {
       text,
       ...(images.length === 0 ? {} : { images }),
     });
-    // Grok takes images in prompts, as its answer to initialize says.
+    const message = { text, images };
+    if (!running) {
+      this.prompt([...this.queued.splice(0), message]);
+      return;
+    }
+    // During a turn, a message joins it through Grok's interjection, its images with it, at the turn's
+    // next safe point; Grok stops answering its client after an interjection without text, so images
+    // sent alone go with a text of the app's. One that Grok refuses waits for the turn's end and starts
+    // the next turn: a prompt sent to Grok during a turn would wait in Grok's own queue, which Grok
+    // holds after a cancel until the next prompt.
+    if (await this.interjected(message)) return;
+    if (this.turnRunning) {
+      this.queued.push(message);
+      return;
+    }
+    this.turnRunning = true;
+    this.onEvent({ type: 'turn-started' });
+    this.prompt([...this.queued.splice(0), message]);
+  }
+
+  private interjected({ text, images }: Message): Promise<boolean> {
+    const params: InterjectParams = {
+      sessionId: this.sessionId,
+      text: interjectionText(text, images.length),
+      interjectionId: randomUUID(),
+      ...(images.length === 0 ? {} : { content: images.map(imageBlock) }),
+    };
+    return this.agent.connection.agent.request(INTERJECT, params).then(
+      () => true,
+      () => false,
+    );
+  }
+
+  // Sends a turn's prompt: the messages' text, then their images, which Grok takes in prompts, as its
+  // answer to initialize says.
+  private prompt(messages: Message[]): void {
+    const text = messages
+      .map((message) => message.text)
+      .filter((part) => part !== '')
+      .join('\n\n');
     const prompt: ContentBlock[] = [
       ...(text === '' ? [] : [{ type: 'text' as const, text }]),
-      ...images.map((image) => ({
-        type: 'image' as const,
-        mimeType: image.mediaType,
-        data: image.data,
-      })),
+      ...messages.flatMap((message) => message.images).map(imageBlock),
     ];
     // ACP answers a prompt when its turn ends; the turn's progress comes before as session updates. A
     // connection that closes first is the session's end, which closed reports.
     const { connection } = this.agent;
     connection.agent.request('session/prompt', { sessionId: this.sessionId, prompt }).then(
       (response) => {
-        this.endTurn(turnEndedBy(response.stopReason));
+        const promptId = response._meta?.promptId;
+        this.endTurn(
+          turnEndedBy(response.stopReason),
+          typeof promptId === 'string' ? promptId : undefined,
+        );
       },
       (error: unknown) => {
         if (connection.signal.aborted) return;
@@ -622,6 +703,18 @@ class GrokSession implements ProviderSession {
         current() ? this.askApproval(params, signal) : Promise.resolve(cancelledPermission),
       question: (params, signal) =>
         current() ? this.askQuestion(params, signal) : Promise.resolve(cancelledQuestion),
+      queueChanged: ({ sessionId, runningPromptId }) => {
+        if (!current() || this.replaying || sessionId !== this.sessionId) return;
+        this.runningPrompt = runningPromptId ?? null;
+        if (!this.turnRunning && this.runningPrompt !== null)
+          this.followGrokTurn(this.runningPrompt);
+      },
+      notice: (notice) => {
+        if (!current() || notice.sessionId !== this.sessionId) return;
+        const completed = completedTurn(notice);
+        if (completed?.promptId !== this.grokTurn) return;
+        this.endTurn(turnEndedBy(completed.stopReason), completed.promptId);
+      },
     };
   }
 
@@ -764,19 +857,43 @@ class GrokSession implements ProviderSession {
     for (const requestId of [...this.pending.keys()]) this.withdraw(requestId);
   }
 
-  // The turn has ended: what Grok left open is cancelled, and a level asked for during the turn takes
-  // over before the next one.
-  private endTurn(event: TurnEnded): void {
+  // The turn of the prompt has ended: what Grok left open is cancelled. Should Grok already run another
+  // prompt, as for an interjection that came after the turn, the session follows that turn; otherwise a
+  // level asked for during the turn takes over, and then the messages that no turn took start the next.
+  private endTurn(event: TurnEnded, promptId?: string): void {
     if (this.closed || this.closing || !this.turnRunning) return;
     this.turnRunning = false;
+    this.grokTurn = null;
     this.withdrawAll();
     this.translator.endMessage();
     this.onEvent(event);
-    if (!this.sandboxPending) return;
-    this.sandboxPending = false;
-    this.switchSandbox().catch((error: unknown) => {
-      this.onEvent({ type: 'error', message: errorMessage(error) });
-    });
+    if (promptId !== undefined && this.runningPrompt !== null && this.runningPrompt !== promptId) {
+      this.followGrokTurn(this.runningPrompt);
+      return;
+    }
+    if (this.sandboxPending) {
+      this.sandboxPending = false;
+      this.switchSandbox().catch((error: unknown) => {
+        this.onEvent({ type: 'error', message: errorMessage(error) });
+      });
+    }
+    if (this.queued.length > 0) void this.sendQueued();
+  }
+
+  // Follows a turn that Grok runs by itself, until Grok's notice that it completed.
+  private followGrokTurn(promptId: string): void {
+    this.grokTurn = promptId;
+    this.turnRunning = true;
+    this.translator.endMessage();
+    this.onEvent({ type: 'turn-started' });
+  }
+
+  private async sendQueued(): Promise<void> {
+    if (this.switching !== null) await this.switching;
+    if (this.closed || this.closing || this.turnRunning || this.queued.length === 0) return;
+    this.turnRunning = true;
+    this.onEvent({ type: 'turn-started' });
+    this.prompt(this.queued.splice(0));
   }
 
   // The session has ended: what is still open is cancelled, and closed is reported once.
@@ -785,6 +902,7 @@ class GrokSession implements ProviderSession {
     this.withdrawAll();
     this.closed = true;
     this.turnRunning = false;
+    this.queued = [];
     this.onEvent(error === undefined ? { type: 'closed' } : { type: 'closed', error });
   }
 }

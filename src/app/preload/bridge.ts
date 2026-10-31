@@ -106,5 +106,11 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
         }),
       confirmClose: (name) => invoke(channels.files.confirmClose, name) as Promise<CloseAnswer>,
     },
+    approvals: {
+      answerApproval: (sessionId, requestId, answer) =>
+        invoke(channels.approvals.answerApproval, sessionId, requestId, answer) as Promise<void>,
+      answerQuestion: (sessionId, requestId, answer) =>
+        invoke(channels.approvals.answerQuestion, sessionId, requestId, answer) as Promise<void>,
+    },
   };
 }

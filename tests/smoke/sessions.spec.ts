@@ -81,3 +81,74 @@ test('a long session scrolls within its page, and the window’s page itself nev
     await expect(window.getByRole('textbox', { name: 'Message' })).toBeInViewport();
   });
 });
+
+test('a session waiting on the user shows beside the window buttons, and its approval is answered in place', async () => {
+  const waiting: SessionSummary = {
+    ...summary,
+    title: 'Waiting session',
+    status: 'waiting',
+    waitingSince: 1,
+  };
+  const asking: SessionState = {
+    ...initialSessionState(),
+    title: 'Waiting session',
+    turnRunning: true,
+    timeline: [
+      {
+        type: 'approval',
+        request: {
+          id: 'r1',
+          action: 'command',
+          command: 'pnpm test',
+          canAllowForSession: true,
+          denyByDefault: false,
+          requestedAt: 1,
+        },
+      },
+    ],
+  };
+  await withApp(async (app) => {
+    const window = await app.firstWindow();
+    await window.getByRole('heading', { name: 'Sessions' }).waitFor();
+    await app.evaluate(
+      ({ ipcMain }, { answers, answerChannel }) => {
+        for (const [channel, answer] of answers) {
+          ipcMain.removeHandler(channel);
+          ipcMain.handle(channel, () => answer);
+        }
+        // The answers the window sends, which the test reads back.
+        const sent: unknown[][] = [];
+        (globalThis as unknown as { sent: unknown[][] }).sent = sent;
+        ipcMain.removeHandler(answerChannel);
+        ipcMain.handle(answerChannel, (_event, ...values: unknown[]) => {
+          sent.push(values);
+        });
+      },
+      {
+        answers: [
+          [channels.sessions.list, [waiting]],
+          [channels.sessions.snapshot, { seq: 0, state: asking }],
+        ] as const,
+        answerChannel: channels.approvals.answerApproval,
+      },
+    );
+    await window.reload();
+    await expect(
+      window.getByRole('button', {
+        name: 'Sessions waiting on you: 1. Show the one waiting longest (⇧⌘A).',
+      }),
+    ).toBeVisible();
+    // ⇧⌘A shows the waiting session with the focus on its approval, which Return allows once.
+    await window.keyboard.press('Shift+Meta+a');
+    const approval = window
+      .getByRole('main')
+      .getByRole('region', { name: 'Waiting session' })
+      .getByRole('region', { name: 'Run this command?' });
+    await expect(approval.getByText('pnpm test')).toBeVisible();
+    await expect(approval).toBeFocused();
+    await window.keyboard.press('Enter');
+    await expect
+      .poll(() => app.evaluate(() => (globalThis as unknown as { sent: unknown[][] }).sent))
+      .toEqual([['s1', 'r1', { decision: 'allow-once' }]]);
+  });
+});

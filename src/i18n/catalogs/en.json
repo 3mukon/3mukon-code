@@ -71,8 +71,6 @@
       "fromAgent": "{{agent}}:",
       "failed": "The turn failed.",
       "startFailed": "The session couldn’t start.",
-      "approval": "Waiting for your approval",
-      "question": "Waiting for your answer",
       "ended": "The session has ended.",
       "activity": "Activity",
       "context": "{{used}} / {{size}} ({{share}})",
@@ -121,6 +119,42 @@
         "count": "A message takes at most {{limit}} images."
       }
     }
+  },
+  "approvals": {
+    "heading": {
+      "command": "Run this command?",
+      "edit": "Make these changes?",
+      "permissions": "Grant these permissions?",
+      "plan": "Carry out this plan?",
+      "tool": "Use {{tool}}?"
+    },
+    "allowOnce": "Allow Once",
+    "allowForSession": "Allow for This Session",
+    "deny": "Deny",
+    "asks": "The agent asks",
+    "answer": "Answer",
+    "skip": "Skip",
+    "otherAnswer": "Another answer",
+    "yourAnswer": "Your answer",
+    "failed": "The answer couldn’t be sent.",
+    "waiting": "Sessions waiting on you: {{count}}. Show the one waiting longest (⇧⌘A).",
+    "kind": {
+      "approval": "Approval",
+      "question": "Question"
+    },
+    "outcome": {
+      "allow-once": "Allowed once",
+      "allow-for-session": "Allowed for this session",
+      "deny": "Denied",
+      "answer": "Answered",
+      "decline": "Skipped",
+      "answered": "Answered",
+      "withdrawn": "Withdrawn"
+    },
+    "chosen": "chosen",
+    "hidden": "Hidden answer",
+    "message": "“{{message}}”",
+    "denialMessage": "Tell the agent what to do instead"
   },
   "panels": {
     "sessionPage": "New session",

@@ -44,6 +44,7 @@ describe('approvals', () => {
       cwd: '/work/app',
       canAllowForSession: true,
       denyByDefault: false,
+      denialMessage: true,
       requestedAt: 1000,
     });
   });

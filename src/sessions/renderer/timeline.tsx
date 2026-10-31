@@ -1,9 +1,21 @@
 import { useTranslation } from 'react-i18next';
 import { StatusDot, type Status } from '../../ui/renderer/status-dot';
+import type { ReactNode } from 'react';
 import type { MessageImage, Task } from '../shared/events';
-import type { SessionState, SessionStatus, TimelineItem } from '../shared/session-state';
+import {
+  openRequests,
+  type RequestItem,
+  type SessionState,
+  type SessionStatus,
+  type TimelineItem,
+} from '../shared/session-state';
 import { Message } from './message';
 import { FileChangeEntry, ToolCall } from './tool-call';
+
+// Shows an approval or a question where it stands in the activity, as whoever composes the page
+// decides, and tells whether it is the session's oldest waiting request; the approvals module shows
+// it, with what answers it.
+export type RenderRequest = (item: RequestItem, place: { oldestWaiting: boolean }) => ReactNode;
 
 // How a session's status shows as a dot: a closed session as done.
 export const statusDots: Record<SessionStatus, Status> = {
@@ -26,23 +38,31 @@ interface TimelineProps {
   starting?: { text: string; images: MessageImage[] };
   // The provider's name, which VoiceOver reads before each of the agent's messages.
   agent: string;
+  renderRequest?: RenderRequest;
 }
 
 // A session's activity, oldest first, as the reference's panes show it: the messages (Message), the
 // user's at the right and the agent's at the left, so that the two never read alike, and the agent's
 // thinking quieter; each tool call as one entry, with the files it changed and their diffs; the
-// approvals and questions waiting for the user, errors, then the agent's task list with finished rows
-// struck through and the current one bright, and Working while a turn runs.
-export function Timeline({ state, starting, agent }: TimelineProps) {
+// approvals and questions, as the page's composer renders them; errors, then the agent's task list
+// with finished rows struck through and the current one bright, and Working while a turn runs.
+export function Timeline({ state, starting, agent, renderRequest }: TimelineProps) {
   const { t } = useTranslation();
   const working = starting !== undefined || state?.turnRunning === true;
+  const oldestWaiting = state === null ? undefined : openRequests(state)[0]?.id;
   return (
     <>
       {starting !== undefined && (
         <Message role="user" text={starting.text} images={starting.images} agent={agent} />
       )}
       {state?.timeline.map((item, index) => (
-        <Item key={keyOf(item, index)} item={item} agent={agent} />
+        <Item
+          key={keyOf(item, index)}
+          item={item}
+          agent={agent}
+          oldestWaiting={oldestWaiting}
+          {...(renderRequest === undefined ? {} : { renderRequest })}
+        />
       ))}
       {state !== null && state.tasks.length > 0 && (
         <ul className="my-3">
@@ -75,7 +95,18 @@ const taskLook: Record<Task['status'], string> = {
   completed: 'text-faint line-through decoration-line',
 };
 
-function Item({ item, agent }: { item: TimelineItem; agent: string }) {
+function Item({
+  item,
+  agent,
+  oldestWaiting,
+  renderRequest,
+}: {
+  item: TimelineItem;
+  agent: string;
+  // The id of the session's oldest waiting request, if any.
+  oldestWaiting: string | undefined;
+  renderRequest?: RenderRequest;
+}) {
   const { t } = useTranslation();
   switch (item.type) {
     case 'message':
@@ -85,16 +116,8 @@ function Item({ item, agent }: { item: TimelineItem; agent: string }) {
     case 'file-change':
       return <FileChangeEntry change={item.change} />;
     case 'approval':
-    case 'question': {
-      const waiting = item.resolution === undefined;
-      const title = item.type === 'approval' ? item.request.title : undefined;
-      return (
-        <Row status={waiting ? 'waiting' : 'done'}>
-          {title ??
-            t(item.type === 'approval' ? 'sessions.page.approval' : 'sessions.page.question')}
-        </Row>
-      );
-    }
+    case 'question':
+      return renderRequest?.(item, { oldestWaiting: item.request.id === oldestWaiting }) ?? null;
     case 'error':
       return (
         <p className="my-3 whitespace-pre-wrap text-del">
@@ -102,17 +125,6 @@ function Item({ item, agent }: { item: TimelineItem; agent: string }) {
         </p>
       );
   }
-}
-
-function Row({ status, children }: { status: Status; children: string }) {
-  return (
-    <p className="my-0.5 flex min-w-0 items-baseline gap-3">
-      <span className="-translate-y-0.5">
-        <StatusDot status={status} />
-      </span>
-      <span className="min-w-0 truncate">{children}</span>
-    </p>
-  );
 }
 
 function keyOf(item: TimelineItem, index: number): string {

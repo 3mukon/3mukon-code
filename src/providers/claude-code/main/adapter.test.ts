@@ -220,14 +220,17 @@ describe('the Claude Code provider', () => {
       settingSources: [],
       persistSession: false,
       settings: join(gatewaysDir, 'work.json'),
+      env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
     });
     expect(probe.closed).toBe(true);
     expect(probe.inputs).toEqual([]);
-    // Otherwise it reads the user's own settings, with their hooks off, and no project's.
+    // Otherwise it reads the user's own settings, with their hooks off, and no project's; its auto-memory
+    // is off either way, so it leaves no folder in Claude Code's projects folder.
     expect(await provider.listModels(null)).toEqual([opus]);
     expect(current().params.options).toMatchObject({
       settingSources: ['user'],
       settings: { disableAllHooks: true },
+      env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
     });
   });
 
@@ -387,6 +390,41 @@ describe('a Claude Code session', () => {
     expect(current().params.options).toMatchObject({ sessionId: session.id });
     expect(current().params.options).not.toHaveProperty('resume');
     expect(current().params.options).not.toHaveProperty('settings');
+  });
+
+  it('sends a message during a turn into Claude Code’s input, with its images, and follows the turn it makes', async () => {
+    const { session, events } = await startSession();
+    await session.send('Fix the build');
+    await session.send('Also the lint', [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }]);
+    await waitFor(() => current().inputs.length === 2);
+    expect(current().inputs[1]).toMatchObject({
+      message: {
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' },
+          },
+          { type: 'text', text: 'Also the lint' },
+        ],
+      },
+    });
+    expect(events.filter((event) => event.type === 'turn-started')).toHaveLength(1);
+    expect(events.flatMap((event) => (event.type === 'message' ? [event.text] : []))).toEqual([
+      'Fix the build',
+      'Also the lint',
+    ]);
+    // Claude Code ran the turn without taking the message into it, and goes on with it as the next.
+    current().push(init);
+    current().push({ ...result, queued_turn_count: 1 });
+    await waitFor(() => events.filter((event) => event.type === 'turn-ended').length === 1);
+    const ended = events.findIndex((event) => event.type === 'turn-ended');
+    expect(events.slice(ended)).toContainEqual({ type: 'turn-started' });
+    current().push({ ...result, queued_turn_count: 0 });
+    await waitFor(() => events.filter((event) => event.type === 'turn-ended').length === 2);
+    expect(events.filter((event) => event.type === 'turn-started')).toHaveLength(2);
+    expect(events.findLast((event) => event.type === 'turn-ended')).toMatchObject({
+      outcome: 'completed',
+    });
   });
 
   it('sends a message’s images as content blocks before its text, and shows them with it', async () => {

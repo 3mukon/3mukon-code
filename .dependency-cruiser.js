@@ -80,6 +80,17 @@ export default {
       to: { path: '^src/', pathNot: ['^src/workspaces/', '^src/ui/', '^src/i18n/'] },
     },
     {
+      name: 'approvals-only-to-sessions-ui-and-i18n',
+      comment:
+        "The approvals module answers the sessions' requests: it uses the sessions module's model and its activity's views, the ui and i18n modules, and the sessions module never uses it (src/approvals/README.md).",
+      severity: 'error',
+      from: { path: '^src/approvals/' },
+      to: {
+        path: '^src/',
+        pathNot: ['^src/approvals/', '^src/sessions/(shared|renderer)/', '^src/ui/', '^src/i18n/'],
+      },
+    },
+    {
       name: 'files-only-to-ui-and-i18n',
       comment: 'The files module uses only the ui and i18n modules (src/files/README.md).',
       severity: 'error',

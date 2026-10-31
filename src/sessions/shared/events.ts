@@ -95,6 +95,8 @@ export interface ApprovalRequest {
   canAllowForSession: boolean;
   // The provider asks for the decline option to be preselected and for no one-key approval.
   denyByDefault: boolean;
+  // A denial can carry the user's message to the agent, which the provider passes on.
+  denialMessage?: boolean;
   // Milliseconds since the epoch.
   requestedAt: number;
 }
@@ -129,6 +131,9 @@ export interface QuestionRequest {
   questions: Question[];
   // Milliseconds since the epoch.
   requestedAt: number;
+  // The answer goes to the agent as the user's next message rather than within the turn, so the
+  // question stays open after its turn ends.
+  byMessage?: boolean;
 }
 
 export type QuestionAnswer =
@@ -179,6 +184,9 @@ export type SessionEvent =
   | { type: 'question-asked'; request: QuestionRequest }
   // An approval or question was answered, or the provider withdrew it.
   | { type: 'request-resolved'; requestId: string; outcome: 'answered' | 'cancelled' }
+  // The user's answer to an approval or question, as the host passed it on to the provider; a typed
+  // answer to a question that asks for a secret is left out.
+  | { type: 'request-answered'; requestId: string; answer: ApprovalAnswer | QuestionAnswer }
   | { type: 'title'; title: string }
   | { type: 'mode'; mode: PermissionMode }
   // The session's gateway, model, reasoning effort and sandbox; fields left out keep their value. A null

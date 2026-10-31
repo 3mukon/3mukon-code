@@ -47,6 +47,9 @@ interface PanelAreaProps {
   // macOS's window buttons lie over the area's top-left corner, as they do while the sidebar is
   // hidden.
   clearsWindowButtons: boolean;
+  // Shown just after the window buttons while they lie over the area: in the header of the panel at
+  // the top left, or in the empty strip while no panel is open.
+  besideWindowButtons?: ReactNode;
 }
 
 // Where a drag would drop: on the empty area, or on a panel, in the zone under the pointer.
@@ -80,7 +83,13 @@ const panelDragType = 'application/x-3mukon-code-panel';
 // downwards, opening a session page in its folder; ⌘W closes the focused panel; ⌘1 to ⌘9 focus the
 // panels in reading order; ⌥⌘ and an arrow focus the next panel that way, and ⇧⌥⌘ and an arrow swap
 // the focused panel with it. Dividers take focus with Tab and move with the arrow keys.
-export function PanelArea({ panels, bridge, view, clearsWindowButtons }: PanelAreaProps) {
+export function PanelArea({
+  panels,
+  bridge,
+  view,
+  clearsWindowButtons,
+  besideWindowButtons,
+}: PanelAreaProps) {
   const { t } = useTranslation();
   const root = useRef<HTMLDivElement>(null);
   const elements = useRef(new Map<string, HTMLElement>());
@@ -274,6 +283,9 @@ export function PanelArea({ panels, bridge, view, clearsWindowButtons }: PanelAr
               focused={panel.id === panels.focusedId}
               inTitleBar={box.y === 0}
               clearsWindowButtons={clearsWindowButtons && box.x === 0 && box.y === 0}
+              {...(clearsWindowButtons && box.x === 0 && box.y === 0
+                ? { start: besideWindowButtons }
+                : {})}
               onFocus={() => {
                 panels.focus(panel.id);
               }}
@@ -313,7 +325,11 @@ export function PanelArea({ panels, bridge, view, clearsWindowButtons }: PanelAr
         />
       ))}
       {panels.layout === null && (
-        <div className="absolute inset-x-0 top-0 h-10 [-webkit-app-region:drag]" />
+        <div
+          className={`absolute inset-x-0 top-0 flex h-10 items-center [-webkit-app-region:drag] ${clearsWindowButtons ? 'pl-[84px]' : ''}`}
+        >
+          {clearsWindowButtons && besideWindowButtons}
+        </div>
       )}
       {drop?.kind === 'area' && <DropZone zone="middle" />}
     </div>

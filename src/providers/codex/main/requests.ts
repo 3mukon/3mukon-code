@@ -11,6 +11,7 @@ import type { FileChangeApprovalDecision } from './protocol/v2/FileChangeApprova
 import type { FileChangeRequestApprovalParams } from './protocol/v2/FileChangeRequestApprovalParams';
 import type { PermissionsRequestApprovalParams } from './protocol/v2/PermissionsRequestApprovalParams';
 import type { PermissionsRequestApprovalResponse } from './protocol/v2/PermissionsRequestApprovalResponse';
+import type { ThreadItem } from './protocol/v2/ThreadItem';
 import type { ToolRequestUserInputParams } from './protocol/v2/ToolRequestUserInputParams';
 import type { ToolRequestUserInputResponse } from './protocol/v2/ToolRequestUserInputResponse';
 
@@ -128,6 +129,44 @@ export function userInputQuestion(
       requestedAt: context.now,
     },
   };
+}
+
+// Questions Codex asks without waiting for the answer (`request_user_input_async`), which come as an
+// agent message that carries them. Codex takes one choice or a typed answer for each, as the user's next
+// message.
+export function asyncQuestion(item: ThreadItem, context: Context): QuestionRequest | undefined {
+  if (item.type !== 'agentMessage' || item.questions === null || item.questions.length === 0) {
+    return undefined;
+  }
+  return {
+    id: `async-${item.id}`,
+    questions: item.questions.map((question, index) => ({
+      id: String(index),
+      text: question.title,
+      options: (question.options ?? []).map((label) => ({ label })),
+      multiSelect: false,
+      freeText: true,
+      secret: false,
+    })),
+    requestedAt: context.now,
+    byMessage: true,
+  };
+}
+
+// The message that carries the user's answer to Codex's async questions: the answer alone for a single
+// question, else each question with its answer under it; none when the user declined or gave nothing.
+export function asyncReply(request: QuestionRequest, answer: QuestionAnswer): string | undefined {
+  if (answer.decision === 'decline') return undefined;
+  const replies = request.questions.flatMap((question) => {
+    const given = answer.answers[question.id];
+    const text = given?.text?.trim() ?? '';
+    const parts = [...(given?.selected ?? []), ...(text === '' ? [] : [text])];
+    return parts.length === 0 ? [] : [{ question: question.text, answer: parts.join('\n') }];
+  });
+  const [first] = replies;
+  if (first === undefined) return undefined;
+  if (request.questions.length === 1) return first.answer;
+  return replies.map((reply) => `${reply.question}\n${reply.answer}`).join('\n\n');
 }
 
 // The response Codex takes for the user's answer to an approval.

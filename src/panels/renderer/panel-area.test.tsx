@@ -259,6 +259,23 @@ describe('PanelArea', () => {
     expect(fireEvent.keyDown(window, { key: 'd', metaKey: true })).toBe(true);
   });
 
+  it('shows what lies beside the window buttons in the empty strip while they lie over the area', () => {
+    function Beside({ clears }: { clears: boolean }) {
+      return (
+        <PanelArea
+          panels={usePanels()}
+          bridge={{ itemsAt: () => Promise.resolve([]) }}
+          clearsWindowButtons={clears}
+          besideWindowButtons={<b>2 waiting</b>}
+        />
+      );
+    }
+    const { rerender } = render(<Beside clears={false} />);
+    expect(screen.queryByText('2 waiting')).toBeNull();
+    rerender(<Beside clears />);
+    expect(screen.getByText('2 waiting').parentElement?.className).toContain('pl-[84px]');
+  });
+
   it('puts the headers of the panels at the top in the title bar, clearing the window buttons when asked', () => {
     const { area } = renderArea([], true);
     // While no panel is open, an empty strip at the top moves the window.

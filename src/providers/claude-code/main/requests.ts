@@ -88,6 +88,8 @@ export function toRequest(
       canAllowForSession:
         !isPlan && suggestions.length > 0 && options.suppressAlwaysAllowRule !== true,
       denyByDefault: options.defaultToNo === true,
+      // Claude Code gives a denial's message to the model as the reason.
+      denialMessage: true,
       requestedAt: context.now,
     },
   };

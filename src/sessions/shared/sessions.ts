@@ -23,6 +23,8 @@ export interface SessionSummary {
   status: SessionStatus;
   // When the app opened the session, in milliseconds since the epoch.
   openedAt: number;
+  // While the session waits on the user, since when: its oldest open approval's or question's time.
+  waitingSince?: number;
 }
 
 // What a session page starts a session with. A null gateway is the provider's own configuration, a

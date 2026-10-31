@@ -419,6 +419,46 @@ describe('SessionPage', () => {
     expect(composer()).toHaveProperty('value', 'Hi');
   });
 
+  it('shows the session’s approvals and questions as its composer renders them', async () => {
+    const { bridge } = fakeBridge({
+      ...initialSessionState(),
+      turnRunning: true,
+      mode: 'auto',
+      timeline: [
+        {
+          type: 'approval',
+          request: {
+            id: 'r1',
+            action: 'command',
+            command: 'pnpm test',
+            canAllowForSession: true,
+            denyByDefault: false,
+            requestedAt: 0,
+          },
+        },
+      ],
+    });
+    render(
+      <SessionPage
+        bridge={bridge}
+        folder="/Users/me/web"
+        sessionId="s1"
+        summary={{
+          id: 's1',
+          provider: 'codex',
+          sessionId: 'p1',
+          cwd: '/Users/me/web',
+          status: 'waiting',
+          openedAt: 0,
+        }}
+        onStarted={vi.fn()}
+        renderRequest={(item) => <p>{`${item.type} ${item.request.id}`}</p>}
+      />,
+    );
+    await settle();
+    screen.getByText('approval r1');
+  });
+
   it('shows a running session’s activity, sends and stops it, and switches its settings', async () => {
     const running: SessionState = {
       ...initialSessionState(),
@@ -451,6 +491,10 @@ describe('SessionPage', () => {
     expect(screen.getByText('Working')).toBeDefined();
     // The provider stays as chosen.
     expect(screen.queryByRole('combobox', { name: 'Provider' })).toBeNull();
+    // A message sent during the turn goes to the session at once.
+    fireEvent.change(composer(), { target: { value: 'Also fix the lint' } });
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+    expect(bridge.send.mock.calls).toEqual([['s1', 'Also fix the lint', []]]);
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
     expect(bridge.interrupt.mock.calls).toEqual([['s1']]);
     choose('Permission mode', 'yolo');
@@ -483,6 +527,6 @@ describe('SessionPage', () => {
     expect(screen.queryByText('Working')).toBeNull();
     fireEvent.change(composer(), { target: { value: 'Thanks' } });
     fireEvent.keyDown(composer(), { key: 'Enter' });
-    expect(bridge.send.mock.calls).toEqual([['s1', 'Thanks', []]]);
+    expect(bridge.send.mock.calls.at(-1)).toEqual(['s1', 'Thanks', []]);
   });
 });

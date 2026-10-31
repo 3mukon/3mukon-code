@@ -2,14 +2,14 @@
 id: ADR-0009
 type: adr
 title: Serve the app's MCP toolset from the main process over local streamable HTTP, with a credential per session
-status: accepted
+status: superseded
 visibility: public
 date: 2026-10-26
 summary: The app serves its own MCP toolset, 3mukon-code, from the main process with the official MCP TypeScript SDK in its stateless streamable HTTP mode, on the loopback interface, where each session's provider process authenticates with a random credential of its own; a stdio relay, a hand-written endpoint, Codex's own question tool and Codex's experimental dynamic tools were rejected
 scope: ["src/toolset/**", "src/sessions/main/provider.ts", "src/providers/codex/**"]
 tags: []
 supersedes: []
-superseded_by:
+superseded_by: ADR-0012
 ---
 
 ## Context

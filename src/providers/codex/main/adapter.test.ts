@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Toolset, ToolsetAccess, ToolsetSession } from '../../../sessions/main/provider';
-import type { QuestionAnswer, SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
+import type { Toolset, ToolsetAccess } from '../../../sessions/main/provider';
+import type { SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
 import { createCodexProvider } from './adapter';
 import type { Launch, Rpc, RpcHandlers } from './rpc';
 
@@ -49,6 +49,8 @@ let failResume: string | undefined;
 let heldSandbox: Params | undefined;
 // Runs while the fake handles a thread/resume, before it answers.
 let duringResume: (() => void) | undefined;
+// A turn/steer refused, as Codex refuses one into a turn that cannot take it.
+let failSteer: string | undefined;
 
 function sandboxOf(mode: unknown): Params {
   if (heldSandbox !== undefined) return heldSandbox;
@@ -112,6 +114,9 @@ function reply(method: string, params: Params): unknown {
           id: `turn-${String(fakes.flatMap((fake) => fake.calls).filter((call) => call.method === 'turn/start').length)}`,
         },
       };
+    case 'turn/steer':
+      if (failSteer !== undefined) throw new Error(failSteer);
+      return { turnId: params.expectedTurnId };
     case 'thread/list':
       return {
         data: [
@@ -196,14 +201,13 @@ class FakeCodex implements Rpc {
   }
 }
 
-// Stands in for the app's toolset: it keeps each session's access, through which the test asks.
+// Stands in for the app's toolset: it keeps each session's access.
 class FakeToolset implements Toolset {
   readonly name = '3mukon-code';
-  readonly opened: { session: ToolsetSession; access: ToolsetAccess; closed: boolean }[] = [];
+  readonly opened: { access: ToolsetAccess; closed: boolean }[] = [];
 
-  open(session: ToolsetSession): ToolsetAccess {
+  open(): ToolsetAccess {
     const entry = {
-      session,
       closed: false,
       access: {
         url: 'http://127.0.0.1:4000/mcp',
@@ -216,23 +220,7 @@ class FakeToolset implements Toolset {
     this.opened.push(entry);
     return entry.access;
   }
-
-  // Asks through the latest session's access, as a call of the question tool would.
-  ask(signal = new AbortController().signal): Promise<QuestionAnswer> {
-    const entry = this.opened.at(-1);
-    if (entry === undefined) throw new Error('No session opened the toolset.');
-    return entry.session.ask([toolsetQuestion], signal);
-  }
 }
-
-const toolsetQuestion = {
-  id: 'q0',
-  text: 'Which library?',
-  options: [{ label: 'React' }],
-  multiSelect: false,
-  freeText: true,
-  secret: false,
-};
 
 let fakes: FakeCodex[] = [];
 let toolset: FakeToolset;
@@ -245,6 +233,7 @@ beforeEach(() => {
   failResume = undefined;
   heldSandbox = undefined;
   duringResume = undefined;
+  failSteer = undefined;
   gatewaysDir = mkdtempSync(join(tmpdir(), 'codex-gateways-'));
   writeFileSync(
     join(gatewaysDir, 'work.toml'),
@@ -271,13 +260,6 @@ function provider() {
       return fake;
     },
   });
-}
-
-// The id of the latest question the session asked.
-function lastQuestionId(events: SessionEvent[]): string {
-  const asked = events.findLast((event) => event.type === 'question-asked');
-  if (asked?.type !== 'question-asked') throw new Error('No question was asked.');
-  return asked.request.id;
 }
 
 function current(): FakeCodex {
@@ -317,6 +299,28 @@ const approvalParams = {
   command: 'rm -rf build',
   cwd: '/work',
 };
+
+// An agent message that carries async questions, as Codex completes it for a call of
+// request_user_input_async.
+const asyncQuestions = (id: string, questions: { title: string; options: string[] | null }[]) => ({
+  threadId: 'th1',
+  turnId: 'turn-1',
+  item: {
+    type: 'agentMessage',
+    id,
+    text: questions.map((question) => question.title).join('\n'),
+    phase: 'final_answer',
+    memoryCitation: null,
+    delivery: 'async',
+    questions,
+  },
+});
+
+// The text of the turn's message, by the turn's place among those started.
+const turnText = (index: number) =>
+  (current().params('turn/start', index)?.input as { text?: string }[] | undefined)?.[0]?.text;
+
+const turnsStarted = () => current().calls.filter((call) => call.method === 'turn/start').length;
 
 async function waitFor(condition: () => boolean): Promise<void> {
   for (let tries = 0; tries < 200 && !condition(); tries++) {
@@ -431,7 +435,6 @@ describe('the Codex provider', () => {
         `${server}.url="http://127.0.0.1:4000/mcp"`,
         `${server}.bearer_token_env_var="TOOLSET_3MUKON_CODE_TOKEN"`,
         `${server}.default_tools_approval_mode="approve"`,
-        `${server}.tool_timeout_sec=31536000`,
         `${server}.required=true`,
       ].flatMap((setting) => ['-c', setting]),
       env: { TOOLSET_3MUKON_CODE_TOKEN: 'credential-1' },
@@ -654,42 +657,126 @@ describe('a Codex session', () => {
     await expect(current().ask('attestation/generate', {}, 10)).rejects.toThrow('does not answer');
   });
 
-  it('asks the toolset’s questions and answers them as the user did', async () => {
+  it('asks Codex’s async questions, and sends the answer given during the turn into it', async () => {
     const { session, events } = await startSession();
-    const asked = toolset.ask();
-    const id = lastQuestionId(events);
-    expect(id.startsWith('toolset-')).toBe(true);
-    expect(events.at(-1)).toMatchObject({
+    await session.send('Ask me');
+    current().emit(
+      'item/completed',
+      asyncQuestions('call-1', [{ title: 'Which?', options: ['A', 'B'] }]),
+    );
+    expect(events.at(-1)).toEqual({
       type: 'question-asked',
-      request: { id, questions: [toolsetQuestion] },
+      request: {
+        id: 'async-call-1',
+        questions: [
+          {
+            id: '0',
+            text: 'Which?',
+            options: [{ label: 'A' }, { label: 'B' }],
+            multiSelect: false,
+            freeText: true,
+            secret: false,
+          },
+        ],
+        requestedAt: expect.any(Number) as number,
+        byMessage: true,
+      },
     });
-    const answer: QuestionAnswer = { decision: 'answer', answers: { q0: { selected: ['React'] } } };
-    await session.answerQuestion(id, answer);
-    expect(await asked).toEqual(answer);
-    expect(events.at(-1)).toEqual({ type: 'request-resolved', requestId: id, outcome: 'answered' });
+    await session.answerQuestion('async-call-1', {
+      decision: 'answer',
+      answers: { '0': { selected: ['B'], text: ' in blue ' } },
+    });
+    expect(events).toContainEqual({
+      type: 'request-resolved',
+      requestId: 'async-call-1',
+      outcome: 'answered',
+    });
+    await waitFor(() => current().params('turn/steer') !== undefined);
+    expect(current().params('turn/steer')).toMatchObject({
+      threadId: 'th1',
+      expectedTurnId: 'turn-1',
+      input: [{ type: 'text', text: 'B\nin blue', text_elements: [] }],
+    });
+    expect(turnsStarted()).toBe(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'message', role: 'user', text: 'B\nin blue' }),
+    );
   });
 
-  it('cancels the toolset’s questions on interrupt, at the turn’s end, when the call ends and on close', async () => {
+  it('sends a message during a turn into it, with its images, and one Codex takes into no turn with the next', async () => {
     const { session, events } = await startSession();
-    const declined = { decision: 'decline' };
-    await session.send('hi');
-    const interrupted = toolset.ask();
-    await session.interrupt();
-    expect(await interrupted).toEqual(declined);
-    expect(events.at(-1)).toMatchObject({ type: 'request-resolved', outcome: 'cancelled' });
-    const ended = toolset.ask();
+    await session.send('Fix the build');
+    await session.send('Also the lint', [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }]);
+    expect(current().params('turn/steer')).toMatchObject({
+      expectedTurnId: 'turn-1',
+      input: [
+        { type: 'text', text: 'Also the lint', text_elements: [] },
+        { type: 'image', url: 'data:image/png;base64,iVBORw0KGgo=' },
+      ],
+    });
+    expect(events.filter((event) => event.type === 'turn-started')).toHaveLength(1);
+    // Codex refuses a message into a turn that cannot take one; it starts the next turn.
+    failSteer = 'The active turn cannot be steered.';
+    await session.send('And the docs');
+    expect(turnsStarted()).toBe(1);
     current().emit('turn/completed', completed('turn-1'));
-    expect(await ended).toEqual(declined);
-    const call = new AbortController();
-    const givenUp = toolset.ask(call.signal);
-    call.abort();
-    expect(await givenUp).toEqual(declined);
-    const open = toolset.ask();
+    await waitFor(() => turnsStarted() === 2);
+    expect(turnText(-1)).toBe('And the docs');
+    expect(events.flatMap((event) => (event.type === 'message' ? [event.text] : []))).toEqual([
+      'Fix the build',
+      'Also the lint',
+      'And the docs',
+    ]);
+    // Once the turn has ended, a message starts a turn of its own.
+    current().emit('turn/completed', completed('turn-2'));
+    await session.send('Thanks');
+    expect(turnsStarted()).toBe(3);
+  });
+
+  it('keeps async questions open after their turn, and takes a message of the user’s own as the reply', async () => {
+    const { session, events } = await startSession();
+    await session.send('Ask me');
+    current().emit(
+      'item/completed',
+      asyncQuestions('call-1', [
+        { title: 'Name?', options: null },
+        { title: 'Colour?', options: ['Red'] },
+      ]),
+    );
+    current().emit(
+      'item/completed',
+      asyncQuestions('call-2', [{ title: 'Sure?', options: ['Yes'] }]),
+    );
+    current().emit('item/completed', asyncQuestions('call-3', [{ title: 'Skip?', options: null }]));
+    current().emit('turn/completed', completed('turn-1'));
+    expect(events.filter((event) => event.type === 'request-resolved')).toEqual([]);
+    await session.answerQuestion('async-call-1', {
+      decision: 'answer',
+      answers: { '0': { selected: [], text: 'Ada' }, '1': { selected: ['Red'] } },
+    });
+    expect(turnText(-1)).toBe('Name?\nAda\n\nColour?\nRed');
+    current().emit('turn/completed', completed('turn-2'));
+    await session.answerQuestion('async-call-3', { decision: 'decline' });
+    expect(turnsStarted()).toBe(2);
+    await session.send('Never mind');
+    expect(events).toContainEqual({
+      type: 'request-resolved',
+      requestId: 'async-call-2',
+      outcome: 'answered',
+    });
+    await expect(session.answerQuestion('async-call-2', { decision: 'decline' })).rejects.toThrow(
+      'No question async-call-2 is waiting.',
+    );
+    current().emit(
+      'item/completed',
+      asyncQuestions('call-4', [{ title: 'Later?', options: null }]),
+    );
     await session.close();
-    expect(await open).toEqual(declined);
-    expect(toolset.opened[0]?.closed).toBe(true);
-    expect(await toolset.ask()).toEqual(declined);
-    expect(events.filter((event) => event.type === 'question-asked')).toHaveLength(4);
+    expect(events).toContainEqual({
+      type: 'request-resolved',
+      requestId: 'async-call-4',
+      outcome: 'cancelled',
+    });
   });
 
   it('switches the gateway between turns by resuming the thread on a new app-server', async () => {

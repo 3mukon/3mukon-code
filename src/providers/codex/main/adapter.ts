@@ -17,8 +17,8 @@ import type {
   MessageImage,
   ModelOption,
   PermissionMode,
-  Question,
   QuestionAnswer,
+  QuestionRequest,
   ReasoningEffort,
   SandboxLevel,
   SessionEvent,
@@ -30,6 +30,7 @@ import type { InitializeParams } from './protocol/InitializeParams';
 import type { RequestId } from './protocol/RequestId';
 import type { CommandExecutionRequestApprovalParams } from './protocol/v2/CommandExecutionRequestApprovalParams';
 import type { FileChangeRequestApprovalParams } from './protocol/v2/FileChangeRequestApprovalParams';
+import type { ItemCompletedNotification } from './protocol/v2/ItemCompletedNotification';
 import type { Model } from './protocol/v2/Model';
 import type { ModelListResponse } from './protocol/v2/ModelListResponse';
 import type { PermissionsRequestApprovalParams } from './protocol/v2/PermissionsRequestApprovalParams';
@@ -45,8 +46,13 @@ import type { ThreadTurnsListResponse } from './protocol/v2/ThreadTurnsListRespo
 import type { ToolRequestUserInputParams } from './protocol/v2/ToolRequestUserInputParams';
 import type { TurnStartParams } from './protocol/v2/TurnStartParams';
 import type { TurnStartResponse } from './protocol/v2/TurnStartResponse';
+import type { TurnSteerParams } from './protocol/v2/TurnSteerParams';
+import type { TurnSteerResponse } from './protocol/v2/TurnSteerResponse';
+import type { UserInput } from './protocol/v2/UserInput';
 import {
   approvalResult,
+  asyncQuestion,
+  asyncReply,
   commandApproval,
   fileChangeApproval,
   permissionsApproval,
@@ -108,9 +114,6 @@ function sandboxLevel(policy: SandboxPolicy): SandboxLevel | undefined {
 // runs, so the agent's commands do not see it.
 const TOOLSET_VARIABLE = 'TOOLSET_3MUKON_CODE_TOKEN';
 
-// Longer than any question waits for the user: the toolset's calls have no time limit of their own.
-const TOOLSET_TIMEOUT_SECONDS = 365 * 24 * 60 * 60;
-
 // The folders of the probes still listing models, removed as the app's process exits, should it quit
 // during a probe, so that quitting leaves none behind.
 const probeFolders = new Set<string>();
@@ -118,16 +121,15 @@ process.on('exit', () => {
   for (const folder of probeFolders) rmSync(folder, { recursive: true, force: true });
 });
 
-// The app-server's settings for the app's toolset (ADR-0009): its address, the variable that holds the
-// session's credential, its tools allowed without asking, and no timeout that a waiting call reaches.
-// Codex starts no thread while it cannot reach the toolset.
+// The app-server's settings for the app's toolset (ADR-0012): its address, the variable that holds the
+// session's credential, and its tools allowed without asking. Codex starts no thread while it cannot
+// reach the toolset.
 function toolsetLaunch(name: string, access: ToolsetAccess): Launch {
   const server = `mcp_servers.${name}`;
   const settings = [
     `${server}.url=${JSON.stringify(access.url)}`,
     `${server}.bearer_token_env_var=${JSON.stringify(TOOLSET_VARIABLE)}`,
     `${server}.default_tools_approval_mode="approve"`,
-    `${server}.tool_timeout_sec=${String(TOOLSET_TIMEOUT_SECONDS)}`,
     `${server}.required=true`,
   ];
   return {
@@ -137,8 +139,8 @@ function toolsetLaunch(name: string, access: ToolsetAccess): Launch {
 }
 
 export interface CodexProviderOptions {
-  // The app's toolset, whose question tool every session gets, since Codex offers its own only in its
-  // plan mode (ADR-0009).
+  // The app's toolset, which every session connects to, so that the tools it gains reach Codex
+  // (ADR-0012).
   toolset: Toolset;
   // The folder of gateway files; the gateways folder in Codex's home when left out.
   gatewaysDir?: string;
@@ -322,8 +324,10 @@ class CodexSession implements ProviderSession {
   // The session's access to the app's toolset, and what its app-servers start with to use it.
   private readonly access: ToolsetAccess;
   private readonly launch: Launch;
-  // The toolset's questions waiting for the user, by request id.
-  private readonly toolsetQuestions = new Map<string, (answer: QuestionAnswer) => void>();
+  // Codex's async questions waiting for the user's reply, by request id.
+  private readonly asyncQuestions = new Map<string, QuestionRequest>();
+  // The user's messages that Codex took into no turn, which start the next one together.
+  private queued: Message[] = [];
   // Each connection's handlers act only while their connection is the session's current one. The
   // first connection is number 1, so 0 stands for none, as during a gateway switch.
   private generation = 0;
@@ -338,6 +342,8 @@ class CodexSession implements ProviderSession {
   >();
   private turnRunning = false;
   private turnId: string | null = null;
+  // The turn/start under way, which a message during the turn waits for to learn the turn's id.
+  private starting: Promise<void> | null = null;
   private closing = false;
   private closed = false;
   // What changed since the last turn started, which the next turn carries.
@@ -397,9 +403,7 @@ class CodexSession implements ProviderSession {
     private readonly onEvent: SessionEventListener,
   ) {
     this.translator = new Translator(settings.cwd);
-    this.access = toolset.open({
-      ask: (questions, signal) => this.askToolset(questions, signal),
-    });
+    this.access = toolset.open();
     this.launch = toolsetLaunch(toolset.name, this.access);
     // A thread takes no effort of its own; a chosen one goes with the first turn.
     this.effortChanged = settings.effort !== null;
@@ -408,36 +412,12 @@ class CodexSession implements ProviderSession {
   async send(text: string, images: MessageImage[] = []): Promise<void> {
     if (this.switching !== null) await this.switching;
     if (this.closed) throw new Error('The session is closed.');
-    this.turnRunning = true;
-    this.onEvent({ type: 'turn-started' });
-    this.onEvent({
-      type: 'message',
-      id: randomUUID(),
-      role: 'user',
-      text,
-      ...(images.length === 0 ? {} : { images }),
-    });
-    try {
-      const { turn } = await this.rpc.request<TurnStartResponse>(
-        'turn/start',
-        this.turnParams(text, images),
-      );
-      this.turnId = turn.id;
-      this.modeChanged = false;
-      this.modelChanged = false;
-      this.effortChanged = false;
-      this.sandboxChanged = false;
-    } catch (error) {
-      this.turnRunning = false;
-      const message = errorMessage(error);
-      this.onEvent({ type: 'turn-ended', outcome: 'failed', error: message });
-      throw error;
-    }
+    // A message of the user's own is their reply to Codex's async questions still open.
+    this.resolveAsyncQuestions('answered');
+    await this.deliver({ text, images });
   }
 
   async interrupt(): Promise<void> {
-    // The toolset's questions end with the turn they were asked in.
-    this.cancelToolsetQuestions();
     if (!this.turnRunning || this.turnId === null) return;
     await this.rpc.request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId });
   }
@@ -454,11 +434,12 @@ class CodexSession implements ProviderSession {
   }
 
   answerQuestion(requestId: string, answer: QuestionAnswer): Promise<void> {
-    const asked = this.toolsetQuestions.get(requestId);
-    if (asked !== undefined) {
-      this.toolsetQuestions.delete(requestId);
-      asked(answer);
+    const asynchronous = this.asyncQuestions.get(requestId);
+    if (asynchronous !== undefined) {
+      this.asyncQuestions.delete(requestId);
       this.onEvent({ type: 'request-resolved', requestId, outcome: 'answered' });
+      const reply = asyncReply(asynchronous, answer);
+      if (reply !== undefined) void this.reply(reply);
       return Promise.resolve();
     }
     const pending = this.pending.get(requestId);
@@ -636,17 +617,14 @@ class CodexSession implements ProviderSession {
 
   // The turn's input, with whatever changed since the last turn. A model or an effort set back to the
   // default goes as Codex's default, since a turn cannot unset what an earlier one chose.
-  private turnParams(text: string, images: readonly MessageImage[]): TurnStartParams {
+  private turnParams(message: Message): TurnStartParams {
     const model = this.settings.model ?? this.models.find((entry) => entry.isDefault)?.model;
     const effort =
       this.settings.effort ??
       this.models.find((entry) => entry.model === model)?.defaultReasoningEffort;
     return {
       threadId: this.threadId,
-      input: [
-        ...(text === '' ? [] : [{ type: 'text' as const, text, text_elements: [] }]),
-        ...images.map((image) => ({ type: 'image' as const, url: imageUrl(image) })),
-      ],
+      input: turnInput(message),
       ...(this.modelChanged && model !== undefined ? { model } : {}),
       ...(this.effortChanged && effort !== undefined ? { effort } : {}),
       ...(this.modeChanged ? approvals(this.settings.mode) : {}),
@@ -723,6 +701,18 @@ class CodexSession implements ProviderSession {
       this.withdraw(String((params as ServerRequestResolvedNotification).requestId));
       return;
     }
+    // An async question comes as an agent message that carries it, and shows as the question.
+    if (method === 'item/completed') {
+      const question = asyncQuestion((params as ItemCompletedNotification).item, {
+        cwd: this.settings.cwd,
+        now: Date.now(),
+      });
+      if (question !== undefined) {
+        this.asyncQuestions.set(question.id, question);
+        this.onEvent({ type: 'question-asked', request: question });
+        return;
+      }
+    }
     for (const event of this.translator.live(method, params)) this.emit(event);
   }
 
@@ -770,34 +760,105 @@ class CodexSession implements ProviderSession {
     });
   }
 
-  // A question from the app's toolset, which waits for the user as Codex's own do. It ends as declined
-  // when the toolset's call ends first.
-  private askToolset(questions: Question[], signal: AbortSignal): Promise<QuestionAnswer> {
-    if (this.closed || signal.aborted) return Promise.resolve({ decision: 'decline' });
-    const id = `toolset-${randomUUID()}`;
-    return new Promise((resolve) => {
-      this.toolsetQuestions.set(id, resolve);
-      signal.addEventListener(
-        'abort',
-        () => {
-          this.cancelToolsetQuestion(id);
-        },
-        { once: true },
-      );
-      this.onEvent({ type: 'question-asked', request: { id, questions, requestedAt: Date.now() } });
+  // The user's message, shown at once. During a turn it joins the running turn (`turn/steer`); Codex
+  // takes none into a turn that has just ended or that cannot take one, such as a compaction, and the
+  // message then starts a turn of its own, at once or once the running turn ends.
+  private async deliver(message: Message): Promise<void> {
+    const steering = this.turnRunning;
+    if (!steering) this.announceTurn();
+    this.onEvent({
+      type: 'message',
+      id: randomUUID(),
+      role: 'user',
+      text: message.text,
+      ...(message.images.length === 0 ? {} : { images: message.images }),
     });
+    if (steering) {
+      if (await this.steered(message)) return;
+      if (this.turnRunning) {
+        this.queued.push(message);
+        return;
+      }
+      this.announceTurn();
+    }
+    await this.startTurn([...this.queued.splice(0), message]);
   }
 
-  private cancelToolsetQuestion(id: string): void {
-    const asked = this.toolsetQuestions.get(id);
-    if (asked === undefined) return;
-    this.toolsetQuestions.delete(id);
-    asked({ decision: 'decline' });
-    this.onEvent({ type: 'request-resolved', requestId: id, outcome: 'cancelled' });
+  private announceTurn(): void {
+    this.turnRunning = true;
+    this.onEvent({ type: 'turn-started' });
   }
 
-  private cancelToolsetQuestions(): void {
-    for (const id of [...this.toolsetQuestions.keys()]) this.cancelToolsetQuestion(id);
+  // Adds the message to the running turn, once Codex has said which turn that is; false where Codex
+  // does not take it.
+  private async steered(message: Message): Promise<boolean> {
+    if (this.starting !== null) await this.starting;
+    const turnId = this.turnId;
+    if (!this.turnRunning || turnId === null) return false;
+    const params: TurnSteerParams = {
+      threadId: this.threadId,
+      expectedTurnId: turnId,
+      input: turnInput(message),
+    };
+    return this.rpc.request<TurnSteerResponse>('turn/steer', params).then(
+      () => true,
+      () => false,
+    );
+  }
+
+  // Starts a turn with the user's messages, which the session has shown, together as one input.
+  private async startTurn(messages: Message[]): Promise<void> {
+    const message = {
+      text: messages
+        .map((entry) => entry.text)
+        .filter((text) => text !== '')
+        .join('\n\n'),
+      images: messages.flatMap((entry) => entry.images),
+    };
+    const started = this.rpc.request<TurnStartResponse>('turn/start', this.turnParams(message));
+    const starting = started.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.starting = starting;
+    try {
+      const { turn } = await started;
+      this.turnId = turn.id;
+      this.modeChanged = false;
+      this.modelChanged = false;
+      this.effortChanged = false;
+      this.sandboxChanged = false;
+    } catch (error) {
+      this.turnRunning = false;
+      this.onEvent({ type: 'turn-ended', outcome: 'failed', error: errorMessage(error) });
+      throw error;
+    } finally {
+      if (this.starting === starting) this.starting = null;
+    }
+  }
+
+  // The messages that waited for the turn's end start the next turn, after any gateway switch; a message
+  // sent meanwhile has taken them into its own turn.
+  private async sendQueued(): Promise<void> {
+    if (this.switching !== null) await this.switching;
+    if (this.closed || this.turnRunning || this.queued.length === 0) return;
+    this.announceTurn();
+    // A turn that fails to start says so in the session.
+    await this.startTurn(this.queued.splice(0)).catch(() => undefined);
+  }
+
+  // The user's reply to an async question, which goes out as their next message.
+  private async reply(text: string): Promise<void> {
+    if (this.switching !== null) await this.switching;
+    if (this.closed) return;
+    await this.deliver({ text, images: [] }).catch(() => undefined);
+  }
+
+  private resolveAsyncQuestions(outcome: 'answered' | 'cancelled'): void {
+    for (const requestId of this.asyncQuestions.keys()) {
+      this.onEvent({ type: 'request-resolved', requestId, outcome });
+    }
+    this.asyncQuestions.clear();
   }
 
   // Codex resolved a request itself, such as when its turn ended; what the user has not answered is
@@ -816,7 +877,8 @@ class CodexSession implements ProviderSession {
     if (this.closed) return;
     this.closed = true;
     this.turnRunning = false;
-    this.cancelToolsetQuestions();
+    this.resolveAsyncQuestions('cancelled');
+    this.queued = [];
     this.access.close();
     for (const [requestId, pending] of this.pending) {
       pending.resolve(declined(pending.request));
@@ -830,7 +892,6 @@ class CodexSession implements ProviderSession {
     if (event.type === 'turn-ended') {
       this.turnRunning = false;
       this.turnId = null;
-      this.cancelToolsetQuestions();
     }
     this.onEvent(event);
     // A gateway asked for during the turn takes over before the next turn.
@@ -841,7 +902,22 @@ class CodexSession implements ProviderSession {
         this.onEvent({ type: 'error', message: errorMessage(error) });
       });
     }
+    if (event.type === 'turn-ended' && this.queued.length > 0) void this.sendQueued();
   }
+}
+
+// A message of the user's, with its images.
+interface Message {
+  text: string;
+  images: MessageImage[];
+}
+
+// A message as Codex takes it: its text, then its images as data URLs.
+function turnInput({ text, images }: Message): UserInput[] {
+  return [
+    ...(text === '' ? [] : [{ type: 'text' as const, text, text_elements: [] }]),
+    ...images.map((image) => ({ type: 'image' as const, url: imageUrl(image) })),
+  ];
 }
 
 // The answer to a request that no one answered: a denial, or no answers to the questions.

@@ -5,7 +5,6 @@ import type {
   ModelOption,
   PermissionMode,
   ProviderId,
-  Question,
   QuestionAnswer,
   ReasoningEffort,
   SandboxLevel,
@@ -60,8 +59,10 @@ export interface Provider {
 export interface ProviderSession {
   // The provider's id for the session.
   readonly id: string;
-  // Starts a turn with the user's message and its images, and resolves once the provider has accepted
-  // it; the turn's progress and end arrive as events. Called only while no turn is running.
+  // Sends the user's message and its images, and resolves once the provider has accepted it; the
+  // message is reported at once. While no turn runs it starts one, whose progress and end arrive as
+  // events; during a turn it goes to the running turn, or, where the provider cannot add it there, to a
+  // turn of its own that follows, as the provider takes it.
   send(text: string, images?: MessageImage[]): Promise<void>;
   // Stops the running turn. Approvals and questions still open resolve as cancelled.
   interrupt(): Promise<void>;
@@ -84,21 +85,13 @@ export interface ProviderSession {
   close(): Promise<void>;
 }
 
-// The app's own MCP toolset, named 3mukon-code (ADR-0009). The app starts it once and hands it to the
-// adapters whose providers lack one of its tools; an adapter opens it for each session it runs and
-// gives the session's provider process the address and the credential.
+// The app's own MCP toolset, named 3mukon-code (ADR-0012). The app starts it once and hands it to the
+// adapters that give it to their sessions; an adapter opens it for each session it runs and gives the
+// session's provider process the address and the credential.
 export interface Toolset {
   // The name providers list it under.
   readonly name: string;
-  open(session: ToolsetSession): ToolsetAccess;
-}
-
-// What the toolset needs from the session that a call comes from.
-export interface ToolsetSession {
-  // Shows the questions to the user, as a question request of the session, and resolves with the
-  // answer. It resolves as declined when the user declines, the turn is interrupted or the session
-  // closes, and when the signal aborts, as it does when the provider gives up the call.
-  ask(questions: Question[], signal: AbortSignal): Promise<QuestionAnswer>;
+  open(): ToolsetAccess;
 }
 
 // How one session's provider process reaches the toolset.
@@ -108,6 +101,6 @@ export interface ToolsetAccess {
   // The session's own credential, which the provider sends as a bearer credential. It is the app's,
   // opens only the toolset and only for this session, and is never a provider credential.
   readonly credential: string;
-  // Ends the session's access; calls still running end as cancelled.
+  // Ends the session's access.
   close(): void;
 }

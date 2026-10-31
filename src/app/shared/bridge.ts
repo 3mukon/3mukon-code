@@ -1,3 +1,4 @@
+import type { ApprovalsBridge } from '../../approvals/shared/approvals';
 import type { FilesBridge } from '../../files/shared/files';
 import type { PanelsBridge } from '../../panels/shared/panels';
 import type { SessionsBridge } from '../../sessions/shared/sessions';
@@ -10,6 +11,7 @@ export interface Bridge {
   sessions: SessionsBridge;
   panels: PanelsBridge;
   files: FilesBridge;
+  approvals: ApprovalsBridge;
 }
 
 // The bridge's IPC channels: one per call the main process answers, and one per notification it sends.
@@ -57,5 +59,9 @@ export const channels = {
     watch: 'files:watch',
     changed: 'files:changed',
     confirmClose: 'files:confirm-close',
+  },
+  approvals: {
+    answerApproval: 'approvals:answer-approval',
+    answerQuestion: 'approvals:answer-question',
   },
 } as const;

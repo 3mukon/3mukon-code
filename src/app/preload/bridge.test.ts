@@ -52,6 +52,8 @@ describe('createBridge', () => {
     });
     const image = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
     await bridge.sessions.send('s1', 'Look', [image]);
+    await bridge.approvals.answerApproval('s1', 'r1', { decision: 'allow-once' });
+    await bridge.approvals.answerQuestion('s1', 'q1', { decision: 'decline' });
     await bridge.sessions.setSandbox('s1', 'read-only');
     await bridge.sessions.snapshot('s1');
     await bridge.sessions.copyText('Hi');
@@ -97,6 +99,8 @@ describe('createBridge', () => {
         },
       ],
       ['sessions:send', 's1', 'Look', [image]],
+      ['approvals:answer-approval', 's1', 'r1', { decision: 'allow-once' }],
+      ['approvals:answer-question', 's1', 'q1', { decision: 'decline' }],
       ['sessions:set-sandbox', 's1', 'read-only'],
       ['sessions:snapshot', 's1'],
       ['sessions:copy-text', 'Hi'],

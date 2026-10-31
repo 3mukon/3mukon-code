@@ -88,6 +88,8 @@ function permission(command: string): RequestPermissionRequest {
 // What the fake Grok does; a test can change it.
 let replay: SessionUpdate[];
 let failNew: string | undefined;
+// An interjection Grok refuses.
+let failInterject: string | undefined;
 // The sandbox profile whose processes cannot resume a session.
 let failResumeAt: string | undefined;
 let pages: ListSessionsResponse[];
@@ -98,6 +100,7 @@ let fakes: FakeGrok[];
 beforeEach(() => {
   replay = [];
   failNew = undefined;
+  failInterject = undefined;
   failResumeAt = undefined;
   pages = [];
   slowExit = false;
@@ -120,7 +123,7 @@ class FakeGrok {
   readonly process: GrokProcess;
   stopped = false;
   private readonly connection: AgentConnection;
-  private prompt: ((stopReason: StopReason) => void) | null = null;
+  private prompt: ((stopReason: StopReason, meta?: Params) => void) | null = null;
   private failPrompt: ((message: string) => void) | null = null;
   private model = 'grok-default';
   private effort = 'high';
@@ -177,14 +180,23 @@ class FakeGrok {
       .onRequest('session/prompt', ({ params }) => {
         record('session/prompt', params);
         return new Promise((resolve, reject) => {
-          this.prompt = (stopReason) => {
-            resolve({ stopReason });
+          this.prompt = (stopReason, meta) => {
+            resolve({ stopReason, ...(meta === undefined ? {} : { _meta: meta }) });
           };
           this.failPrompt = (message) => {
             reject(new RequestError(-32000, message));
           };
         });
       })
+      .onRequest(
+        '_x.ai/interject',
+        (params) => params as Params,
+        ({ params }) => {
+          record('_x.ai/interject', params);
+          if (failInterject !== undefined) throw new RequestError(-32000, failInterject);
+          return { status: 'queued' };
+        },
+      )
       .onNotification('session/cancel', ({ params }) => {
         record('session/cancel', params);
         this.endPrompt('cancelled');
@@ -229,9 +241,14 @@ class FakeGrok {
     if (this.prompt === null) throw new Error('No prompt reached Grok.');
   }
 
-  endPrompt(stopReason: StopReason): void {
-    this.prompt?.(stopReason);
+  endPrompt(stopReason: StopReason, meta?: Params): void {
+    this.prompt?.(stopReason, meta);
     this.prompt = null;
+  }
+
+  // One of Grok's extension notices, such as its queue's.
+  async notify(method: string, params: Params): Promise<void> {
+    await this.connection.client.notify(method, params);
   }
 
   rejectPrompt(message: string): void {
@@ -412,6 +429,90 @@ describe('turns', () => {
       sessionId: 'grok-1',
       prompt: [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' }],
     });
+  });
+
+  it('adds a message during a turn through Grok’s interjection, with its images, and holds one it refuses', async () => {
+    const { session, events, until } = await open((onEvent) =>
+      provider.start({ cwd: '/work' }, onEvent),
+    );
+    events.length = 0;
+    const image = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
+    const block = { type: 'image', mimeType: 'image/png', data: image.data };
+    await session.send('Fix the build');
+    await fake().prompted();
+    await session.send('Also the lint');
+    await session.send('Like this', [image]);
+    expect(fake().paramsOf('_x.ai/interject')).toMatchObject([
+      { sessionId: 'grok-1', text: 'Also the lint' },
+      { sessionId: 'grok-1', text: 'Like this', content: [block] },
+    ]);
+    expect(fake().paramsOf('_x.ai/interject')[0]).not.toHaveProperty('content');
+    // Images sent alone go with a text of the app's, since Grok goes silent after an interjection
+    // without one; the activity shows the message as sent.
+    await session.send('', [image, image]);
+    expect(fake().paramsOf('_x.ai/interject')[2]).toMatchObject({
+      text: '(images attached)',
+      content: [block, block],
+    });
+    expect(events.findLast((event) => event.type === 'message')).toMatchObject({ text: '' });
+    // A message that Grok refuses waits for the next turn.
+    failInterject = 'Grok cannot take it now.';
+    await session.send('And the docs');
+    expect(fake().paramsOf('_x.ai/interject')).toHaveLength(4);
+    expect(fake().paramsOf('session/prompt')).toHaveLength(1);
+    fake().endPrompt('end_turn');
+    await until(() => fake().paramsOf('session/prompt').length === 2);
+    expect(fake().paramsOf('session/prompt')[1]).toEqual({
+      sessionId: 'grok-1',
+      prompt: [{ type: 'text', text: 'And the docs' }],
+    });
+    expect(events.map((event) => event.type)).toEqual([
+      'turn-started',
+      'message',
+      'message',
+      'message',
+      'message',
+      'message',
+      'turn-ended',
+      'turn-started',
+    ]);
+  });
+
+  it('follows a turn that Grok runs by itself, as for an interjection after its turn', async () => {
+    const { session, events, until } = await open((onEvent) =>
+      provider.start({ cwd: '/work' }, onEvent),
+    );
+    events.length = 0;
+    const types = () => events.map((event) => event.type);
+    const completed = (promptId: string) => ({
+      sessionId: 'grok-1',
+      update: { sessionUpdate: 'turn_completed', prompt_id: promptId, stop_reason: 'end_turn' },
+    });
+    await session.send('Fix the build');
+    await fake().prompted();
+    // Grok already runs the interjection as a prompt of its own when the turn's answer comes.
+    await fake().notify('_x.ai/queue/changed', {
+      sessionId: 'grok-1',
+      entries: [],
+      runningPromptId: 'interject-fallback-1',
+      runningKind: 'prompt',
+    });
+    fake().endPrompt('end_turn', { promptId: 'p1' });
+    await until(() => types().length === 4);
+    expect(types()).toEqual(['turn-started', 'message', 'turn-ended', 'turn-started']);
+    await fake().notify('_x.ai/session_notification', completed('interject-fallback-1'));
+    await until(() => types().length === 5);
+    expect(events.at(-1)).toEqual({ type: 'turn-ended', outcome: 'completed' });
+    // One that Grok starts while no turn runs.
+    await fake().notify('_x.ai/queue/changed', {
+      sessionId: 'grok-1',
+      entries: [],
+      runningPromptId: 'interject-fallback-2',
+    });
+    await until(() => types().length === 6);
+    await fake().notify('_x.ai/session_notification', completed('interject-fallback-2'));
+    await until(() => types().length === 7);
+    expect(types().slice(4)).toEqual(['turn-ended', 'turn-started', 'turn-ended']);
   });
 
   it('sends the message and streams the turn until Grok answers the prompt', async () => {

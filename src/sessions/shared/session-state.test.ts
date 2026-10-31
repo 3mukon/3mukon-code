@@ -211,6 +211,22 @@ describe('applyEvent', () => {
     });
   });
 
+  it('keeps the user’s answer with its request, an approval’s with an approval and a question’s with a question', () => {
+    const state = fold([
+      { type: 'approval-requested', request: approval },
+      { type: 'question-asked', request: question },
+      { type: 'request-answered', requestId: 'approval-1', answer: { decision: 'allow-once' } },
+      { type: 'request-answered', requestId: question.id, answer: { decision: 'decline' } },
+      { type: 'request-answered', requestId: question.id, answer: { decision: 'deny' } },
+      { type: 'request-answered', requestId: 'nope', answer: { decision: 'decline' } },
+    ]);
+    expect(
+      state.timeline.map((item) =>
+        item.type === 'approval' || item.type === 'question' ? item.answer : undefined,
+      ),
+    ).toEqual([{ decision: 'allow-once' }, { decision: 'decline' }]);
+  });
+
   it('never changes the state it is given', () => {
     const before = fold([
       { type: 'message', id: 'm1', role: 'agent', text: 'a' },
@@ -279,6 +295,20 @@ describe('sessionStatus and openRequests', () => {
       { type: 'error', message: 'Connection lost' },
     ]);
     expect(sessionStatus(state)).toBe('idle');
+  });
+
+  it('keeps a question answered by message open after its turn, until the session closes', () => {
+    const byMessage = { ...question, id: 'question-2', byMessage: true };
+    let state = fold([
+      { type: 'turn-started' },
+      { type: 'question-asked', request: question },
+      { type: 'question-asked', request: byMessage },
+      { type: 'turn-ended', outcome: 'completed' },
+    ]);
+    expect(openRequests(state)).toEqual([byMessage]);
+    expect(sessionStatus(state)).toBe('waiting');
+    state = applyEvent(state, { type: 'closed' });
+    expect(openRequests(state)).toEqual([]);
   });
 
   it('closes, cancelling what is still open', () => {

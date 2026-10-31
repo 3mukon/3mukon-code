@@ -1,10 +1,12 @@
 import type {
+  ApprovalAnswer,
   ApprovalRequest,
   FileChange,
   MessageImage,
   MessageRole,
   ModelOption,
   PermissionMode,
+  QuestionAnswer,
   QuestionRequest,
   ReasoningEffort,
   SandboxLevel,
@@ -35,10 +37,24 @@ export type TimelineItem =
   | ToolItem
   // A change no tool call in the timeline made.
   | { type: 'file-change'; change: FileChange }
-  | { type: 'approval'; request: ApprovalRequest; resolution?: 'answered' | 'cancelled' }
-  | { type: 'question'; request: QuestionRequest; resolution?: 'answered' | 'cancelled' }
+  | {
+      type: 'approval';
+      request: ApprovalRequest;
+      resolution?: 'answered' | 'cancelled';
+      // The user's answer, once the app has passed one on.
+      answer?: ApprovalAnswer;
+    }
+  | {
+      type: 'question';
+      request: QuestionRequest;
+      resolution?: 'answered' | 'cancelled';
+      answer?: QuestionAnswer;
+    }
   // Without a message, the UI says in its own words that the turn failed.
   | { type: 'error'; message?: string };
+
+// An approval or a question in the timeline.
+export type RequestItem = Extract<TimelineItem, { type: 'approval' | 'question' }>;
 
 // What the UI shows of one session, folded from its events by applyEvent.
 export interface SessionState {
@@ -90,7 +106,7 @@ export function applyEvent(state: SessionState, event: SessionEvent): SessionSta
     case 'turn-started':
       return { ...state, turnRunning: true };
     case 'turn-ended': {
-      const ended = { ...cancelOpenRequests(state), turnRunning: false };
+      const ended = { ...cancelOpenRequests(state, 'turn'), turnRunning: false };
       return event.outcome === 'failed' ? append(ended, errorItem(event.error)) : ended;
     }
     case 'message': {
@@ -168,6 +184,22 @@ export function applyEvent(state: SessionState, event: SessionEvent): SessionSta
         type: 'question',
         request: event.request,
       });
+    case 'request-answered': {
+      const index = state.timeline.findIndex(
+        (item) =>
+          (item.type === 'approval' || item.type === 'question') &&
+          item.request.id === event.requestId,
+      );
+      const item = state.timeline[index];
+      const { answer } = event;
+      if (item?.type === 'approval' && isApprovalAnswer(answer)) {
+        return put(state, index, { ...item, answer });
+      }
+      if (item?.type === 'question' && !isApprovalAnswer(answer)) {
+        return put(state, index, { ...item, answer });
+      }
+      return state;
+    }
     case 'request-resolved': {
       const index = state.timeline.findIndex(
         (item) =>
@@ -199,7 +231,7 @@ export function applyEvent(state: SessionState, event: SessionEvent): SessionSta
     case 'error':
       return append(state, errorItem(event.message));
     case 'closed': {
-      const closed = { ...cancelOpenRequests(state), turnRunning: false, closed: true };
+      const closed = { ...cancelOpenRequests(state, 'session'), turnRunning: false, closed: true };
       return event.error === undefined ? closed : append(closed, errorItem(event.error));
     }
   }
@@ -253,15 +285,22 @@ function errorItem(message: string | undefined): TimelineItem {
   return message === undefined || message === '' ? { type: 'error' } : { type: 'error', message };
 }
 
-// Requests that can no longer be answered once their turn or session is over.
-function cancelOpenRequests(state: SessionState): SessionState {
-  if (openRequests(state).length === 0) return state;
+// Requests that can no longer be answered once their turn or session is over; a question answered by
+// message outlasts its turn.
+function cancelOpenRequests(state: SessionState, over: 'turn' | 'session'): SessionState {
+  const cancelled = (item: TimelineItem): item is RequestItem =>
+    (item.type === 'approval' || item.type === 'question') &&
+    item.resolution === undefined &&
+    (over === 'session' || item.type === 'approval' || item.request.byMessage !== true);
+  if (!state.timeline.some(cancelled)) return state;
   return {
     ...state,
     timeline: state.timeline.map((item) =>
-      (item.type === 'approval' || item.type === 'question') && item.resolution === undefined
-        ? { ...item, resolution: 'cancelled' }
-        : item,
+      cancelled(item) ? { ...item, resolution: 'cancelled' } : item,
     ),
   };
+}
+
+function isApprovalAnswer(answer: ApprovalAnswer | QuestionAnswer): answer is ApprovalAnswer {
+  return answer.decision !== 'answer' && answer.decision !== 'decline';
 }

@@ -12,7 +12,7 @@ import type {
 import type { RememberedChoice, SessionsBridge, SessionSummary } from '../shared/sessions';
 import { Attachments, useAttachments } from './attachments';
 import { SessionSettings, type Setting } from './session-settings';
-import { Timeline } from './timeline';
+import { Timeline, type RenderRequest } from './timeline';
 import { TimelineActionsContext, timelineActions } from './timeline-actions';
 import { rememberChoice, useOffers, useRemembered } from './use-offers';
 import { useSession } from './use-session';
@@ -60,6 +60,8 @@ interface SessionPageProps {
   summary?: SessionSummary;
   // Called with the app's id for the session once the page has started it.
   onStarted: (id: string) => void;
+  // Shows the session's approvals and questions in its activity, with what answers them.
+  renderRequest?: RenderRequest;
 }
 
 // A session page. Before its first message it chooses the provider, gateway, model, reasoning effort,
@@ -72,9 +74,17 @@ interface SessionPageProps {
 // or effort no longer offered gives way to the default; a session's settings, as it starts and as it
 // switches, are remembered for its folder. Choosing yolo asks the
 // user to confirm; a running session's sandbox level switches at once. The composer sends with Return
-// and starts a new line with Shift-Return, with the images pasted into it or dropped on it; Stop ends
-// the running turn.
-export function SessionPage({ bridge, folder, sessionId, summary, onStarted }: SessionPageProps) {
+// and starts a new line with Shift-Return, with the images pasted into it or dropped on it, during a
+// turn too, when the message goes to the running turn as the provider takes it; Stop ends the running
+// turn.
+export function SessionPage({
+  bridge,
+  folder,
+  sessionId,
+  summary,
+  onStarted,
+  renderRequest,
+}: SessionPageProps) {
   const { t } = useTranslation();
   const state = useSession(bridge, sessionId);
   // The user's choice on this page, once they have made one.
@@ -142,7 +152,7 @@ export function SessionPage({ bridge, folder, sessionId, summary, onStarted }: S
   const send = () => {
     const text = draft.trim();
     const { images } = attachments;
-    if ((text === '' && images.length === 0) || running || closed) return;
+    if ((text === '' && images.length === 0) || shownStart !== null || closed) return;
     setDraft('');
     attachments.clear();
     setStartFailed(false);
@@ -351,6 +361,7 @@ export function SessionPage({ bridge, folder, sessionId, summary, onStarted }: S
             state={state}
             agent={providerName}
             {...(shownStart === null ? {} : { starting: shownStart })}
+            {...(renderRequest === undefined ? {} : { renderRequest })}
           />
           {startFailed && <p className="my-3 text-del">{t('sessions.page.startFailed')}</p>}
         </section>

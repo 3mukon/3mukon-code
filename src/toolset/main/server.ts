@@ -3,16 +3,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { CancelledNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { Toolset, ToolsetSession } from '../../sessions/main/provider';
-import {
-  ASK_USER,
-  askUserDescription,
-  askUserInput,
-  askUserOutput,
-  toQuestions,
-  toResult,
-} from './ask-user';
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import type { Toolset } from '../../sessions/main/provider';
 
 // The toolset's name, as providers list it and as its MCP server introduces itself.
 export const TOOLSET_NAME = '3mukon-code';
@@ -20,27 +12,17 @@ export const TOOLSET_NAME = '3mukon-code';
 const PATH = '/mcp';
 
 export interface RunningToolset extends Toolset {
-  // Stops serving: every session's access ends, and calls still running end as cancelled.
+  // Stops serving: every session's access ends.
   close(): Promise<void>;
 }
 
-// One session's access while it lasts.
-interface Opened {
-  session: ToolsetSession;
-  // Aborts the session's running calls when its access ends.
-  ended: AbortController;
-  // The session's running calls, by their request ids. A provider that gives up a call says so in a
-  // request of its own, which a server of its own handles, so the calls are found here.
-  calls: Map<string, AbortController>;
-}
-
-// Serves the app's own MCP toolset (ADR-0009) over streamable HTTP on the loopback interface, at a
-// port the system chooses. A request needs the credential of a session whose access is open, and its
-// calls act for that session alone. Each request gets an MCP server and transport of its own, as the
-// MCP SDK's stateless mode has it, so a call can wait for the user as long as its request lasts.
+// Serves the app's own MCP toolset (ADR-0012) over streamable HTTP on the loopback interface, at a
+// port the system chooses. A request needs the credential of a session whose access is open. Each
+// request gets an MCP server and transport of its own, as the MCP SDK's stateless mode has it.
 export async function startToolset({ version }: { version: string }): Promise<RunningToolset> {
-  // By the digest of each credential, so that looking one up compares no credential directly.
-  const opened = new Map<string, Opened>();
+  // The digests of the open accesses' credentials, so that looking one up compares no credential
+  // directly.
+  const opened = new Set<string>();
   const server = createServer((request, response) => {
     void serve(request, response);
   });
@@ -65,8 +47,7 @@ export async function startToolset({ version }: { version: string }): Promise<Ru
       reply(response, 403, 'Forbidden.');
       return;
     }
-    const entry = opened.get(digest(bearer(request.headers.authorization)));
-    if (entry === undefined) {
+    if (!opened.has(digest(bearer(request.headers.authorization)))) {
       response.setHeader('WWW-Authenticate', 'Bearer');
       reply(response, 401, 'Unauthorized.');
       return;
@@ -76,7 +57,7 @@ export async function startToolset({ version }: { version: string }): Promise<Ru
       reply(response, 405, 'This toolset takes POST requests only.');
       return;
     }
-    const mcp = toolset(entry, version);
+    const mcp = toolset(version);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     response.on('close', () => {
       void transport.close();
@@ -93,23 +74,19 @@ export async function startToolset({ version }: { version: string }): Promise<Ru
 
   return {
     name: TOOLSET_NAME,
-    open(session) {
+    open() {
       const credential = randomBytes(32).toString('base64url');
       const key = digest(credential);
-      const entry: Opened = { session, ended: new AbortController(), calls: new Map() };
-      opened.set(key, entry);
+      opened.add(key);
       return {
         url: `http://${host}${PATH}`,
         credential,
         close() {
-          if (opened.get(key) !== entry) return;
           opened.delete(key);
-          entry.ended.abort();
         },
       };
     },
     close() {
-      for (const entry of opened.values()) entry.ended.abort();
       opened.clear();
       return new Promise((resolve) => {
         server.close(() => {
@@ -121,46 +98,14 @@ export async function startToolset({ version }: { version: string }): Promise<Ru
   };
 }
 
-// The toolset's MCP server for one request of one session.
-function toolset(entry: Opened, version: string): McpServer {
+// The toolset's MCP server for one request. It has no tools in this version, and lists none: Codex
+// lists a server's tools even when it offers none, and a required server that cannot list them keeps
+// Codex from starting a thread. The first tool registered with registerTool lists the tools itself, so
+// these two lines go with it.
+function toolset(version: string): McpServer {
   const mcp = new McpServer({ name: TOOLSET_NAME, version });
-  mcp.server.setNotificationHandler(CancelledNotificationSchema, ({ params }) => {
-    if (params.requestId !== undefined) entry.calls.get(String(params.requestId))?.abort();
-  });
-  mcp.registerTool(
-    ASK_USER,
-    {
-      title: 'Ask the user',
-      description: askUserDescription,
-      inputSchema: askUserInput,
-      outputSchema: askUserOutput,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    },
-    async (input, extra) => {
-      const questions = toQuestions(input);
-      const id = String(extra.requestId);
-      const call = new AbortController();
-      entry.calls.set(id, call);
-      try {
-        const answer = await entry.session.ask(
-          questions,
-          AbortSignal.any([extra.signal, entry.ended.signal, call.signal]),
-        );
-        const result = toResult(questions, answer);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result) }],
-          structuredContent: result,
-        };
-      } finally {
-        if (entry.calls.get(id) === call) entry.calls.delete(id);
-      }
-    },
-  );
+  mcp.server.registerCapabilities({ tools: {} });
+  mcp.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [] }));
   return mcp;
 }
 

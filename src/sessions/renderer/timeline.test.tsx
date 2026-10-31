@@ -53,7 +53,15 @@ describe('Timeline', () => {
         { text: 'Fix the test', status: 'in_progress' },
       ],
     };
-    render(<Timeline state={state} agent="Claude Code" />);
+    render(
+      <Timeline
+        state={state}
+        agent="Claude Code"
+        renderRequest={(item, place) => (
+          <p>{`${item.type} ${item.request.id}${place.oldestWaiting ? ' oldest' : ''}`}</p>
+        )}
+      />,
+    );
     // The user's message at the right, filled, and the agent's at the left, outlined, each named for
     // VoiceOver.
     const prompt = screen.getByText('Fix the build').closest('.rounded-lg');
@@ -70,7 +78,8 @@ describe('Timeline', () => {
     expect(screen.getByText('Failed')).toBeDefined();
     const change = screen.getByRole('button', { name: /src\/a\.ts/ });
     expect(change.textContent).toContain('+2−1');
-    expect(screen.getByText('Waiting for your approval')).toBeDefined();
+    // A request shows as the page's composer renders it.
+    screen.getByText('approval r1 oldest');
     expect(screen.getByText('The turn failed.')).toBeDefined();
     expect(screen.getByRole('link', { name: 'the docs' }).getAttribute('href')).toBe(
       'https://example.com',

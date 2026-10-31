@@ -26,6 +26,17 @@ describe('Pane', () => {
     expect(pane.getAttribute('aria-current')).toBe('true');
   });
 
+  it('shows what it is given at the start of its header, before the title', () => {
+    render(
+      <Pane title="a.ts" focused onFocus={vi.fn()} clearsWindowButtons start={<b>2</b>}>
+        <p>body</p>
+      </Pane>,
+    );
+    const header = screen.getByRole('region', { name: 'a.ts' }).querySelector('header');
+    expect(header?.firstElementChild?.textContent).toBe('2');
+    expect(header?.className).toContain('pl-[84px]');
+  });
+
   it('marks unsaved changes with a dot in its close button, which VoiceOver hears after the title', () => {
     render(
       <Pane

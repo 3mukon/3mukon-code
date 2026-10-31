@@ -21,8 +21,8 @@ import { createCodexProvider } from './adapter';
 
 // Drives a real Codex session on the signed-in account, in a throwaway folder, on a small model at low
 // effort, with the app's toolset. Only `corepack pnpm run test:live` runs it, never the check command:
-// it needs Codex signed in, and it uses a little of the account's usage. Codex's own question tool
-// works only in its plan mode, so the agent asks through the toolset's.
+// it needs Codex signed in, and it uses a little of the account's usage. The agent asks through Codex's
+// own async question tool, whose answer goes back as the user's next message.
 
 const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'codex-live-')));
 // A gateway that keeps Codex's own provider, so that switching to it keeps the account's sign-in.
@@ -82,7 +82,7 @@ function lastAgentText(state: SessionState): string {
   return last?.type === 'message' ? last.text : '';
 }
 
-it('runs turns in auto, writes a file, asks through the toolset, switches mode, model, gateway and sandbox, and resumes', async () => {
+it('runs turns in auto, writes a file, asks with Codex’s own question tool, switches mode, model, gateway and sandbox, and resumes', async () => {
   const provider = createCodexProvider({ toolset, gatewaysDir });
   expect(await provider.listGateways()).toEqual(['plain']);
   const models = await provider.listModels(null);
@@ -139,26 +139,39 @@ it('runs turns in auto, writes a file, asks through the toolset, switches mode, 
     ),
   ).toBe(true);
 
-  // The question tool runs in auto without asking for approval, and its answer reaches the agent.
+  // Codex's async question shows as a question, and the answer reaches the agent as the user's next
+  // message, within the turn or after it.
   await session.send(
-    'Use the ask_user tool of the 3mukon-code MCP server to ask me one question, whether I prefer tabs or spaces, with the options Tabs and Spaces. Then reply with one word: the option I chose.',
+    'Use your request_user_input_async tool to ask me one question, whether I prefer tabs or spaces, with the options Tabs and Spaces. When my answer arrives, reply with one word: the option I chose.',
   );
-  await live.until((_, events) => turnsEnded(events) === 3);
+  const replied = (events: SessionEvent[]) =>
+    events.findIndex(
+      (event) => event.type === 'message' && event.role === 'user' && event.text === 'Tabs',
+    );
+  await live.until((state, events) => {
+    const at = replied(events);
+    return (
+      at >= 0 && !state.turnRunning && events.slice(at).some((event) => event.type === 'turn-ended')
+    );
+  });
   const asked = live.events.flatMap((event) =>
-    event.type === 'question-asked' ? [event.request.id] : [],
+    event.type === 'question-asked' ? [event.request] : [],
   );
   expect(asked).toHaveLength(1);
-  expect(asked[0]?.startsWith('toolset-')).toBe(true);
+  expect(asked[0]?.byMessage).toBe(true);
   expect(lastAgentText(live.state).toLowerCase()).toContain('tabs');
+  // Sends a message and waits for the end of the turn it starts.
+  const turn = async (text: string) => {
+    const ended = turnsEnded(live.events);
+    await session.send(text);
+    await live.until((_, events) => turnsEnded(events) > ended);
+  };
 
   // Yolo runs commands without asking, from the next turn on, still in the workspace sandbox; the model
   // switches the same way.
   await session.setMode('yolo');
   await session.setModel(otherModel);
-  await session.send(
-    'Run the shell command `printf yolo > again.txt`, then reply with one word: done',
-  );
-  await live.until((_, events) => turnsEnded(events) === 4);
+  await turn('Run the shell command `printf yolo > again.txt`, then reply with one word: done');
   expect(existsSync(join(cwd, 'again.txt'))).toBe(true);
   expect(live.events.some((event) => event.type === 'tool' && event.kind === 'execute')).toBe(true);
   expect(live.state.mode).toBe('yolo');
@@ -166,10 +179,9 @@ it('runs turns in auto, writes a file, asks through the toolset, switches mode, 
   // The gateway switches between turns, by resuming the thread on a new app-server.
   await session.setGateway('plain');
   expect(live.state.gateway).toBe('plain');
-  await session.send(
+  await turn(
     'What was the one word you replied with first in this conversation? Reply with that word only.',
   );
-  await live.until((_, events) => turnsEnded(events) === 5);
   expect(lastAgentText(live.state).toLowerCase()).toContain('ready');
   expect(live.events.some((event) => event.type === 'closed' || event.type === 'error')).toBe(
     false,
@@ -178,10 +190,9 @@ it('runs turns in auto, writes a file, asks through the toolset, switches mode, 
   // Read-only takes over from the next turn, and in yolo nothing may leave it.
   await session.setSandbox('read-only');
   expect(live.state.sandbox).toBe('read-only');
-  await session.send(
+  await turn(
     'Run the shell command `printf blocked > blocked.txt` once, and do not try any other way. Then reply with one word: done',
   );
-  await live.until((_, events) => turnsEnded(events) === 6);
   expect(existsSync(join(cwd, 'blocked.txt'))).toBe(false);
 
   await session.close();
