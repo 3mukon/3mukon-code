@@ -8,7 +8,8 @@ export type Translate = TFunction;
 
 // Translates the main process's own strings, such as those of the dialogs and menus it shows, in the
 // language picked from the preferred languages, as the window picks its own. The text goes to native
-// dialogs and menus, never into a page, so values are not escaped.
+// dialogs and to the menus and questions a window's page draws, which show it as text, never as
+// markup, so values are not escaped.
 export function mainTranslator(preferred: readonly string[]): Translate {
   const language = resolveLanguage(preferred);
   const instance = i18next.createInstance();

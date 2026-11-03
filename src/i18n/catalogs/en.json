@@ -27,6 +27,7 @@
     "newSession": "New session",
     "filter": "Filter sessions by workspace",
     "allWorkspaces": "All workspaces",
+    "archived": "Archived sessions",
     "status": {
       "running": "Running",
       "waiting": "Waiting for you",
@@ -40,6 +41,21 @@
       "message": "Run this session in yolo mode?",
       "detail": "In yolo mode the agent carries out every action without asking, and nothing reviews it first. Its sandbox still applies.",
       "confirm": "Use Yolo"
+    },
+    "menu": {
+      "archive": "Archive",
+      "unarchive": "Unarchive",
+      "remove": "Remove from List"
+    },
+    "archive": {
+      "message": "Archive “{{title}}”?",
+      "detail": "The session is working, and archiving it stops it.",
+      "confirm": "Archive"
+    },
+    "remove": {
+      "message": "Remove “{{title}}” from the list?",
+      "detail": "The session leaves the app’s lists, and {{provider}} keeps its history. A session that is working stops.",
+      "confirm": "Remove"
     },
     "sandbox": {
       "read-only": "Read-only",
@@ -71,7 +87,9 @@
       "fromAgent": "{{agent}}:",
       "failed": "The turn failed.",
       "startFailed": "The session couldn’t start.",
-      "ended": "The session has ended.",
+      "resumeFailed": "The session couldn’t be resumed.",
+      "loadingHistory": "Reading the session’s history…",
+      "historyFailed": "The session’s history couldn’t be read.",
       "activity": "Activity",
       "context": "{{used}} / {{size}} ({{share}})",
       "contextDetail": "{{used}} of {{size}} tokens of the context window in use ({{share}})",

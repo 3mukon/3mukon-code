@@ -76,8 +76,9 @@ const panelDragType = 'application/x-3mukon-code-panel';
 // A folder or file dropped from a tree or the Finder fills the empty area; near a panel's edge it
 // splits that panel and opens on that side, and in a panel's middle it takes the panel's place. A
 // panel dragged by its title onto another panel moves beside it near its edge, and in its middle the
-// two swap places. A panel that asks before it closes is asked first, also before a drop takes its
-// place.
+// two swap places; dropped anywhere else in the window, on itself too, it stays where it was, without
+// the slide back that macOS gives a drag that nothing took. A panel that asks before it closes is
+// asked first, also before a drop takes its place.
 //
 // The keyboard, from anywhere in the window: ⌘D splits the focused panel to the right and ⇧⌘D
 // downwards, opening a session page in its folder; ⌘W closes the focused panel; ⌘1 to ⌘9 focus the
@@ -164,6 +165,24 @@ export function PanelArea({
     followFocus.current = false;
     if (panels.focusedId !== null) elements.current.get(panels.focusedId)?.focus();
   });
+
+  // The window takes a panel being moved wherever it is let go, so that a panel that goes nowhere
+  // stays without macOS sliding its title back to where the drag began; the area's own handlers,
+  // which the events reach first, move a panel that has somewhere to go.
+  useEffect(() => {
+    const takeMove = (event: globalThis.DragEvent) => {
+      const transfer = event.dataTransfer;
+      if (moving.current === null || transfer?.types.includes(panelDragType) !== true) return;
+      event.preventDefault();
+      if (event.type === 'dragover') transfer.dropEffect = 'move';
+    };
+    window.addEventListener('dragover', takeMove);
+    window.addEventListener('drop', takeMove);
+    return () => {
+      window.removeEventListener('dragover', takeMove);
+      window.removeEventListener('drop', takeMove);
+    };
+  }, []);
 
   const targetAt = (event: DragEvent<HTMLElement>): DropTarget | null => {
     if (panels.layout === null) return { kind: 'area' };

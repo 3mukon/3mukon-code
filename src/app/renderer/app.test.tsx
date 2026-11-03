@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import { initialSessionState } from '../../sessions/shared/session-state';
-import type { SessionSummary } from '../../sessions/shared/sessions';
+import type { SessionList, SessionSummary } from '../../sessions/shared/sessions';
 import type { WorkspaceList } from '../../workspaces/shared/workspaces';
 import type { Bridge } from '../shared/bridge';
 import { App } from './app';
@@ -12,10 +12,17 @@ beforeAll(() => {
 });
 afterEach(cleanup);
 
+// A bridge whose main process has these workspaces and sessions, the archived ones apart.
 function fakeBridge(
   list: WorkspaceList = { workspaces: [], selectedId: null },
   sessions: SessionSummary[] = [],
 ): Bridge {
+  const archived = sessions.filter((session) => session.archived === true);
+  const sessionList: SessionList = {
+    sessions: sessions.filter((session) => session.archived !== true),
+    archived: archived.length,
+    shown: [],
+  };
   return {
     workspaces: {
       get: () => Promise.resolve(list),
@@ -27,8 +34,11 @@ function fakeBridge(
       listFolder: () => Promise.resolve({ entries: [] }),
     },
     sessions: {
-      list: () => Promise.resolve(sessions),
+      list: () => Promise.resolve(sessionList),
       onChange: () => () => undefined,
+      archived: () => Promise.resolve(archived),
+      resume: () => Promise.resolve(),
+      showMenu: () => Promise.resolve(null),
       providers: () => Promise.resolve(['claude-code']),
       dayFolder: () => Promise.resolve('/Users/me/3mukon-code/2026-10-28'),
       gateways: () => Promise.resolve([]),
@@ -63,7 +73,13 @@ function fakeBridge(
       answerApproval: () => Promise.resolve(),
       answerQuestion: () => Promise.resolve(),
     },
+    prompts: { onPrompt: () => () => undefined, answer: () => Promise.resolve() },
   };
+}
+
+// Opens a popover as the browser would tell it, which happy-dom does not.
+function opened(popover: HTMLElement) {
+  fireEvent(popover, Object.assign(new Event('toggle'), { oldState: 'closed', newState: 'open' }));
 }
 
 // Renders the shell and lets the bridge's first answers arrive.
@@ -117,7 +133,7 @@ describe('App', () => {
             cwd: '/Users/me/web',
             title: 'Fix the build',
             status: 'running',
-            openedAt: 1,
+            activeAt: 1,
           },
         ],
       ),
@@ -181,7 +197,7 @@ describe('App', () => {
       cwd: '/Users/me/web',
       title,
       status: 'waiting' as const,
-      openedAt: 1,
+      activeAt: 1,
       waitingSince,
     });
     await renderApp(
@@ -194,12 +210,136 @@ describe('App', () => {
     const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
     fireEvent.click(within(sidebar).getByRole('button', { name: label }));
     within(screen.getByRole('main')).getByRole('region', { name: 'Update the docs' });
-    // With the sidebar hidden, it lies in the top-left panel's header, just after the window buttons.
+    // Just after the archived sessions' button, which keeps its place beside the window buttons; with
+    // the sidebar hidden, both lie in the top-left panel's header.
+    const named = (element: Element | null | undefined) =>
+      [...(element?.querySelectorAll('button') ?? [])].map((button) =>
+        button.getAttribute('aria-label'),
+      );
+    expect(named(within(sidebar).getByRole('button', { name: label }).parentElement)).toEqual([
+      'Archived sessions',
+      label,
+    ]);
     fireEvent.keyDown(window, { key: 'b', metaKey: true });
     const header = within(screen.getByRole('main'))
       .getByRole('region', { name: 'Update the docs' })
       .querySelector('header');
-    expect(header?.firstElementChild?.getAttribute('aria-label')).toBe(label);
+    expect(named(header?.firstElementChild)).toEqual(['Archived sessions', label]);
+  });
+
+  it('lists archived sessions apart, from the button beside the window buttons, and shows one from there', async () => {
+    const summary = (id: string, title: string, archived: boolean): SessionSummary => ({
+      id,
+      provider: 'codex',
+      sessionId: `thread-${id}`,
+      cwd: '/Users/me/web',
+      title,
+      status: 'closed',
+      activeAt: 1,
+      ...(archived ? { archived: true } : {}),
+    });
+    await renderApp(
+      fakeBridge({ workspaces: [], selectedId: null }, [
+        summary('s1', 'Fix the build', false),
+        summary('s2', 'Old idea', true),
+      ]),
+    );
+    const sessions = screen.getByRole('region', { name: 'Sessions' });
+    within(sessions).getByText('Fix the build');
+    expect(within(sessions).queryByText('Old idea')).toBeNull();
+    const button = screen.getByRole('button', { name: 'Archived sessions' });
+    expect(button).toHaveProperty('disabled', false);
+    const dropdown = document.getElementById(button.getAttribute('popovertarget') ?? '');
+    if (dropdown === null) throw new Error('no dropdown');
+    opened(dropdown);
+    fireEvent.click(await within(dropdown).findByRole('button', { name: /Old idea/ }));
+    // Its panel is titled by it, and its page has its provider, though the Sessions list lacks it.
+    const panel = within(screen.getByRole('main')).getByRole('region', { name: 'Old idea' });
+    await waitFor(() => {
+      expect(within(panel).getByText('Codex CLI')).toBeTruthy();
+    });
+  });
+
+  it('keeps titling the panel of a session archived while it shows, from the sessions the window has shown', async () => {
+    const bridge = fakeBridge();
+    const summary: SessionSummary = {
+      id: 's1',
+      provider: 'codex',
+      sessionId: 'thread-1',
+      cwd: '/Users/me/web',
+      title: 'Fix the build',
+      status: 'idle',
+      activeAt: 1,
+    };
+    let report: (list: SessionList) => void = () => undefined;
+    bridge.sessions.onChange = (listener) => {
+      report = listener;
+      return () => undefined;
+    };
+    await renderApp(bridge);
+    act(() => {
+      report({ sessions: [summary], archived: 0, shown: [] });
+    });
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Fix the build/,
+      }),
+    );
+    act(() => {
+      report({
+        sessions: [],
+        archived: 1,
+        shown: [{ ...summary, status: 'closed', archived: true }],
+      });
+    });
+    const panel = within(screen.getByRole('main')).getByRole('region', { name: 'Fix the build' });
+    expect(within(panel).getByText('Codex CLI')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Archived sessions' })).toHaveProperty(
+      'disabled',
+      false,
+    );
+  });
+
+  it('offers a session’s menu, and closes the panels of a session removed from the lists', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/web',
+        title: 'Fix the build',
+        status: 'idle',
+        activeAt: 1,
+      },
+    ]);
+    const asked: string[] = [];
+    let done: 'archive' | 'remove' | null = 'archive';
+    bridge.sessions.showMenu = (id) => {
+      asked.push(id);
+      return Promise.resolve(done);
+    };
+    await renderApp(bridge);
+    const row = () =>
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Fix the build/,
+      });
+    fireEvent.click(row());
+    const shown = () =>
+      within(screen.getByRole('main')).queryAllByRole('region', { name: 'Fix the build' });
+    expect(shown()).toHaveLength(1);
+    // Archived, a session keeps its panel; removed, it loses it.
+    await act(async () => {
+      fireEvent.contextMenu(row());
+      await Promise.resolve();
+    });
+    expect(shown()).toHaveLength(1);
+    done = 'remove';
+    await act(async () => {
+      fireEvent.contextMenu(row());
+      await Promise.resolve();
+    });
+    expect(asked).toEqual(['s1', 's1']);
+    expect(shown()).toHaveLength(0);
   });
 
   it('shows the request that has waited longest with ⇧⌘A, with the focus on it, and the next waiting session’s at the next press', async () => {
@@ -210,7 +350,7 @@ describe('App', () => {
       cwd: '/Users/me/web',
       title,
       status: 'waiting',
-      openedAt: 1,
+      activeAt: 1,
       waitingSince,
     });
     const since: Record<string, number> = { s1: 300, s2: 100 };
@@ -271,7 +411,7 @@ describe('App', () => {
           cwd: '/Users/me/web',
           title: 'Fix the build',
           status: 'running',
-          openedAt: 1,
+          activeAt: 1,
         },
       ]),
     );

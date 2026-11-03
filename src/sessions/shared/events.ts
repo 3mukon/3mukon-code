@@ -205,6 +205,12 @@ export type SessionEvent =
   | { type: 'context'; used: number; size: number | null }
   // A resumed session has replayed its past events; what follows is live.
   | { type: 'replay-finished' }
+  // A session that is not running, as the host read it from its provider's history: its past events,
+  // or none, failed, when they could not be read. A host event, which no provider sends.
+  | { type: 'history'; events: SessionEvent[]; failed?: true }
+  // The host has resumed a session that was not running, which runs again. A host event, which no
+  // provider sends.
+  | { type: 'resumed' }
   | { type: 'error'; message: string }
   // The session ended, and its provider process with it.
   | { type: 'closed'; error?: string };

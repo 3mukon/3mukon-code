@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { answerDialogs, dataFolder, launch } from './app';
+import { answerQuestion, dataFolder, launch, pickFolder } from './app';
 
 test('a workspace added with its trust answer is selected, opens into its tree and is kept after a restart', async () => {
   const data = dataFolder();
@@ -15,8 +15,9 @@ test('a workspace added with its trust answer is selected, opens into its tree a
     let app = await launch(data.path);
     try {
       const window = await app.firstWindow();
-      await answerDialogs(app, folder, false);
+      await pickFolder(app, folder);
       await window.getByRole('button', { name: 'Add workspace' }).click();
+      await answerQuestion(window, 'Don’t Trust');
       const workspace = window.getByRole('treeitem', { name, exact: true });
       await expect(workspace).toHaveAttribute('aria-selected', 'true');
       await expect(workspace.locator('> div')).toHaveAttribute('title', folder);
@@ -47,6 +48,46 @@ test('a workspace added with its trust answer is selected, opens into its tree a
   }
 });
 
+test('a workspace’s menu is drawn in the window, stays as the press that opened it is released, and changes the trust answer', async () => {
+  const data = dataFolder();
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), 'smoke-workspace-menu-')));
+  try {
+    const app = await launch(data.path);
+    try {
+      const window = await app.firstWindow();
+      await pickFolder(app, folder);
+      await window.getByRole('button', { name: 'Add workspace' }).click();
+      await answerQuestion(window, 'Trust');
+      const line = window
+        .getByRole('treeitem', { name: basename(folder), exact: true })
+        .locator('> div');
+      const lineBox = await line.boundingBox();
+      if (lineBox === null) throw new Error('The workspace is not listed.');
+      // The menu shows while the button is still down, as a person right-clicks, and stays as it
+      // comes up.
+      await window.mouse.move(lineBox.x + 20, lineBox.y + lineBox.height / 2);
+      await window.mouse.down({ button: 'right' });
+      const menu = window.getByRole('menu');
+      await expect(menu).toBeVisible();
+      await window.mouse.up({ button: 'right' });
+      await expect(menu).toBeVisible();
+      const trusted = menu.getByRole('menuitemcheckbox', { name: 'Trusted' });
+      await expect(trusted).toHaveAttribute('aria-checked', 'true');
+      await expect(menu.getByRole('menuitem')).toHaveText(['Remove Workspace']);
+      await trusted.click();
+      await expect(menu).toHaveCount(0);
+      await expect(
+        window.getByRole('treeitem', { name: `${basename(folder)}, Untrusted`, exact: true }),
+      ).toBeVisible();
+    } finally {
+      await app.close();
+    }
+  } finally {
+    data.remove();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test('a click opens and closes a workspace, a double click selects it, and the filter lists the workspaces just below itself', async () => {
   const data = dataFolder();
   const parent = realpathSync(mkdtempSync(join(tmpdir(), 'smoke-workspaces-')));
@@ -57,8 +98,9 @@ test('a click opens and closes a workspace, a double click selects it, and the f
     try {
       const window = await app.firstWindow();
       for (const folder of folders) {
-        await answerDialogs(app, folder, true);
+        await pickFolder(app, folder);
         await window.getByRole('button', { name: 'Add workspace' }).click();
+        await answerQuestion(window, 'Trust');
         await expect(
           window.getByRole('treeitem', { name: basename(folder), exact: true }),
         ).toHaveAttribute('aria-selected', 'true');

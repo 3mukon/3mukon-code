@@ -89,14 +89,26 @@ describe('Timeline', () => {
     expect(screen.queryByText('Working')).toBeNull();
   });
 
-  it('shows a first message on its way and Working while the session starts, and when it has ended', () => {
+  it('shows a message on its way after the activity, and Working, while the session starts or resumes', () => {
     const { rerender } = render(
-      <Timeline state={null} starting={{ text: 'Hello', images: [] }} agent="Codex CLI" />,
+      <Timeline state={null} pending={{ text: 'Hello', images: [] }} agent="Codex CLI" />,
     );
     expect(screen.getByText('Hello')).toBeDefined();
     expect(screen.getByText('Working')).toBeDefined();
-    rerender(<Timeline state={{ ...initialSessionState(), closed: true }} agent="Codex CLI" />);
-    expect(screen.getByText('The session has ended.')).toBeDefined();
+    const past: SessionState = {
+      ...initialSessionState(),
+      closed: true,
+      timeline: [{ type: 'message', id: 'm1', role: 'user', text: 'Earlier' }],
+    };
+    rerender(<Timeline state={past} pending={{ text: 'Again', images: [] }} agent="Codex CLI" />);
+    const earlier = screen.getByText('Earlier');
+    expect(
+      earlier.compareDocumentPosition(screen.getByText('Again')) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // A session that is not running says nothing of its own: the next message resumes it.
+    rerender(<Timeline state={past} agent="Codex CLI" />);
+    expect(screen.queryByText('Working')).toBeNull();
+    expect(screen.queryByText(/ended/)).toBeNull();
   });
 
   it('leaves raw HTML in an agent’s message out', () => {

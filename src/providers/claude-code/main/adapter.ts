@@ -96,6 +96,12 @@ export function createClaudeCodeProvider({
       onEvent({ type: 'replay-finished' });
       return ClaudeCodeSession.open(settings, onEvent, translator);
     },
+    // Read from Claude Code's own transcript, without starting Claude Code.
+    async history(sessionId, cwd) {
+      const translator = new Translator(cwd);
+      const messages = await getSessionMessages(sessionId, { dir: cwd });
+      return messages.flatMap((message) => translator.history(message));
+    },
     async listSessions(cwd, limit) {
       const sessions = await listSessions({ dir: cwd, limit });
       return sessions.map((session) => ({

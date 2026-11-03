@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelOption, ProviderId, QuestionAnswer, SessionEvent } from '../shared/events';
-import type { SessionSummary } from '../shared/sessions';
-import { SessionHost } from './host';
-import type { Provider, ProviderSession, SessionEventListener } from './provider';
+import type { SessionAction, SessionList, SessionSettings } from '../shared/sessions';
+import { SessionHost, type SessionsMenuUi } from './host';
+import type { Provider, ProviderSession, ResumeOptions, SessionEventListener } from './provider';
+import { SessionRecords, type SessionRecord } from './records';
 
 // Sessions start in real folders, which the host checks.
 let root: string;
@@ -34,65 +35,146 @@ function sessionCalls() {
   };
 }
 
-// A provider whose sessions the test drives: it reports the sandbox while starting, and hands each
-// session's listener and calls to the test.
+// The past of a fake session: the user's first message, among the settings it reported.
+const pastEvents: SessionEvent[] = [
+  { type: 'mode', mode: 'auto' },
+  { type: 'message', id: 'm1', role: 'user', text: 'Fix the build' },
+  { type: 'settings', model: 'sonnet' },
+];
+
+// A provider whose sessions the test drives: it reports the sandbox while starting; resuming, it
+// replays the session's past and then reports the mode and the settings it was given, as the adapters
+// do; its sessions report that they closed as they close. Each session's listener and calls go to the
+// test.
 function fakeProvider(id: ProviderId, fail = false) {
   const listeners: SessionEventListener[] = [];
   const sessions: ReturnType<typeof sessionCalls>[] = [];
   const closed: string[] = [];
+  const resumed: ResumeOptions[] = [];
   const listModels = vi.fn<Provider['listModels']>(() => Promise.resolve([]));
+  const history = vi.fn<Provider['history']>(() => Promise.resolve(pastEvents));
+  const open = (sessionId: string, onEvent: SessionEventListener): Promise<ProviderSession> => {
+    listeners.push(onEvent);
+    const calls = sessionCalls();
+    sessions.push(calls);
+    return Promise.resolve({
+      id: sessionId,
+      ...calls,
+      close: () => {
+        closed.push(sessionId);
+        onEvent({ type: 'closed' });
+        return Promise.resolve();
+      },
+    });
+  };
   const provider: Provider = {
     id,
     start(_options, onEvent) {
       if (fail) return Promise.reject(new Error('Not signed in.'));
-      const sessionId = `${id}-${String(sessions.length + 1)}`;
-      listeners.push(onEvent);
       onEvent({ type: 'settings', sandbox: 'workspace-write' });
-      const calls = sessionCalls();
-      sessions.push(calls);
-      return Promise.resolve({
-        id: sessionId,
-        ...calls,
-        close: () => {
-          closed.push(sessionId);
-          return Promise.resolve();
-        },
-      });
+      return open(`${id}-${String(sessions.length + 1)}`, onEvent);
     },
-    resume: () => Promise.reject(new Error('unused')),
+    resume(options, onEvent) {
+      if (fail) return Promise.reject(new Error('Not signed in.'));
+      resumed.push(options);
+      for (const event of pastEvents) onEvent(event);
+      onEvent({ type: 'replay-finished' });
+      onEvent({ type: 'mode', mode: options.mode ?? 'auto' });
+      onEvent({
+        type: 'settings',
+        gateway: options.gateway ?? null,
+        model: options.model ?? null,
+        effort: options.effort ?? null,
+        sandbox: options.sandbox ?? 'workspace-write',
+      });
+      return open(options.sessionId, onEvent);
+    },
     listSessions: () => Promise.resolve([]),
+    history,
     listGateways: () => Promise.resolve(['work']),
     listModels,
   };
-  return { provider, listeners, sessions, closed, listModels };
+  return { provider, listeners, sessions, closed, resumed, listModels, history };
 }
+
+// The sessions the app keeps, in memory, beginning with these, and every list of them saved.
+function memoryRecords(initial: SessionRecord[] = []) {
+  const saved: SessionRecord[][] = [];
+  const records = new SessionRecords({
+    load: () => initial,
+    save: (all) => saved.push(all),
+  });
+  return { records, saved };
+}
+
+// A Claude Code session the app started in an earlier run, last in yolo.
+const kept = (overrides: Partial<SessionRecord> = {}): SessionRecord => ({
+  id: 'kept',
+  provider: 'claude-code',
+  sessionId: 'claude-9',
+  cwd: folder('web'),
+  title: 'Fix the build',
+  activeAt: 1_000,
+  mode: 'yolo',
+  gateway: 'work',
+  model: 'opus',
+  effort: 'high',
+  sandbox: 'read-only',
+  ...overrides,
+});
+
+// The settings kept for that session, which its page resumes it with unless the user changes them.
+const keptSettings: SessionSettings = {
+  mode: 'yolo',
+  gateway: 'work',
+  model: 'opus',
+  effort: 'high',
+  sandbox: 'read-only',
+};
+
+// The user in the session's menu and its questions, choosing and answering as the test says.
+function menuUi(choice: SessionAction | null, confirm = true) {
+  const ui = {
+    sessionMenu: vi.fn<SessionsMenuUi['sessionMenu']>(() => Promise.resolve(choice)),
+    confirmArchive: vi.fn<SessionsMenuUi['confirmArchive']>(() => Promise.resolve(confirm)),
+    confirmRemove: vi.fn<SessionsMenuUi['confirmRemove']>(() => Promise.resolve(confirm)),
+  } satisfies SessionsMenuUi;
+  return ui;
+}
+
+// Lets the host's reads and replies settle.
+const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 describe('SessionHost', () => {
   it('lists a session once its provider has started it', async () => {
     const claude = fakeProvider('claude-code');
-    const host = new SessionHost([claude.provider]);
-    const changes: SessionSummary[][] = [];
-    host.onChange((sessions) => changes.push(sessions));
+    const host = new SessionHost([claude.provider], memoryRecords().records);
+    const changes: SessionList[] = [];
+    host.onChange((list) => changes.push(list));
     const id = await host.start('claude-code', { cwd: folder('web') });
-    expect(host.list()).toEqual([
-      {
-        id,
-        provider: 'claude-code',
-        sessionId: 'claude-code-1',
-        cwd: folder('web'),
-        status: 'idle',
-        openedAt: expect.any(Number) as number,
-      },
-    ]);
+    expect(host.list()).toEqual({
+      sessions: [
+        {
+          id,
+          provider: 'claude-code',
+          sessionId: 'claude-code-1',
+          cwd: folder('web'),
+          status: 'idle',
+          activeAt: expect.any(Number) as number,
+        },
+      ],
+      archived: 0,
+      shown: [],
+    });
     expect(changes).toEqual([host.list()]);
   });
 
   it('reports a session when its title or status changes, not for every event', async () => {
     const codex = fakeProvider('codex');
-    const host = new SessionHost([codex.provider]);
+    const host = new SessionHost([codex.provider], memoryRecords().records);
     await host.start('codex', { cwd: folder('api') });
-    const changes: SessionSummary[][] = [];
-    host.onChange((sessions) => changes.push(sessions));
+    const changes: SessionList[] = [];
+    host.onChange((list) => changes.push(list));
     const emit = codex.listeners[0];
     if (emit === undefined) throw new Error('no session');
     emit({ type: 'turn-started' });
@@ -101,7 +183,7 @@ describe('SessionHost', () => {
     emit({ type: 'title', title: 'Greeting' });
     emit({ type: 'turn-ended', outcome: 'completed' });
     emit({ type: 'closed' });
-    expect(changes.map(([summary]) => [summary?.status, summary?.title])).toEqual([
+    expect(changes.map(({ sessions: [summary] }) => [summary?.status, summary?.title])).toEqual([
       ['running', undefined],
       ['running', 'Greeting'],
       ['idle', 'Greeting'],
@@ -111,10 +193,10 @@ describe('SessionHost', () => {
 
   it('passes answers to the provider’s session, and reports since when a session waits on the user', async () => {
     const codex = fakeProvider('codex');
-    const host = new SessionHost([codex.provider]);
+    const host = new SessionHost([codex.provider], memoryRecords().records);
     const id = await host.start('codex', { cwd: folder('api') });
-    const changes: SessionSummary[][] = [];
-    host.onChange((sessions) => changes.push(sessions));
+    const changes: SessionList[] = [];
+    host.onChange((list) => changes.push(list));
     const emit = codex.listeners[0];
     const session = codex.sessions[0];
     if (emit === undefined || session === undefined) throw new Error('no session');
@@ -176,7 +258,9 @@ describe('SessionHost', () => {
     ]);
     emit({ type: 'request-resolved', requestId: 'q1', outcome: 'answered' });
     emit({ type: 'request-resolved', requestId: 'r1', outcome: 'answered' });
-    expect(changes.map(([summary]) => [summary?.status, summary?.waitingSince])).toEqual([
+    expect(
+      changes.map(({ sessions: [summary] }) => [summary?.status, summary?.waitingSince]),
+    ).toEqual([
       ['waiting', 200],
       ['waiting', 100],
       ['waiting', 200],
@@ -186,31 +270,31 @@ describe('SessionHost', () => {
 
   it('lists a session by its first message until the provider titles it', async () => {
     const claude = fakeProvider('claude-code');
-    const host = new SessionHost([claude.provider]);
+    const host = new SessionHost([claude.provider], memoryRecords().records);
     await host.start('claude-code', { cwd: folder('web') });
     const emit = claude.listeners[0];
     if (emit === undefined) throw new Error('no session');
     emit({ type: 'message', id: 'm1', role: 'user', text: '  Fix the build\nand run the tests  ' });
-    expect(host.list()[0]?.title).toBe('Fix the build and run the tests');
+    expect(host.list().sessions[0]?.title).toBe('Fix the build and run the tests');
     emit({ type: 'message', id: 'm2', role: 'user', text: 'x'.repeat(120) });
-    expect(host.list()[0]?.title).toBe('Fix the build and run the tests');
+    expect(host.list().sessions[0]?.title).toBe('Fix the build and run the tests');
     emit({ type: 'title', title: 'Build fixes' });
-    expect(host.list()[0]?.title).toBe('Build fixes');
+    expect(host.list().sessions[0]?.title).toBe('Build fixes');
   });
 
   it('shortens a long first message to a title', async () => {
     const claude = fakeProvider('claude-code');
-    const host = new SessionHost([claude.provider]);
+    const host = new SessionHost([claude.provider], memoryRecords().records);
     await host.start('claude-code', { cwd: folder('web') });
     claude.listeners[0]?.({ type: 'message', id: 'm1', role: 'user', text: 'word '.repeat(40) });
-    const title = host.list()[0]?.title ?? '';
+    const title = host.list().sessions[0]?.title ?? '';
     expect(title.length).toBeLessThanOrEqual(80);
     expect(title.endsWith('…')).toBe(true);
   });
 
   it('numbers each session’s events, which its snapshot counts', async () => {
     const claude = fakeProvider('claude-code');
-    const host = new SessionHost([claude.provider]);
+    const host = new SessionHost([claude.provider], memoryRecords().records);
     const heard: [string, number, SessionEvent][] = [];
     host.onEvent((id, seq, event) => heard.push([id, seq, event]));
     const id = await host.start('claude-code', { cwd: folder('web') });
@@ -228,7 +312,7 @@ describe('SessionHost', () => {
 
   it('passes messages, stops and switches to the provider’s session', async () => {
     const claude = fakeProvider('claude-code');
-    const host = new SessionHost([claude.provider]);
+    const host = new SessionHost([claude.provider], memoryRecords().records);
     const id = await host.start('claude-code', { cwd: folder('web') });
     await host.send(id, 'Fix the build');
     await host.interrupt(id);
@@ -246,14 +330,17 @@ describe('SessionHost', () => {
     expect(session.setModel.mock.calls).toEqual([[null]]);
     expect(session.setEffort.mock.calls).toEqual([['high']]);
     expect(session.setSandbox.mock.calls).toEqual([['read-only']]);
-    expect(() => host.send('missing', 'Hi')).toThrow('not open');
+    await expect(host.send('missing', 'Hi')).rejects.toThrow('not open');
   });
 
   it('offers its providers, their gateways, and their models, found once per gateway', async () => {
     const claude = fakeProvider('claude-code');
     const models: ModelOption[] = [{ id: 'opus', label: 'Opus', efforts: ['high'] }];
     claude.listModels.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(models);
-    const host = new SessionHost([claude.provider, fakeProvider('codex').provider]);
+    const host = new SessionHost(
+      [claude.provider, fakeProvider('codex').provider],
+      memoryRecords().records,
+    );
     expect(host.providerIds()).toEqual(['claude-code', 'codex']);
     expect(await host.gateways('claude-code')).toEqual(['work']);
     // A failed search is tried again; a found list is kept.
@@ -271,7 +358,7 @@ describe('SessionHost', () => {
     claude.listModels
       .mockReturnValueOnce(new Promise<ModelOption[]>(() => undefined))
       .mockResolvedValue(models);
-    const host = new SessionHost([claude.provider]);
+    const host = new SessionHost([claude.provider], memoryRecords().records);
     let failure: unknown;
     const late = host.models('claude-code', null).catch((error: unknown) => {
       failure = error;
@@ -284,20 +371,36 @@ describe('SessionHost', () => {
     expect(await host.models('claude-code', null)).toEqual(models);
   });
 
-  it('lists the newest session first', async () => {
+  it('lists the most recently active session first: one moves up as the user sends it a message and as its turn ends', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const claude = fakeProvider('claude-code');
     const grok = fakeProvider('grok-build');
-    const host = new SessionHost([claude.provider, grok.provider]);
+    const host = new SessionHost([claude.provider, grok.provider], memoryRecords().records);
     vi.setSystemTime(1_000);
-    await host.start('claude-code', { cwd: folder('a') });
+    const first = await host.start('claude-code', { cwd: folder('a') });
     vi.setSystemTime(2_000);
     await host.start('grok-build', { cwd: folder('b') });
-    expect(host.list().map((summary) => summary.cwd)).toEqual([folder('b'), folder('a')]);
+    const order = () => host.list().sessions.map((summary) => summary.cwd);
+    expect(order()).toEqual([folder('b'), folder('a')]);
+    vi.setSystemTime(3_000);
+    await host.send(first, 'Fix the build');
+    expect(order()).toEqual([folder('a'), folder('b')]);
+    const emit = grok.listeners[0];
+    if (emit === undefined) throw new Error('no session');
+    // Not while the turn runs, only once it ends.
+    vi.setSystemTime(4_000);
+    emit({ type: 'turn-started' });
+    emit({ type: 'message', id: 'm1', role: 'agent', text: 'Done' });
+    expect(order()).toEqual([folder('a'), folder('b')]);
+    vi.setSystemTime(5_000);
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    expect(order()).toEqual([folder('b'), folder('a')]);
+    expect(host.list().sessions[0]?.activeAt).toBe(5_000);
   });
 
-  it('starts no session outside a folder, lists none that failed, and refuses a provider it does not have', async () => {
-    const host = new SessionHost([fakeProvider('codex', true).provider]);
+  it('starts no session outside a folder, lists or keeps none that failed, and refuses a provider it does not have', async () => {
+    const { records, saved } = memoryRecords();
+    const host = new SessionHost([fakeProvider('codex', true).provider], records);
     const listener = vi.fn();
     host.onChange(listener);
     writeFileSync(folder('notes.txt'), '');
@@ -305,16 +408,461 @@ describe('SessionHost', () => {
     await expect(host.start('codex', { cwd: folder('missing') })).rejects.toThrow();
     await expect(host.start('codex', { cwd: folder('a') })).rejects.toThrow('Not signed in.');
     await expect(host.start('claude-code', { cwd: folder('a') })).rejects.toThrow('not available');
-    expect(host.list()).toEqual([]);
+    expect(host.list()).toEqual({ sessions: [], archived: 0, shown: [] });
+    expect(saved).toEqual([]);
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it('closes every session', async () => {
+  it('closes every session that is open', async () => {
     const claude = fakeProvider('claude-code');
-    const host = new SessionHost([claude.provider]);
+    const host = new SessionHost([claude.provider], memoryRecords([kept()]).records);
     await host.start('claude-code', { cwd: folder('a') });
     await host.start('claude-code', { cwd: folder('b') });
     await host.closeAll();
     expect(claude.closed).toEqual(['claude-code-1', 'claude-code-2']);
+    expect(host.list().sessions.map((summary) => summary.status)).toEqual([
+      'closed',
+      'closed',
+      'closed',
+    ]);
+  });
+});
+
+describe('SessionHost history', () => {
+  it('keeps each session it starts, with its title, its latest activity and the settings it has now, for later runs', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(5_000);
+    const claude = fakeProvider('claude-code');
+    const { records, saved } = memoryRecords();
+    const host = new SessionHost([claude.provider], records);
+    const id = await host.start('claude-code', {
+      cwd: folder('web'),
+      mode: 'yolo',
+      gateway: 'work',
+      model: 'opus',
+      effort: 'high',
+      sandbox: 'read-only',
+    });
+    // The settings the session reports stand over those it started with.
+    const started: SessionRecord = {
+      id,
+      provider: 'claude-code',
+      sessionId: 'claude-code-1',
+      cwd: folder('web'),
+      activeAt: 5_000,
+      mode: 'yolo',
+      gateway: 'work',
+      model: 'opus',
+      effort: 'high',
+      sandbox: 'workspace-write',
+    };
+    expect(saved).toEqual([[started]]);
+    const emit = claude.listeners[0];
+    if (emit === undefined) throw new Error('no session');
+    emit({ type: 'message', id: 'm1', role: 'user', text: 'Fix the build' });
+    vi.setSystemTime(6_000);
+    await host.send(id, 'Fix the build');
+    emit({ type: 'turn-started' });
+    emit({ type: 'settings', model: null, effort: null });
+    emit({ type: 'mode', mode: 'auto' });
+    emit({ type: 'title', title: 'Build fixes' });
+    vi.setSystemTime(7_000);
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    const titled = { ...started, title: 'Fix the build' };
+    const switched = { ...titled, activeAt: 6_000, model: null, effort: null };
+    expect(saved.slice(1)).toEqual([
+      [titled],
+      [{ ...titled, activeAt: 6_000 }],
+      [switched],
+      [{ ...switched, mode: 'auto' }],
+      [{ ...switched, mode: 'auto', title: 'Build fixes' }],
+      [{ ...switched, mode: 'auto', title: 'Build fixes', activeAt: 7_000 }],
+    ]);
+  });
+
+  it('lists the sessions of earlier runs as closed, the most recently active first, and gives the archived ones only when asked', async () => {
+    const { records } = memoryRecords([
+      kept({ id: 'older', sessionId: 'claude-8', title: undefined, activeAt: 500, archived: true }),
+      kept({ id: 'oldest', sessionId: 'claude-7', activeAt: 100, archived: true }),
+      kept(),
+    ]);
+    const host = new SessionHost([fakeProvider('claude-code').provider], records);
+    const past = { provider: 'claude-code', cwd: folder('web'), status: 'closed' } as const;
+    expect(host.list()).toEqual({
+      sessions: [
+        { ...past, id: 'kept', sessionId: 'claude-9', title: 'Fix the build', activeAt: 1_000 },
+      ],
+      archived: 2,
+      shown: [],
+    });
+    expect(host.archived()).toEqual([
+      { ...past, id: 'older', sessionId: 'claude-8', activeAt: 500, archived: true },
+      {
+        ...past,
+        id: 'oldest',
+        sessionId: 'claude-7',
+        title: 'Fix the build',
+        activeAt: 100,
+        archived: true,
+      },
+    ]);
+    const id = await host.start('claude-code', { cwd: folder('a') });
+    expect(host.list().sessions.map((summary) => summary.id)).toEqual([id, 'kept']);
+  });
+
+  it('gives an archived session whose page the window shows among the shown sessions, and reports it from then on', async () => {
+    const claude = fakeProvider('claude-code');
+    const { records } = memoryRecords([
+      kept({ id: 'older', sessionId: 'claude-8', title: undefined, activeAt: 500, archived: true }),
+      kept(),
+    ]);
+    const host = new SessionHost([claude.provider], records);
+    const changes: SessionList[] = [];
+    host.onChange((list) => changes.push(list));
+    // The page of a session the Sessions list holds changes nothing there.
+    host.snapshot('kept');
+    expect(changes).toEqual([]);
+    host.snapshot('older');
+    host.snapshot('older');
+    const past = { provider: 'claude-code', cwd: folder('web'), status: 'closed' } as const;
+    expect(changes).toEqual([
+      {
+        sessions: [
+          { ...past, id: 'kept', sessionId: 'claude-9', title: 'Fix the build', activeAt: 1_000 },
+        ],
+        archived: 1,
+        shown: [{ ...past, id: 'older', sessionId: 'claude-8', activeAt: 500, archived: true }],
+      },
+    ]);
+    // Its history, read once it is shown, gives it its title.
+    await settle();
+    expect(changes.at(-1)?.shown).toMatchObject([{ id: 'older', title: 'Fix the build' }]);
+    host.unarchive('older');
+    expect(changes.at(-1)).toMatchObject({
+      sessions: [{ id: 'kept' }, { id: 'older' }],
+      shown: [],
+    });
+    await host.archive('older');
+    expect(changes.at(-1)).toMatchObject({ archived: 1, shown: [{ id: 'older' }] });
+  });
+
+  it('lists no more than the 1,000 sessions the records keep, the archived ones aside, and gives one that leaves while shown among the shown sessions', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(5_000);
+    const claude = fakeProvider('claude-code');
+    const { records } = memoryRecords([
+      ...Array.from({ length: 1_000 }, (_, index) =>
+        kept({ id: `k${String(index)}`, sessionId: `c${String(index)}`, activeAt: index + 1 }),
+      ),
+      kept({ id: 'archived', sessionId: 'c-archived', activeAt: 0, archived: true }),
+    ]);
+    const host = new SessionHost([claude.provider], records);
+    host.snapshot('k1');
+    const first = await host.start('claude-code', { cwd: folder('a') });
+    let list = host.list();
+    expect(list.sessions).toHaveLength(1_000);
+    expect(list.sessions[0]?.id).toBe(first);
+    expect(list.sessions.some((summary) => summary.id === 'k0')).toBe(false);
+    expect(list.archived).toBe(1);
+    expect(list.shown).toEqual([]);
+    // A session the records no longer keep stays where the window shows it.
+    await host.start('claude-code', { cwd: folder('b') });
+    list = host.list();
+    expect(list.sessions).toHaveLength(1_000);
+    expect(list.shown).toMatchObject([{ id: 'k1', status: 'closed' }]);
+  });
+
+  it('shows a session of an earlier run with the settings it last had, and reads its history once, without resuming it', async () => {
+    const claude = fakeProvider('claude-code');
+    const { records, saved } = memoryRecords([kept()]);
+    const host = new SessionHost([claude.provider], records);
+    const heard: [string, number, SessionEvent][] = [];
+    host.onEvent((id, seq, event) => heard.push([id, seq, event]));
+    expect(host.snapshot('kept')).toEqual({
+      seq: 0,
+      state: {
+        timeline: [],
+        tasks: [],
+        turnRunning: false,
+        closed: true,
+        loadingHistory: true,
+        historyFailed: false,
+        ...keptSettings,
+      },
+    });
+    host.snapshot('kept');
+    await settle();
+    expect(claude.history.mock.calls).toEqual([['claude-9', folder('web')]]);
+    // The settings the history reports are left out: the app keeps the session's own.
+    const past: SessionEvent = {
+      type: 'history',
+      events: [{ type: 'message', id: 'm1', role: 'user', text: 'Fix the build' }],
+    };
+    expect(heard).toEqual([['kept', 1, past]]);
+    expect(host.snapshot('kept')).toMatchObject({
+      seq: 1,
+      state: {
+        closed: true,
+        loadingHistory: false,
+        mode: 'yolo',
+        model: 'opus',
+        timeline: [{ type: 'message', role: 'user', text: 'Fix the build' }],
+      },
+    });
+    expect(host.list().sessions[0]).toMatchObject({ status: 'closed', activeAt: 1_000 });
+    expect(claude.resumed).toEqual([]);
+    expect(saved).toEqual([]);
+  });
+
+  it('says when a session’s history could not be read', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const claude = fakeProvider('claude-code');
+    claude.history.mockRejectedValue(new Error('No such session.'));
+    const host = new SessionHost(
+      [claude.provider],
+      memoryRecords([kept(), kept({ id: 'grok', provider: 'grok-build' })]).records,
+    );
+    host.snapshot('kept');
+    host.snapshot('grok');
+    await settle();
+    for (const id of ['kept', 'grok']) {
+      expect(host.snapshot(id)?.state).toMatchObject({
+        closed: true,
+        loadingHistory: false,
+        historyFailed: true,
+        timeline: [],
+      });
+    }
+  });
+
+  it('resumes a session with the settings it is given, yolo too, without showing its history twice, and sends it the message', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(9_000);
+    const claude = fakeProvider('claude-code');
+    const { records, saved } = memoryRecords([kept()]);
+    const host = new SessionHost([claude.provider], records);
+    host.snapshot('kept');
+    await settle();
+    const heard: SessionEvent[] = [];
+    host.onEvent((_id, _seq, event) => heard.push(event));
+    await host.resume('kept', keptSettings);
+    expect(claude.resumed).toEqual([
+      {
+        sessionId: 'claude-9',
+        cwd: folder('web'),
+        mode: 'yolo',
+        sandbox: 'read-only',
+        gateway: 'work',
+        model: 'opus',
+        effort: 'high',
+      },
+    ]);
+    expect(heard.map((event) => event.type)).toEqual(['mode', 'settings', 'resumed']);
+    expect(host.snapshot('kept')?.state).toMatchObject({
+      closed: false,
+      mode: 'yolo',
+      timeline: [{ type: 'message', id: 'm1', role: 'user', text: 'Fix the build' }],
+    });
+    expect(host.snapshot('kept')?.state.timeline).toHaveLength(1);
+    expect(host.list().sessions[0]).toMatchObject({ id: 'kept', status: 'idle', activeAt: 1_000 });
+    // Nothing kept has changed yet; the message moves the session up.
+    expect(saved).toEqual([]);
+    await host.send('kept', 'And the tests');
+    expect(claude.sessions[0]?.send.mock.calls).toEqual([['And the tests', []]]);
+    expect(saved).toEqual([[kept({ activeAt: 9_000 })]]);
+  });
+
+  it('reads the history first when a session is resumed before it is shown', async () => {
+    const claude = fakeProvider('claude-code');
+    const host = new SessionHost([claude.provider], memoryRecords([kept()]).records);
+    await host.resume('kept', { ...keptSettings, mode: 'auto' });
+    expect(claude.history).toHaveBeenCalledOnce();
+    expect(claude.resumed[0]?.mode).toBe('auto');
+    expect(host.snapshot('kept')?.state.timeline).toHaveLength(1);
+  });
+
+  it('shows what the provider replays as the history when the history could not be read', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const claude = fakeProvider('claude-code');
+    claude.history.mockRejectedValue(new Error('offline'));
+    const host = new SessionHost([claude.provider], memoryRecords([kept()]).records);
+    const heard: SessionEvent[] = [];
+    host.onEvent((_id, _seq, event) => heard.push(event));
+    await host.resume('kept', keptSettings);
+    expect(heard.map((event) => event.type)).toEqual([
+      'history',
+      'history',
+      'mode',
+      'settings',
+      'resumed',
+    ]);
+    expect(heard[1]).toEqual({
+      type: 'history',
+      events: [{ type: 'message', id: 'm1', role: 'user', text: 'Fix the build' }],
+    });
+    expect(host.snapshot('kept')?.state).toMatchObject({
+      closed: false,
+      historyFailed: false,
+      timeline: [{ type: 'message', role: 'user', text: 'Fix the build' }],
+    });
+  });
+
+  it('resumes a session whose provider stopped in this run, keeping what it showed', async () => {
+    const claude = fakeProvider('claude-code');
+    const host = new SessionHost([claude.provider], memoryRecords().records);
+    const id = await host.start('claude-code', { cwd: folder('web') });
+    const emit = claude.listeners[0];
+    if (emit === undefined) throw new Error('no session');
+    emit({ type: 'message', id: 'u1', role: 'user', text: 'Hi' });
+    emit({ type: 'closed', error: 'Claude Code stopped.' });
+    expect(host.list().sessions[0]?.status).toBe('closed');
+    await expect(host.send(id, 'Still there?')).rejects.toThrow('not open');
+    await host.resume(id, { ...keptSettings, gateway: null });
+    expect(claude.history).not.toHaveBeenCalled();
+    expect(claude.resumed).toMatchObject([{ sessionId: 'claude-code-1', mode: 'yolo' }]);
+    expect(host.snapshot(id)?.state.timeline).toEqual([
+      { type: 'message', id: 'u1', role: 'user', text: 'Hi' },
+      { type: 'error', message: 'Claude Code stopped.' },
+    ]);
+    expect(host.list().sessions[0]?.status).toBe('idle');
+    // Only the resumed session is heard from now on.
+    emit({ type: 'turn-started' });
+    expect(host.list().sessions[0]?.status).toBe('idle');
+    await host.send(id, 'Still there?');
+    expect(claude.sessions[1]?.send.mock.calls).toEqual([['Still there?', []]]);
+  });
+
+  it('resumes on the provider’s own configuration once the session’s gateway is gone', async () => {
+    const claude = fakeProvider('claude-code');
+    const host = new SessionHost([claude.provider], memoryRecords([kept()]).records);
+    await host.resume('kept', { ...keptSettings, gateway: 'retired' });
+    expect(claude.resumed).toEqual([
+      { sessionId: 'claude-9', cwd: folder('web'), mode: 'yolo', sandbox: 'read-only' },
+    ]);
+  });
+
+  it('resumes a session once, leaves a running one as it is, and refuses one it does not have', async () => {
+    const claude = fakeProvider('claude-code');
+    const host = new SessionHost([claude.provider], memoryRecords([kept()]).records);
+    const first = host.resume('kept', keptSettings);
+    expect(host.resume('kept', keptSettings)).toBe(first);
+    await first;
+    await host.resume('kept', keptSettings);
+    const id = await host.start('claude-code', { cwd: folder('a') });
+    await host.resume(id, keptSettings);
+    expect(claude.resumed).toHaveLength(1);
+    await expect(host.resume('missing', keptSettings)).rejects.toThrow('no such session');
+  });
+
+  it('keeps a session it could not resume as it was, and tries again when asked', async () => {
+    const { records, saved } = memoryRecords([
+      kept(),
+      kept({ id: 'moved', cwd: folder('gone') }),
+      kept({ id: 'grok', provider: 'grok-build' }),
+    ]);
+    const failing = fakeProvider('claude-code', true);
+    const host = new SessionHost([failing.provider], records);
+    const listener = vi.fn();
+    host.onChange(listener);
+    await expect(host.resume('kept', keptSettings)).rejects.toThrow('Not signed in.');
+    await expect(host.resume('moved', keptSettings)).rejects.toThrow();
+    await expect(host.resume('grok', keptSettings)).rejects.toThrow('not available');
+    expect(host.list().sessions.map((summary) => [summary.id, summary.status])).toEqual([
+      ['kept', 'closed'],
+      ['moved', 'closed'],
+      ['grok', 'closed'],
+    ]);
+    expect(host.snapshot('kept')?.state).toMatchObject({ closed: true, mode: 'yolo' });
+    expect(saved).toEqual([]);
+    expect(listener).not.toHaveBeenCalled();
+    await expect(host.resume('kept', keptSettings)).rejects.toThrow('Not signed in.');
+  });
+});
+
+describe('SessionHost archive and removal', () => {
+  it('archives a session, closing it while it runs, and a message to it returns it to the Sessions list', async () => {
+    const claude = fakeProvider('claude-code');
+    const { records, saved } = memoryRecords();
+    const host = new SessionHost([claude.provider], records);
+    const id = await host.start('claude-code', { cwd: folder('web') });
+    const changes: SessionList[] = [];
+    host.onChange((list) => changes.push(list));
+    await host.archive(id);
+    expect(claude.closed).toEqual(['claude-code-1']);
+    expect(host.list()).toEqual({ sessions: [], archived: 1, shown: [] });
+    expect(host.archived()).toMatchObject([{ id, status: 'closed', archived: true }]);
+    expect(saved.at(-1)).toMatchObject([{ id, archived: true }]);
+    // The session leaves the Sessions list; its closing changes nothing there.
+    expect(changes).toEqual([{ sessions: [], archived: 1, shown: [] }]);
+    await host.resume(id, keptSettings);
+    expect(host.archived()).toMatchObject([{ id, status: 'idle' }]);
+    await host.send(id, 'Back to it');
+    expect(host.list()).toMatchObject({ sessions: [{ id }], archived: 0 });
+    expect(host.list().sessions[0]?.archived).toBeUndefined();
+    expect(saved.at(-1)?.[0]?.archived).toBeUndefined();
+  });
+
+  it('unarchives a session, which stays as it was', () => {
+    const { records, saved } = memoryRecords([kept({ archived: true })]);
+    const host = new SessionHost([fakeProvider('claude-code').provider], records);
+    host.unarchive('kept');
+    host.unarchive('kept');
+    expect(host.list()).toMatchObject({
+      sessions: [{ id: 'kept', status: 'closed' }],
+      archived: 0,
+    });
+    expect(host.list().sessions[0]?.archived).toBeUndefined();
+    expect(host.archived()).toEqual([]);
+    expect(saved).toEqual([[kept()]]);
+  });
+
+  it('removes a session from the lists and the records, closing it while it runs, and hears no more of it', async () => {
+    const claude = fakeProvider('claude-code');
+    const { records, saved } = memoryRecords([kept()]);
+    const host = new SessionHost([claude.provider], records);
+    const id = await host.start('claude-code', { cwd: folder('web') });
+    const changes: SessionList[] = [];
+    host.onChange((list) => changes.push(list));
+    await host.remove(id);
+    await host.remove('kept');
+    expect(claude.closed).toEqual(['claude-code-1']);
+    expect(host.list()).toEqual({ sessions: [], archived: 0, shown: [] });
+    expect(changes.map((list) => list.sessions.length)).toEqual([1, 0]);
+    expect(saved.at(-1)).toEqual([]);
+    expect(host.snapshot(id)).toBeNull();
+    claude.listeners[0]?.({ type: 'title', title: 'Late' });
+    expect(saved.at(-1)).toEqual([]);
+  });
+
+  it('archives or removes from the session’s menu, asking first where it stops or removes a session', async () => {
+    const claude = fakeProvider('claude-code');
+    const host = new SessionHost([claude.provider], memoryRecords([kept()]).records);
+    const id = await host.start('claude-code', { cwd: folder('web') });
+    claude.listeners[0]?.({ type: 'turn-started' });
+    // A working session is archived only once the user confirms, which stops it.
+    const declined = menuUi('archive', false);
+    expect(await host.showMenu(id, declined)).toBeNull();
+    expect(declined.sessionMenu.mock.calls).toEqual([[host.list().sessions[0]]]);
+    expect(declined.confirmArchive).toHaveBeenCalledOnce();
+    expect(host.list().sessions[0]).toMatchObject({ status: 'running' });
+    expect(await host.showMenu(id, menuUi('archive'))).toBe('archive');
+    expect(claude.closed).toEqual(['claude-code-1']);
+    // A session that is not working is archived without a question.
+    const idle = menuUi('archive');
+    expect(await host.showMenu('kept', idle)).toBe('archive');
+    expect(idle.confirmArchive).not.toHaveBeenCalled();
+    expect(host.list()).toMatchObject({ sessions: [], archived: 2 });
+    expect(await host.showMenu('kept', menuUi('unarchive'))).toBe('unarchive');
+    expect(await host.showMenu('kept', menuUi('remove', false))).toBeNull();
+    expect(await host.showMenu('kept', menuUi(null))).toBeNull();
+    expect(host.list()).toMatchObject({ sessions: [{ id: 'kept' }], archived: 1 });
+    const removing = menuUi('remove');
+    expect(await host.showMenu('kept', removing)).toBe('remove');
+    expect(removing.confirmRemove).toHaveBeenCalledOnce();
+    expect(host.list()).toMatchObject({ sessions: [], archived: 1 });
+    expect(host.archived().map((summary) => summary.id)).toEqual([id]);
+    const unknown = menuUi('remove');
+    expect(await host.showMenu('missing', unknown)).toBeNull();
+    expect(unknown.sessionMenu).not.toHaveBeenCalled();
   });
 });

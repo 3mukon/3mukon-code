@@ -27,6 +27,7 @@
     "newSession": "新建会话",
     "filter": "按工作区筛选会话",
     "allWorkspaces": "所有工作区",
+    "archived": "已归档的会话",
     "status": {
       "running": "运行中",
       "waiting": "等待你的回应",
@@ -40,6 +41,21 @@
       "message": "以 yolo 模式运行此会话？",
       "detail": "在 yolo 模式下，代理执行每个操作都不会询问，也不会事先经过审查。沙盒仍然有效。",
       "confirm": "使用 Yolo"
+    },
+    "menu": {
+      "archive": "归档",
+      "unarchive": "取消归档",
+      "remove": "从列表中移除"
+    },
+    "archive": {
+      "message": "归档“{{title}}”？",
+      "detail": "该会话正在工作，归档会将其停止。",
+      "confirm": "归档"
+    },
+    "remove": {
+      "message": "从列表中移除“{{title}}”？",
+      "detail": "会话将离开本应用的列表，{{provider}} 仍保留其历史记录。正在工作的会话会停止。",
+      "confirm": "移除"
     },
     "sandbox": {
       "read-only": "只读",
@@ -71,7 +87,9 @@
       "fromAgent": "{{agent}}：",
       "failed": "本轮失败。",
       "startFailed": "无法启动会话。",
-      "ended": "会话已结束。",
+      "resumeFailed": "无法恢复会话。",
+      "loadingHistory": "正在读取会话的历史记录…",
+      "historyFailed": "无法读取会话的历史记录。",
       "activity": "活动",
       "context": "{{used}} / {{size}}（{{share}}）",
       "contextDetail": "上下文窗口已用 {{used}} / {{size}} 个令牌（{{share}}）",

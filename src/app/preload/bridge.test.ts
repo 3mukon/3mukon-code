@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ResumeRequest } from '../../sessions/shared/sessions';
 import { createBridge, type Ipc } from './bridge';
 
 function fakeIpc() {
@@ -30,6 +31,18 @@ describe('createBridge', () => {
     await bridge.workspaces.showMenu('w1');
     await bridge.workspaces.listFolder('w1', 'src/app');
     await bridge.sessions.list();
+    await bridge.sessions.archived();
+    const resumed: ResumeRequest = {
+      mode: 'yolo',
+      gateway: null,
+      model: null,
+      effort: null,
+      sandbox: 'read-only',
+      message: 'Go on',
+      images: [],
+    };
+    await bridge.sessions.resume('s1', resumed);
+    await bridge.sessions.showMenu('s1');
     await bridge.sessions.models('codex', null);
     await bridge.sessions.choices();
     await bridge.sessions.rememberChoice('/Users/me/web', {
@@ -71,6 +84,9 @@ describe('createBridge', () => {
       ['workspaces:show-menu', 'w1'],
       ['workspaces:list-folder', 'w1', 'src/app'],
       ['sessions:list'],
+      ['sessions:archived'],
+      ['sessions:resume', 's1', resumed],
+      ['sessions:show-menu', 's1'],
       ['sessions:models', 'codex', null],
       ['sessions:choices'],
       [
@@ -138,13 +154,13 @@ describe('createBridge', () => {
     bridge.sessions.onEvent(events);
     bridge.files.onChange(files);
     send('workspaces:changed', { workspaces: [], selectedId: null });
-    send('sessions:changed', []);
+    send('sessions:changed', { sessions: [], archived: 2, shown: [] });
     send('sessions:event', { id: 's1', seq: 1, event: { type: 'turn-started' } });
     send('files:changed', '/Users/me/web/a.ts');
     stop();
     send('workspaces:changed', { workspaces: [], selectedId: null });
     expect(workspaces.mock.calls).toEqual([[{ workspaces: [], selectedId: null }]]);
-    expect(sessions.mock.calls).toEqual([[[]]]);
+    expect(sessions.mock.calls).toEqual([[{ sessions: [], archived: 2, shown: [] }]]);
     expect(events.mock.calls).toEqual([['s1', 1, { type: 'turn-started' }]]);
     expect(files.mock.calls).toEqual([['/Users/me/web/a.ts']]);
   });

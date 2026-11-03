@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { ModelOption, SessionEvent } from '../shared/events';
 import { initialSessionState, type SessionState } from '../shared/session-state';
-import type { SessionEventsListener, SessionsBridge } from '../shared/sessions';
+import type { SessionEventsListener, SessionsBridge, SessionSummary } from '../shared/sessions';
 import { SessionPage } from './session-page';
 import { preloadOffers } from './use-offers';
 
@@ -31,8 +31,11 @@ afterEach(() => {
 function fakeBridge(state: SessionState | null = null) {
   const listeners = new Set<SessionEventsListener>();
   const bridge = {
-    list: () => Promise.resolve([]),
+    list: () => Promise.resolve({ sessions: [], archived: 0, shown: [] }),
     onChange: () => () => undefined,
+    archived: () => Promise.resolve([]),
+    resume: vi.fn<SessionsBridge['resume']>(() => Promise.resolve()),
+    showMenu: vi.fn<SessionsBridge['showMenu']>(() => Promise.resolve(null)),
     providers: () => Promise.resolve(['claude-code' as const, 'codex' as const]),
     dayFolder: () => Promise.resolve('/Users/me/3mukon-code/2026-10-28'),
     gateways: vi.fn<SessionsBridge['gateways']>((provider) =>
@@ -135,7 +138,7 @@ describe('SessionPage', () => {
           sessionId: 'p1',
           cwd: '/Users/me/web',
           status: 'idle',
-          openedAt: 0,
+          activeAt: 0,
         }}
         onStarted={vi.fn()}
       />,
@@ -419,6 +422,132 @@ describe('SessionPage', () => {
     expect(composer()).toHaveProperty('value', 'Hi');
   });
 
+  it('shows a session that is not running with the settings it last had, yolo too, and resumes it with the next message', async () => {
+    const { bridge, emit } = fakeBridge({
+      ...initialSessionState(true),
+      closed: true,
+      mode: 'yolo',
+      gateway: null,
+      model: 'opus',
+      effort: 'max',
+      sandbox: 'read-only',
+    });
+    const summary: SessionSummary = {
+      id: 's1',
+      provider: 'claude-code',
+      sessionId: 'p1',
+      cwd: '/Users/me/web',
+      title: 'Fix the build',
+      status: 'closed',
+      activeAt: 1,
+    };
+    const onStarted = vi.fn();
+    render(
+      <SessionPage
+        bridge={bridge}
+        folder="/Users/me/web"
+        sessionId="s1"
+        summary={summary}
+        onStarted={onStarted}
+      />,
+    );
+    await settle();
+    expect(screen.getByText('Reading the session’s history…')).toBeDefined();
+    emit(2, {
+      type: 'history',
+      events: [{ type: 'message', id: 'm1', role: 'user', text: 'Fix the build' }],
+    });
+    expect(screen.queryByText('Reading the session’s history…')).toBeNull();
+    expect(screen.getByText('Fix the build')).toBeDefined();
+    // Its settings show as it last had them, and change without switching anything.
+    expect(screen.getByText('Claude Code')).toBeDefined();
+    expect(chooser('Permission mode').value).toBe('yolo');
+    expect(chooser('Sandbox').value).toBe('read-only');
+    expect(chooser('Reasoning effort').value).toBe('max');
+    choose('Sandbox', 'workspace-write');
+    choose('Reasoning effort', 'high');
+    expect(bridge.setSandbox).not.toHaveBeenCalled();
+    expect(bridge.setEffort).not.toHaveBeenCalled();
+    expect(chooser('Sandbox').value).toBe('workspace-write');
+    let resumed: () => void = () => undefined;
+    bridge.resume.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resumed = resolve;
+        }),
+    );
+    fireEvent.change(composer(), { target: { value: 'And the tests' } });
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+    expect(bridge.resume.mock.calls).toEqual([
+      [
+        's1',
+        {
+          mode: 'yolo',
+          gateway: null,
+          model: 'opus',
+          effort: 'high',
+          sandbox: 'workspace-write',
+          message: 'And the tests',
+          images: [],
+        },
+      ],
+    ]);
+    expect(bridge.send).not.toHaveBeenCalled();
+    // The message shows after the history while the session resumes.
+    expect(screen.getByText('And the tests')).toBeDefined();
+    expect(screen.getByText('Working')).toBeDefined();
+    expect(composer()).toHaveProperty('value', '');
+    emit(3, { type: 'resumed' });
+    await act(async () => {
+      resumed();
+      await Promise.resolve();
+    });
+    expect(bridge.rememberChoice.mock.calls).toEqual([
+      [
+        '/Users/me/web',
+        {
+          provider: 'claude-code',
+          gateway: null,
+          model: 'opus',
+          effort: 'high',
+          sandbox: 'workspace-write',
+        },
+      ],
+    ]);
+    // Running again, it shows its own settings, and a change switches it.
+    emit(4, { type: 'settings', sandbox: 'workspace-write', effort: 'high' });
+    choose('Sandbox', 'read-only');
+    expect(bridge.setSandbox.mock.calls).toEqual([['s1', 'read-only']]);
+    expect(onStarted).not.toHaveBeenCalled();
+  });
+
+  it('asks before yolo for a session that is not running, and says when it could not be resumed', async () => {
+    const { bridge, emit } = fakeBridge({ ...initialSessionState(), closed: true, mode: 'auto' });
+    bridge.confirmYolo.mockResolvedValueOnce(true);
+    bridge.resume.mockRejectedValueOnce(new Error('Not signed in.'));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    render(
+      <SessionPage bridge={bridge} folder="/Users/me/web" sessionId="s1" onStarted={vi.fn()} />,
+    );
+    await settle();
+    emit(2, { type: 'history', events: [], failed: true });
+    expect(screen.getByText('The session’s history couldn’t be read.')).toBeDefined();
+    choose('Permission mode', 'yolo');
+    await settle();
+    expect(bridge.confirmYolo).toHaveBeenCalledOnce();
+    expect(bridge.setMode).not.toHaveBeenCalled();
+    expect(chooser('Permission mode').value).toBe('yolo');
+    fireEvent.change(composer(), { target: { value: 'Go on' } });
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+    await settle();
+    expect(bridge.resume.mock.calls[0]?.[1]).toMatchObject({ mode: 'yolo', message: 'Go on' });
+    expect(screen.getByText('The session couldn’t be resumed.')).toBeDefined();
+    expect(screen.queryByText('Working')).toBeNull();
+    // The message comes back to the composer, and the choice stays.
+    expect(composer()).toHaveProperty('value', 'Go on');
+    expect(chooser('Permission mode').value).toBe('yolo');
+  });
+
   it('shows the session’s approvals and questions as its composer renders them', async () => {
     const { bridge } = fakeBridge({
       ...initialSessionState(),
@@ -449,7 +578,7 @@ describe('SessionPage', () => {
           sessionId: 'p1',
           cwd: '/Users/me/web',
           status: 'waiting',
-          openedAt: 0,
+          activeAt: 0,
         }}
         onStarted={vi.fn()}
         renderRequest={(item) => <p>{`${item.type} ${item.request.id}`}</p>}
@@ -480,7 +609,7 @@ describe('SessionPage', () => {
           sessionId: 'p1',
           cwd: '/Users/me/web',
           status: 'running',
-          openedAt: 0,
+          activeAt: 0,
         }}
         onStarted={vi.fn()}
       />,

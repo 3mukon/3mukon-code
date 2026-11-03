@@ -1,0 +1,50 @@
+import type { BrowserWindow } from 'electron';
+import { describe, expect, it, vi } from 'vitest';
+import { mainTranslator } from '../../i18n/main/i18n';
+import type { Prompts } from '../../ui/shared/prompts';
+import type { Workspace } from '../shared/workspaces';
+import { windowWorkspacesUi } from './native';
+
+const t = mainTranslator(['en-US']);
+const window = {} as BrowserWindow;
+const workspace: Workspace = { id: 'w1', name: 'web', path: '/Users/me/web', trusted: true };
+
+describe('windowWorkspacesUi', () => {
+  it('asks whether the user trusts a folder, Trust being the default answer and Don’t Trust Escape’s', async () => {
+    const ask = vi.fn<Prompts['ask']>(() => Promise.resolve('trust'));
+    const ui = windowWorkspacesUi(window, { menu: vi.fn(), ask }, t);
+    expect(await ui.askTrust('web', '/Users/me/web')).toBe(true);
+    expect(ask.mock.calls[0]?.[0]).toMatchObject({
+      message: 'Do you trust the files in “web”?',
+      answers: [
+        { id: 'trust', label: 'Trust' },
+        { id: 'distrust', label: 'Don’t Trust' },
+      ],
+      defaultId: 'trust',
+      cancelId: 'distrust',
+    });
+    ask.mockResolvedValue('distrust');
+    expect(await ui.askTrust('web', '/Users/me/web')).toBe(false);
+  });
+
+  it('offers Trusted, checked while it is, and Remove Workspace in a workspace’s menu, and does what is chosen', async () => {
+    for (const [chosen, called] of [
+      ['trusted', 'setTrusted'],
+      ['remove', 'remove'],
+      [null, null],
+    ] as const) {
+      const menu = vi.fn<Prompts['menu']>(() => Promise.resolve(chosen));
+      const actions = { setTrusted: vi.fn(), remove: vi.fn() };
+      windowWorkspacesUi(window, { menu, ask: vi.fn() }, t).showMenu(workspace, actions);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(menu.mock.calls[0]?.[0]).toEqual([
+        { id: 'trusted', label: 'Trusted', checked: true },
+        { separator: true },
+        { id: 'remove', label: 'Remove Workspace' },
+      ]);
+      expect(actions.setTrusted.mock.calls).toEqual(called === 'setTrusted' ? [[false]] : []);
+      expect(actions.remove).toHaveBeenCalledTimes(called === 'remove' ? 1 : 0);
+    }
+  });
+});

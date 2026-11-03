@@ -64,8 +64,11 @@ export interface SessionState {
   tasks: Task[];
   turnRunning: boolean;
   closed: boolean;
-  // A resumed session has not finished replaying its past events.
+  // A resumed session has not finished replaying its past events, or the history of a session that is
+  // not running has not been read yet.
   loadingHistory: boolean;
+  // The history of a session that is not running could not be read from its provider.
+  historyFailed: boolean;
   title?: string;
   mode?: PermissionMode;
   // A null gateway is the provider's own configuration, a null model or effort the provider's default.
@@ -80,7 +83,14 @@ export interface SessionState {
 }
 
 export function initialSessionState(loadingHistory = false): SessionState {
-  return { timeline: [], tasks: [], turnRunning: false, closed: false, loadingHistory };
+  return {
+    timeline: [],
+    tasks: [],
+    turnRunning: false,
+    closed: false,
+    loadingHistory,
+    historyFailed: false,
+  };
 }
 
 // The approvals and questions still waiting for the user, oldest first.
@@ -228,6 +238,18 @@ export function applyEvent(state: SessionState, event: SessionEvent): SessionSta
       return { ...state, context: { used: event.used, size: event.size } };
     case 'replay-finished':
       return { ...state, loadingHistory: false };
+    case 'history': {
+      // The session as its history leaves it, not running: no turn runs and no request waits.
+      const past = event.events.reduce(applyEvent, state);
+      return {
+        ...cancelOpenRequests(past, 'session'),
+        turnRunning: false,
+        loadingHistory: false,
+        historyFailed: event.failed === true,
+      };
+    }
+    case 'resumed':
+      return { ...state, closed: false, historyFailed: false };
     case 'error':
       return append(state, errorItem(event.message));
     case 'closed': {

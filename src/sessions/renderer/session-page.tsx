@@ -17,8 +17,10 @@ import { TimelineActionsContext, timelineActions } from './timeline-actions';
 import { rememberChoice, useOffers, useRemembered } from './use-offers';
 import { useSession } from './use-session';
 
-// What a page starts its session with. A null gateway is the provider's own configuration and a null
-// model the provider's default; a null effort is the page's own starting effort for the model.
+// What a page starts its session with, or resumes it with when it is not running. A null gateway is
+// the provider's own configuration and a null model the provider's default; a null effort is the
+// page's own starting effort for the model before the session starts, and afterwards the model's
+// default.
 interface Choice {
   provider: ProviderId;
   gateway: string | null;
@@ -71,12 +73,14 @@ interface SessionPageProps {
 // page's starting effort for it; until the provider's models come, the page says it is loading them,
 // and a session started before they come keeps the provider's own defaults. Until the user changes
 // one, the settings are those the folder's sessions last used, but for the permission mode, and a model
-// or effort no longer offered gives way to the default; a session's settings, as it starts and as it
-// switches, are remembered for its folder. Choosing yolo asks the
-// user to confirm; a running session's sandbox level switches at once. The composer sends with Return
-// and starts a new line with Shift-Return, with the images pasted into it or dropped on it, during a
-// turn too, when the message goes to the running turn as the provider takes it; Stop ends the running
-// turn.
+// or effort no longer offered gives way to the default; a session's settings, as it starts, switches
+// and resumes, are remembered for its folder. A session that is not running, from an earlier run or
+// whose provider stopped, shows its history and starts nothing: its settings, but for the provider,
+// are those it last had, its permission mode included, until the user changes them, and the next
+// message resumes it with them. Choosing yolo asks the user to confirm; a running session's sandbox
+// level switches at once. The composer sends with Return and starts a new line with Shift-Return, with
+// the images pasted into it or dropped on it, during a turn too, when the message goes to the running
+// turn as the provider takes it; Stop ends the running turn.
 export function SessionPage({
   bridge,
   folder,
@@ -87,42 +91,55 @@ export function SessionPage({
 }: SessionPageProps) {
   const { t } = useTranslation();
   const state = useSession(bridge, sessionId);
-  // The user's choice on this page, once they have made one.
+  // The user's choice on this page, before the session starts or while it is not running, once they
+  // have made one.
   const [chosen, setChosen] = useState<Choice | null>(null);
   const remembered = useRemembered(bridge, folder);
-  const choice: Choice =
-    chosen ?? (remembered === undefined ? firstChoice : { ...remembered, mode: 'auto' });
   const [draft, setDraft] = useState('');
   const attachments = useAttachments();
   const actions = useMemo(() => timelineActions(bridge), [bridge]);
-  // The first message, with its images, while the session starts.
+  // The first message, with its images, while the session starts, and a message to a session that is
+  // not running while it resumes.
   const [starting, setStarting] = useState<{ text: string; images: MessageImage[] } | null>(null);
+  const [resuming, setResuming] = useState<{ text: string; images: MessageImage[] } | null>(null);
   const [startFailed, setStartFailed] = useState(false);
+  const [resumeFailed, setResumeFailed] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   // Whether the activity keeps its end in view as it grows; scrolling up stops that.
   const following = useRef(true);
 
-  const provider = summary?.provider ?? choice.provider;
-  const settings =
-    sessionId === null
-      ? choice
-      : {
-          provider,
-          gateway: state?.gateway ?? null,
-          model: state?.model ?? null,
-          effort: state?.effort ?? null,
-          mode: state?.mode ?? 'auto',
-          sandbox: state?.sandbox ?? 'workspace-write',
-        };
+  // A session that is not running, which shows its history and resumes with the next message.
+  const closed = state?.closed === true;
+  // Whether the settings are the page's to choose, as they are until the session starts and while it
+  // is not running; otherwise they are the running session's, and each change switches it.
+  const choosing = sessionId === null || closed;
+  const provider =
+    summary?.provider ?? chosen?.provider ?? remembered?.provider ?? firstChoice.provider;
+  // The session's own settings: those it runs with, or those it last had.
+  const own: Choice = {
+    provider,
+    gateway: state?.gateway ?? null,
+    model: state?.model ?? null,
+    effort: state?.effort ?? null,
+    mode: state?.mode ?? 'auto',
+    sandbox: state?.sandbox ?? 'workspace-write',
+  };
+  const unchanged =
+    sessionId !== null
+      ? own
+      : remembered === undefined
+        ? firstChoice
+        : { ...remembered, mode: 'auto' as const };
+  const settings = choosing ? (chosen ?? unchanged) : own;
   const offers = useOffers(bridge, provider, settings.gateway);
   // A running session's own list once it reports one, else the provider's; missing while it loads.
-  const models = (sessionId === null ? undefined : state?.models) ?? offers.models;
+  const models = (choosing ? undefined : state?.models) ?? offers.models;
   // The model the provider uses when the session chooses none, under its own name, and the model in
-  // use with its efforts. Before the session starts, a model the provider no longer offers, as one
-  // remembered may be, gives way to the default.
+  // use with its efforts. While the page chooses, a model the provider no longer offers, as one
+  // remembered or last used may be, gives way to the default.
   const defaultModel = models?.find((entry) => entry.default === true);
   const chosenModel =
-    sessionId === null && models?.some((entry) => entry.id === settings.model) === false
+    choosing && models?.some((entry) => entry.id === settings.model) === false
       ? null
       : settings.model;
   const model =
@@ -131,18 +148,17 @@ export function SessionPage({
   // A choice of the default model itself shows as the default.
   const modelValue = chosenModel === defaultModel?.id ? '' : (chosenModel ?? '');
   // The effort without a choice: before the session starts the page's starting effort, and for a
-  // running session without one the provider's default, under its own name where the provider says.
-  // Before the session starts, an effort the model does not take gives way to the starting effort.
+  // session without one the provider's default, under its own name where the provider says. While the
+  // page chooses, an effort the model does not take gives way to the effort without a choice.
   const unchosenEffort =
     sessionId === null ? startingEffort(model) : (model?.defaultEffort ?? null);
   const chosenEffort =
-    sessionId === null && model !== undefined && !efforts.includes(settings.effort ?? '')
+    choosing && model !== undefined && !efforts.includes(settings.effort ?? '')
       ? null
       : settings.effort;
   const effort = chosenEffort ?? unchosenEffort;
-  const shownStart = state === null ? starting : null;
-  const running = shownStart !== null || state?.turnRunning === true;
-  const closed = state?.closed === true;
+  // The message on its way while the session starts or resumes.
+  const pending = (state === null ? starting : null) ?? (closed ? resuming : null);
 
   useLayoutEffect(() => {
     const element = scroller.current;
@@ -152,10 +168,11 @@ export function SessionPage({
   const send = () => {
     const text = draft.trim();
     const { images } = attachments;
-    if ((text === '' && images.length === 0) || shownStart !== null || closed) return;
+    if ((text === '' && images.length === 0) || pending !== null) return;
     setDraft('');
     attachments.clear();
     setStartFailed(false);
+    setResumeFailed(false);
     // A message that could not go comes back to the composer, with its images.
     const restore = () => {
       setDraft(text);
@@ -163,7 +180,7 @@ export function SessionPage({
     };
     if (sessionId === null) {
       setStarting({ text, images });
-      const started = { ...choice, model: chosenModel, effort };
+      const started = { ...settings, model: chosenModel, effort };
       bridge.start({ ...started, cwd: folder, message: text, images }).then(
         (id) => {
           const { provider: chosenProvider, gateway, model: startModel, sandbox } = started;
@@ -185,6 +202,31 @@ export function SessionPage({
       );
       return;
     }
+    if (closed) {
+      setResuming({ text, images });
+      const { mode, gateway, sandbox } = settings;
+      const resumed = { mode, gateway, model: chosenModel, effort: chosenEffort, sandbox };
+      bridge.resume(sessionId, { ...resumed, message: text, images }).then(
+        () => {
+          setResuming(null);
+          setChosen(null);
+          rememberChoice(bridge, folder, {
+            provider,
+            gateway,
+            model: chosenModel,
+            effort: chosenEffort,
+            sandbox,
+          });
+        },
+        (error: unknown) => {
+          report(error);
+          setResuming(null);
+          setResumeFailed(true);
+          restore();
+        },
+      );
+      return;
+    }
     bridge.send(sessionId, text, images).catch((error: unknown) => {
       report(error);
       restore();
@@ -193,7 +235,7 @@ export function SessionPage({
 
   // A change of the page's choice, from what it shows.
   const change = (next: Partial<Choice>) => {
-    setChosen((current) => ({ ...(current ?? choice), ...next }));
+    setChosen((current) => ({ ...(current ?? settings), ...next }));
   };
   // Remembers a running session's settings for its folder once a switch has taken.
   const switched = (next: Partial<RememberedChoice>) => () => {
@@ -207,29 +249,29 @@ export function SessionPage({
       ...next,
     });
   };
-  // A choice before the session starts, or a switch once it runs.
+  // A choice before the session starts or while it is not running, or a switch while it runs.
   const switchTo = {
     provider: (value: string) => {
       change({ provider: value as ProviderId, gateway: null, model: null, effort: null });
     },
     gateway: (value: string) => {
       const gateway = value === '' ? null : value;
-      if (sessionId === null) change({ gateway, model: null, effort: null });
+      if (choosing) change({ gateway, model: null, effort: null });
       else bridge.setGateway(sessionId, gateway).then(switched({ gateway }), report);
     },
     model: (value: string) => {
       const next = value === '' ? null : value;
-      if (sessionId === null) change({ model: next, effort: null });
+      if (choosing) change({ model: next, effort: null });
       else bridge.setModel(sessionId, next).then(switched({ model: next }), report);
     },
     effort: (value: string) => {
       const level = value === '' ? null : value;
-      if (sessionId === null) change({ effort: level });
+      if (choosing) change({ effort: level });
       else bridge.setEffort(sessionId, level).then(switched({ effort: level }), report);
     },
     mode: (value: string) => {
       const mode = value as PermissionMode;
-      if (sessionId !== null) {
+      if (!choosing) {
         bridge.setMode(sessionId, mode).catch(report);
       } else if (mode === 'yolo') {
         bridge.confirmYolo().then((confirmed) => {
@@ -241,7 +283,7 @@ export function SessionPage({
     },
     sandbox: (value: string) => {
       const sandbox = value as SandboxLevel;
-      if (sessionId === null) change({ sandbox });
+      if (choosing) change({ sandbox });
       else bridge.setSandbox(sessionId, sandbox).then(switched({ sandbox }), report);
     },
   };
@@ -357,13 +399,20 @@ export function SessionPage({
           }}
           className="relative min-h-0 overflow-y-auto px-5 pt-2 pb-5 font-mono text-[12.5px]/[1.75] text-muted"
         >
+          {closed && state.loadingHistory && (
+            <p className="my-3 text-faint">{t('sessions.page.loadingHistory')}</p>
+          )}
+          {closed && state.historyFailed && (
+            <p className="my-3 text-del">{t('sessions.page.historyFailed')}</p>
+          )}
           <Timeline
             state={state}
             agent={providerName}
-            {...(shownStart === null ? {} : { starting: shownStart })}
+            {...(pending === null ? {} : { pending })}
             {...(renderRequest === undefined ? {} : { renderRequest })}
           />
           {startFailed && <p className="my-3 text-del">{t('sessions.page.startFailed')}</p>}
+          {resumeFailed && <p className="my-3 text-del">{t('sessions.page.resumeFailed')}</p>}
         </section>
         {/* The composer, on which images can be dropped, marked while they are dragged over it. */}
         <div
@@ -394,7 +443,6 @@ export function SessionPage({
               placeholder={placeholder}
               value={draft}
               rows={1}
-              disabled={closed}
               onChange={(event) => {
                 setDraft(event.target.value);
               }}
@@ -407,7 +455,7 @@ export function SessionPage({
               }}
               className="max-h-40 min-w-0 flex-1 resize-none bg-transparent font-mono text-[12.5px]/[1.75] text-ink outline-none [field-sizing:content] placeholder:text-placeholder"
             />
-            {running && sessionId !== null && (
+            {sessionId !== null && state?.turnRunning === true && (
               <button
                 type="button"
                 onClick={() => {

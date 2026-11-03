@@ -1,4 +1,5 @@
 import {
+  Archive as LucideArchive,
   Brain as LucideBrain,
   Check as LucideCheck,
   ChevronDown as LucideChevronDown,
@@ -50,3 +51,4 @@ export const Copy = decorative(LucideCopy);
 export const Check = decorative(LucideCheck);
 export const ShieldCheck = decorative(LucideShieldCheck);
 export const CircleQuestionMark = decorative(LucideCircleQuestionMark);
+export const Archive = decorative(LucideArchive);

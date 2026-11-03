@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
-import { answerDialogs, dataFolder, launch } from './app';
+import { answerQuestion, dataFolder, launch, pickFolder } from './app';
 
 test('tree rows dragged into the main area open as panels, which split, resize, take focus, close and move', async () => {
   const data = dataFolder();
@@ -13,8 +13,9 @@ test('tree rows dragged into the main area open as panels, which split, resize, 
     const app = await launch(data.path);
     try {
       const window = await app.firstWindow();
-      await answerDialogs(app, folder, true);
+      await pickFolder(app, folder);
       await window.getByRole('button', { name: 'Add workspace' }).click();
+      await answerQuestion(window, 'Trust');
       const workspace = window.getByRole('treeitem', { name: basename(folder), exact: true });
       await workspace.focus();
       await window.keyboard.press('ArrowRight');

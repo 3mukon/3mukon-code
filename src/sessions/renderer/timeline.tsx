@@ -34,8 +34,9 @@ const taskDots: Record<Task['status'], Status> = {
 interface TimelineProps {
   // The session's state, or null before it has one.
   state: SessionState | null;
-  // A first message on its way, with its images, shown as the user's while the session starts.
-  starting?: { text: string; images: MessageImage[] };
+  // A message on its way, with its images, shown as the user's after the activity while the session
+  // starts or resumes.
+  pending?: { text: string; images: MessageImage[] };
   // The provider's name, which VoiceOver reads before each of the agent's messages.
   agent: string;
   renderRequest?: RenderRequest;
@@ -46,15 +47,12 @@ interface TimelineProps {
 // thinking quieter; each tool call as one entry, with the files it changed and their diffs; the
 // approvals and questions, as the page's composer renders them; errors, then the agent's task list
 // with finished rows struck through and the current one bright, and Working while a turn runs.
-export function Timeline({ state, starting, agent, renderRequest }: TimelineProps) {
+export function Timeline({ state, pending, agent, renderRequest }: TimelineProps) {
   const { t } = useTranslation();
-  const working = starting !== undefined || state?.turnRunning === true;
+  const working = pending !== undefined || state?.turnRunning === true;
   const oldestWaiting = state === null ? undefined : openRequests(state)[0]?.id;
   return (
     <>
-      {starting !== undefined && (
-        <Message role="user" text={starting.text} images={starting.images} agent={agent} />
-      )}
       {state?.timeline.map((item, index) => (
         <Item
           key={keyOf(item, index)}
@@ -64,6 +62,9 @@ export function Timeline({ state, starting, agent, renderRequest }: TimelineProp
           {...(renderRequest === undefined ? {} : { renderRequest })}
         />
       ))}
+      {pending !== undefined && (
+        <Message role="user" text={pending.text} images={pending.images} agent={agent} />
+      )}
       {state !== null && state.tasks.length > 0 && (
         <ul className="my-3">
           {state.tasks.map((task, index) => (
@@ -84,7 +85,6 @@ export function Timeline({ state, starting, agent, renderRequest }: TimelineProp
           {t('sessions.page.working')}
         </p>
       )}
-      {state?.closed === true && <p className="mt-3 text-faint">{t('sessions.page.ended')}</p>}
     </>
   );
 }

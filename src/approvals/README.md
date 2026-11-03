@@ -23,7 +23,7 @@ tags: []
 ## Not responsible for
 
 - Holding the requests and passing answers to the providers: the sessions module folds the requests into each session's state, records the answer the user gave, and its host passes answers to the provider's session.
-- Where the indicator and the requests show: the app module puts the waiting button just after the window buttons and hands the session pages this module's request view, with what answers it.
+- Where the indicator and the requests show: the app module puts the waiting button beside the window buttons, just after the archived sessions' button, and hands the session pages this module's request view, with what answers it.
 - The look of the indicator, the icons and the tokens, which the ui module holds.
 
 ## Interface

@@ -48,6 +48,9 @@ export interface Provider {
   resume(options: ResumeOptions, onEvent: SessionEventListener): Promise<ProviderSession>;
   // The folder's past sessions from the provider's own store, newest first, at most limit of them.
   listSessions(cwd: string, limit: number): Promise<HistoryEntry[]>;
+  // A past session's events from the provider's own store, as resume replays them, without resuming
+  // it: no turn runs, and nothing of the session stays open.
+  history(sessionId: string, cwd: string): Promise<SessionEvent[]>;
   // The gateways set up in the provider's own settings, by name and in order; empty for a provider
   // without gateways.
   listGateways(): Promise<string[]>;

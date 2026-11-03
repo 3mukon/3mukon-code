@@ -19,6 +19,10 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 480,
     show: false,
     titleBarStyle: 'hiddenInset',
+    // The traffic lights, 14pt tall, 13pt from the top, so that they are centred in the page's 40px
+    // title bar, on one line with what the page shows beside them and in the panels' headers; hidden
+    // inset's own 11pt sets them 2pt higher. The 12pt from the left is hidden inset's own.
+    trafficLightPosition: { x: 12, y: 13 },
     webPreferences: {
       // The preload script gives the sandboxed page the bridge, its only way to the main process. A
       // sandboxed preload script runs as CommonJS.

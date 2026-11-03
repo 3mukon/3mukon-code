@@ -39,7 +39,7 @@ test('the page reaches the main process only through the bridge’s functions', 
       };
     });
     expect(bridge).toEqual({
-      parts: ['approvals', 'files', 'panels', 'sessions', 'workspaces'],
+      parts: ['approvals', 'files', 'panels', 'prompts', 'sessions', 'workspaces'],
       calls: [
         [
           'workspaces',
@@ -56,6 +56,7 @@ test('the page reaches the main process only through the bridge’s functions', 
         [
           'sessions',
           [
+            'archived:function',
             'choices:function',
             'confirmYolo:function',
             'copyImage:function',
@@ -70,6 +71,7 @@ test('the page reaches the main process only through the bridge’s functions', 
             'onEvent:function',
             'providers:function',
             'rememberChoice:function',
+            'resume:function',
             'saveImage:function',
             'send:function',
             'setEffort:function',
@@ -77,6 +79,7 @@ test('the page reaches the main process only through the bridge’s functions', 
             'setMode:function',
             'setModel:function',
             'setSandbox:function',
+            'showMenu:function',
             'snapshot:function',
             'start:function',
           ],
@@ -93,6 +96,7 @@ test('the page reaches the main process only through the bridge’s functions', 
           ],
         ],
         ['approvals', ['answerApproval:function', 'answerQuestion:function']],
+        ['prompts', ['answer:function', 'onPrompt:function']],
       ],
       electron: [],
     });
@@ -128,6 +132,23 @@ test('Command-B hides the sidebar and shows it again', async () => {
     await window.keyboard.press('Meta+B');
     await expect(sidebar).toHaveCSS('width', '220px');
     await expect(sidebar).not.toHaveAttribute('inert');
+  });
+});
+
+test('the traffic lights are centred in the 40px title bar, on one line with the buttons beside them', async () => {
+  await withApp(async (electronApp) => {
+    const window = await electronApp.firstWindow();
+    // The traffic lights, 14pt circles, set 13pt from the top: their centre lies 20pt down, as the
+    // archived sessions' button's does, centred in the page's title bar.
+    const position = await electronApp.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.getWindowButtonPosition(),
+    );
+    expect(position).toEqual({ x: 12, y: 13 });
+    const button = await window.getByRole('button', { name: 'Archived sessions' }).boundingBox();
+    if (button === null) throw new Error('The archived sessions’ button is not shown.');
+    expect(button.y + button.height / 2).toBe(13 + 14 / 2);
+    // It lies just after them.
+    expect(button.x).toBe(84);
   });
 });
 

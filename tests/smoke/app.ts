@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { _electron as electron, type ElectronApplication } from '@playwright/test';
+import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 
 // A throwaway data folder for the app, so that smoke tests never read or change the user's own.
 export function dataFolder(): { path: string; remove: () => void } {
@@ -34,15 +34,15 @@ export async function withApp(
   }
 }
 
-// Stands in for the user in the native folder picker and trust question, which a test cannot click:
-// the picker chooses the folder, and the question gets the answer.
-export async function answerDialogs(app: ElectronApplication, folder: string, trust: boolean) {
-  await app.evaluate(
-    ({ dialog }, { folder, trust }) => {
-      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [folder] });
-      dialog.showMessageBox = () =>
-        Promise.resolve({ response: trust ? 0 : 1, checkboxChecked: false });
-    },
-    { folder, trust },
-  );
+// Stands in for the user in the native folder picker, which a test cannot click: it chooses the
+// folder.
+export async function pickFolder(app: ElectronApplication, folder: string) {
+  await app.evaluate(({ dialog }, folder) => {
+    dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [folder] });
+  }, folder);
+}
+
+// Gives the answer of this label to the question the window asks, as the user would.
+export async function answerQuestion(window: Page, label: string) {
+  await window.getByRole('alertdialog').getByRole('button', { name: label, exact: true }).click();
 }

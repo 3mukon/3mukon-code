@@ -13,15 +13,16 @@ import { MAX_IMAGE_BASE64, MAX_IMAGES, SENDABLE_IMAGE_TYPES } from '../../sessio
 import type { Workspaces, WorkspacesUi } from '../../workspaces/main/workspaces';
 import { channels } from '../shared/bridge';
 import { isAppPage } from './links';
+import { answerPrompt } from './prompts';
 
 interface BridgeServices {
   workspaces: Workspaces;
   sessions: SessionHost;
   // The settings each folder's sessions last used.
   choices: RememberedChoices;
-  // The dialogs and menus the workspaces show, attached to the window that asked.
+  // The questions and menus the workspaces show, in the window that asked.
   workspacesUi: (window: BrowserWindow) => WorkspacesUi;
-  // The confirmations the sessions ask for, attached to the window that asked.
+  // The confirmations and menus the sessions show, in the window that asked.
   sessionsUi: (window: BrowserWindow) => SessionsUi;
   // The files the editors read, write and watch.
   files: FileService;
@@ -61,6 +62,18 @@ const startRequest = z
   .object({
     provider,
     cwd: path.startsWith('/'),
+    mode,
+    gateway: name.nullable(),
+    model: name.nullable(),
+    effort: effort.nullable(),
+    sandbox,
+    message: text,
+    images: sentImages,
+  })
+  .strict()
+  .refine((request) => hasContent(request.message, request.images));
+const resumeRequest = z
+  .object({
     mode,
     gateway: name.nullable(),
     model: name.nullable(),
@@ -142,6 +155,21 @@ export function serveBridge({
     workspaces.listFolder(workspace, folder),
   );
   handle(channels.sessions.list, z.tuple([]), () => sessions.list());
+  handle(channels.sessions.archived, z.tuple([]), () => sessions.archived());
+  // A page asks for yolo's confirmation when the user chooses it for a session that is not running;
+  // one that ran in yolo before resumes in it, as the user chose it then (ADR-0006).
+  handle(
+    channels.sessions.resume,
+    z.tuple([id, resumeRequest]),
+    async (_window, session, request) => {
+      const { message, images, ...settings } = request;
+      await sessions.resume(session, settings);
+      await sessions.send(session, message, images);
+    },
+  );
+  handle(channels.sessions.showMenu, z.tuple([id]), (window, session) =>
+    sessions.showMenu(session, sessionsUi(window)),
+  );
   handle(channels.sessions.providers, z.tuple([]), () => sessions.providerIds());
   handle(channels.sessions.dayFolder, z.tuple([]), () => dayFolder(homedir(), new Date()));
   handle(channels.sessions.gateways, z.tuple([provider]), (_window, chosen) =>
@@ -251,6 +279,14 @@ export function serveBridge({
   });
   handle(channels.files.confirmClose, z.tuple([fileName]), (window, file) =>
     filesUi(window).confirmClose(file),
+  );
+  // The page's answer to a menu or question it was asked to draw.
+  handle(
+    channels.prompts.answer,
+    z.tuple([z.number().int().positive(), id.nullable()]),
+    (window, prompt, answer) => {
+      answerPrompt(window.webContents, prompt, answer);
+    },
   );
 
   workspaces.onChange((list) => {

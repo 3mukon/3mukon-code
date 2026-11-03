@@ -142,6 +142,29 @@ export function createGrokBuildProvider(options: GrokBuildProviderOptions): Prov
     resume(options, onEvent) {
       return GrokSession.open(options, options.sessionId, connect, onEvent);
     },
+    // Grok replays a session to the process that loads it, so a short-lived process in the read-only
+    // profile loads it and ends; nothing is sent to the session.
+    history(sessionId, cwd) {
+      const translator = new Translator(cwd);
+      const events: SessionEvent[] = [];
+      return withGrok(
+        connect,
+        cwd,
+        async ({ connection }) => {
+          await connection.agent.request('session/load', {
+            cwd,
+            mcpServers: [],
+            _meta: SESSION_META,
+            sessionId,
+          });
+          translator.endMessage();
+          return events;
+        },
+        ({ sessionId: loaded, update }) => {
+          if (loaded === sessionId) events.push(...translator.update(update));
+        },
+      );
+    },
     listSessions(cwd, limit) {
       return withGrok(connect, cwd, async ({ connection }): Promise<HistoryEntry[]> => {
         const sessions: SessionInfo[] = [];
@@ -239,9 +262,10 @@ async function withGrok<Result>(
   connect: Connect,
   cwd: string,
   use: (agent: Agent) => Promise<Result>,
+  update: Handlers['update'] = () => undefined,
 ): Promise<Result> {
   const agent = await connect(cwd, 'read-only', {
-    update: () => undefined,
+    update,
     permission: () => Promise.resolve(cancelledPermission),
     question: () => Promise.resolve(cancelledQuestion),
     queueChanged: () => undefined,

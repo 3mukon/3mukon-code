@@ -304,9 +304,14 @@ describe('PanelArea', () => {
     const handle = shown(within(panel('a.ts')).getByText('a.ts').parentElement);
     const moved = { types: ['application/x-3mukon-code-panel'] };
     fireEvent.dragStart(handle, { dataTransfer: { setData: vi.fn(), effectAllowed: 'none' } });
-    // A panel does not drop on itself.
-    expect(drag('dragover', panel('a.ts'), moved, 250, 300)).toBe(true);
+    // On itself, or anywhere else in the window, a panel is taken without a drop zone and stays where
+    // it was, so that macOS does not slide it back as it would a drag nothing took.
+    expect(drag('dragover', panel('a.ts'), moved, 250, 300)).toBe(false);
+    expect(drag('dragover', document.body, moved)).toBe(false);
     expect(area.querySelector('.outline-accent')).toBeNull();
+    expect(dropPanel(panel('a.ts'), 'panel-1', 250, 300)).toBe(false);
+    expect(dropPanel(document.body, 'panel-1', 10, 10)).toBe(false);
+    expect([place('a.ts').left, place('b.ts').left]).toEqual(['0%', '50%']);
     // Near b.ts's bottom edge, a.ts moves below it.
     expect(drag('dragover', panel('b.ts'), moved, 750, 590)).toBe(false);
     dropPanel(panel('b.ts'), 'panel-1', 750, 590);
@@ -316,6 +321,9 @@ describe('PanelArea', () => {
     // In b.ts's middle, the two swap places.
     dropPanel(panel('b.ts'), 'panel-1', 500, 150);
     expect([place('a.ts').top, place('b.ts').top]).toEqual(['0%', '50%']);
+    // Once the drag has ended, the window takes nothing more.
+    fireEvent.dragEnd(handle);
+    expect(drag('dragover', document.body, moved)).toBe(true);
   });
 
   it('focuses the next panel that way with ⌥⌘ and an arrow, and swaps with it with ⇧⌥⌘', () => {

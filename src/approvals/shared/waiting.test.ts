@@ -8,7 +8,7 @@ const session = (id: string, fields: Partial<SessionSummary> = {}): SessionSumma
   sessionId: `p-${id}`,
   cwd: '/Users/me/web',
   status: 'idle',
-  openedAt: 0,
+  activeAt: 0,
   ...fields,
 });
 

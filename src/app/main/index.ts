@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
 import { dockAttention } from '../../approvals/main/dock';
 import { FileService } from '../../files/main/files';
-import { keepUnsavedChanges, nativeFilesUi } from '../../files/main/native';
+import { keepUnsavedChanges, windowFilesUi } from '../../files/main/native';
 import { mainTranslator } from '../../i18n/main/i18n';
 import { createClaudeCodeProvider } from '../../providers/claude-code/main/adapter';
 import { createCodexProvider } from '../../providers/codex/main/adapter';
@@ -11,14 +11,16 @@ import { createGrokBuildProvider } from '../../providers/grok-build/main/adapter
 import { choiceStorage, RememberedChoices } from '../../sessions/main/choices';
 import { dayRoot } from '../../sessions/main/folders';
 import { SessionHost } from '../../sessions/main/host';
-import { nativeSessionsUi } from '../../sessions/main/native';
+import { windowSessionsUi } from '../../sessions/main/native';
 import type { Provider } from '../../sessions/main/provider';
+import { recordStorage, SessionRecords } from '../../sessions/main/records';
 import { startToolset, type RunningToolset } from '../../toolset/main/server';
-import { nativeWorkspacesUi } from '../../workspaces/main/native';
+import { windowWorkspacesUi } from '../../workspaces/main/native';
 import { fileStorage } from '../../workspaces/main/storage';
 import { Workspaces } from '../../workspaces/main/workspaces';
 import { serveBridge } from './bridge';
 
+import { windowPrompts } from './prompts';
 import { createMainWindow, pageUrl } from './window';
 
 // How long quitting waits for the sessions and the toolset to close.
@@ -33,7 +35,11 @@ void app
     // process's strings as it does to the window's.
     const t = mainTranslator([app.getLocale(), ...app.getPreferredSystemLanguages()]);
     const toolset = await startToolsetIfPossible(version);
-    const sessions = new SessionHost(providers(data, version, toolset));
+    // The sessions the app starts, kept in its data, which later runs list and resume.
+    const sessions = new SessionHost(
+      providers(data, version, toolset),
+      new SessionRecords(recordStorage(data)),
+    );
     const workspaces = new Workspaces(fileStorage(data));
     // The editors' files: those in the workspaces, and those dropped on a window.
     const files = new FileService(() =>
@@ -43,17 +49,21 @@ void app
       workspaces,
       sessions,
       choices: new RememberedChoices(choiceStorage(data), dayRoot(homedir())),
-      workspacesUi: (window) => nativeWorkspacesUi(window, t),
-      sessionsUi: (window) => nativeSessionsUi(window, t),
+      // Their menus and questions drawn by the window that asked, in the app's own look.
+      workspacesUi: (window) => windowWorkspacesUi(window, windowPrompts(window), t),
+      sessionsUi: (window) => windowSessionsUi(window, windowPrompts(window), t),
       files,
-      filesUi: (window) => nativeFilesUi(window, t),
+      filesUi: (window) => windowFilesUi(windowPrompts(window), t),
       page: pageUrl(),
     });
     closeBeforeQuitting(sessions, toolset);
     // The sessions waiting on the user show on the Dock icon too.
     const dock = app.dock;
     if (dock !== undefined) {
-      sessions.onChange(dockAttention(dock, () => BrowserWindow.getFocusedWindow() !== null));
+      const attention = dockAttention(dock, () => BrowserWindow.getFocusedWindow() !== null);
+      sessions.onChange((list) => {
+        attention(list.sessions);
+      });
     }
     // A packaged app's bundle carries its icon; unpackaged, the app shows it in the Dock itself.
     if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), 'resources', 'dock-icon.png'));

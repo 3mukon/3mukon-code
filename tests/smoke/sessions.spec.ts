@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { channels } from '../../src/app/shared/bridge';
 import {
@@ -6,7 +8,7 @@ import {
   type TimelineItem,
 } from '../../src/sessions/shared/session-state';
 import type { SessionSummary } from '../../src/sessions/shared/sessions';
-import { withApp } from './app';
+import { answerQuestion, dataFolder, launch, withApp } from './app';
 
 // A session that the main process lists and gives in place of the host's, so that no provider runs: a
 // long timeline of messages and tool calls, each with text for VoiceOver alone.
@@ -17,7 +19,7 @@ const summary: SessionSummary = {
   cwd: '/Users/me/web',
   title: 'Long session',
   status: 'idle',
-  openedAt: 0,
+  activeAt: 0,
 };
 const state: SessionState = {
   ...initialSessionState(),
@@ -49,7 +51,7 @@ test('a long session scrolls within its page, and the window’s page itself nev
       },
       {
         answers: [
-          [channels.sessions.list, [summary]],
+          [channels.sessions.list, { sessions: [summary], archived: 0, shown: [] }],
           [channels.sessions.snapshot, { seq: 0, state }],
         ] as const,
       },
@@ -126,7 +128,7 @@ test('a session waiting on the user shows beside the window buttons, and its app
       },
       {
         answers: [
-          [channels.sessions.list, [waiting]],
+          [channels.sessions.list, { sessions: [waiting], archived: 0, shown: [] }],
           [channels.sessions.snapshot, { seq: 0, state: asking }],
         ] as const,
         answerChannel: channels.approvals.answerApproval,
@@ -151,4 +153,221 @@ test('a session waiting on the user shows beside the window buttons, and its app
       .poll(() => app.evaluate(() => (globalThis as unknown as { sent: unknown[][] }).sent))
       .toEqual([['s1', 'r1', { decision: 'allow-once' }]]);
   });
+});
+
+test('a session the app started in an earlier run is listed, shows the settings it last had, and resumes with the next message', async () => {
+  const data = dataFolder();
+  // The app's own record of the session, as an earlier run left it.
+  writeFileSync(
+    join(data.path, 'sessions.json'),
+    JSON.stringify({
+      sessions: [
+        {
+          id: 'kept',
+          provider: 'claude-code',
+          sessionId: 'p9',
+          cwd: '/Users/me/web',
+          title: 'Earlier session',
+          activeAt: 1,
+          mode: 'yolo',
+          gateway: null,
+          model: null,
+          effort: null,
+          sandbox: 'read-only',
+        },
+      ],
+    }),
+  );
+  const app = await launch(data.path);
+  try {
+    const window = await app.firstWindow();
+    const row = window.getByRole('button', { name: /Earlier session/ });
+    await expect(row).toBeVisible();
+    // The main process's resume, which the test records and holds back, so that no provider runs.
+    await app.evaluate(({ ipcMain }, channel) => {
+      const resumed: unknown[][] = [];
+      (globalThis as unknown as { resumed: unknown[][] }).resumed = resumed;
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, (_event, ...values: unknown[]) => {
+        resumed.push(values);
+        return new Promise(() => undefined);
+      });
+    }, channels.sessions.resume);
+    await row.click();
+    const page = window.getByRole('main');
+    // Showing it starts nothing; its settings are those it last had, yolo too.
+    await expect(page.getByRole('combobox', { name: 'Permission mode' }).first()).toHaveValue(
+      'yolo',
+    );
+    await expect(page.getByRole('combobox', { name: 'Sandbox' }).first()).toHaveValue('read-only');
+    const composer = page.getByRole('textbox', { name: 'Message' });
+    await composer.fill('Continue');
+    await composer.press('Enter');
+    await expect
+      .poll(() => app.evaluate(() => (globalThis as unknown as { resumed: unknown[][] }).resumed))
+      .toEqual([
+        [
+          'kept',
+          {
+            mode: 'yolo',
+            gateway: null,
+            model: null,
+            effort: null,
+            sandbox: 'read-only',
+            message: 'Continue',
+            images: [],
+          },
+        ],
+      ]);
+    await expect(page.getByText('Continue')).toBeVisible();
+  } finally {
+    await app.close();
+    data.remove();
+  }
+});
+
+test('the Sessions list renders only the rows in view, and the archived sessions load only as their list opens', async () => {
+  const data = dataFolder();
+  // The app's records of an earlier run: the 1,000 sessions the Sessions list keeps, the first the
+  // most recently active, and three archived ones.
+  const record = (id: string, title: string, activeAt: number, archived = false) => ({
+    id,
+    provider: 'claude-code',
+    sessionId: `p-${id}`,
+    cwd: '/Users/me/web',
+    title,
+    activeAt,
+    ...(archived ? { archived: true } : {}),
+    mode: 'auto',
+    gateway: null,
+    model: null,
+    effort: null,
+    sandbox: 'workspace-write',
+  });
+  writeFileSync(
+    join(data.path, 'sessions.json'),
+    JSON.stringify({
+      sessions: [
+        ...Array.from({ length: 1_000 }, (_, index) =>
+          record(`s${String(index)}`, `Session ${String(index)}`, 10_000 - index),
+        ),
+        ...Array.from({ length: 3 }, (_, index) =>
+          record(`a${String(index)}`, `Archived ${String(index)}`, 100 - index, true),
+        ),
+      ],
+    }),
+  );
+  const app = await launch(data.path);
+  try {
+    const window = await app.firstWindow();
+    const list = window.getByRole('list', { name: 'Sessions' });
+    const rows = list.getByRole('listitem');
+    await expect(list.getByRole('button', { name: /Session 0 / })).toBeInViewport();
+    expect((await list.getByRole('button', { name: /Session 0 / }).boundingBox())?.height).toBe(28);
+    // Of the thousand, only the rows in view and a few below them are rendered.
+    expect(await rows.count()).toBeLessThan(60);
+    // Scrolled to its end with the wheel, the list shows its last session, still rendering only a few
+    // rows.
+    const box = await list.boundingBox();
+    if (box === null) throw new Error('The list is not shown.');
+    await window.mouse.move(box.x + box.width / 2, box.y + 14);
+    await window.mouse.wheel(0, 40_000);
+    await expect(list.getByRole('button', { name: /Session 999 / })).toBeInViewport();
+    expect(await rows.count()).toBeLessThan(60);
+    const overflow = await window.evaluate(() => {
+      const root = (
+        globalThis as unknown as {
+          document: { documentElement: { scrollHeight: number; clientHeight: number } };
+        }
+      ).document.documentElement;
+      return root.scrollHeight - root.clientHeight;
+    });
+    expect(overflow).toBe(0);
+    // The archived sessions are not in the window until their list opens.
+    await expect(window.getByText('Archived 0')).toHaveCount(0);
+    await window.getByRole('button', { name: 'Archived sessions' }).click();
+    const dropdown = window.getByRole('group', { name: 'Archived sessions' });
+    await expect(dropdown.getByRole('button', { name: /Archived 0 / })).toBeInViewport();
+    await expect(dropdown.getByRole('listitem')).toHaveCount(3);
+    // One shown from there opens in a panel titled by it, as the dropdown closes.
+    await dropdown.getByRole('button', { name: /Archived 1 / }).click();
+    await expect(
+      window.getByRole('main').getByRole('region', { name: 'Archived 1' }),
+    ).toBeVisible();
+    await expect(dropdown).toBeHidden();
+  } finally {
+    await app.close();
+    data.remove();
+  }
+});
+
+test('a session’s menu and the question before removing it are drawn in the window, in the app’s own look', async () => {
+  const data = dataFolder();
+  const record = (id: string, title: string, activeAt: number) => ({
+    id,
+    provider: 'claude-code',
+    sessionId: `p-${id}`,
+    cwd: '/Users/me/web',
+    title,
+    activeAt,
+    mode: 'auto',
+    gateway: null,
+    model: null,
+    effort: null,
+    sandbox: 'workspace-write',
+  });
+  writeFileSync(
+    join(data.path, 'sessions.json'),
+    JSON.stringify({
+      sessions: [record('kept', 'Earlier session', 2), record('other', 'Other session', 1)],
+    }),
+  );
+  const app = await launch(data.path);
+  try {
+    const window = await app.firstWindow();
+    const row = window.getByRole('button', { name: /Earlier session/ });
+    // A secondary click opens the menu at the pointer, a sheet of the window's paper, with the focus
+    // on its first item. As a person clicks, the menu shows while the button is still down, and stays
+    // as it comes up; Escape closes it without a choice.
+    const rowBox = await row.boundingBox();
+    if (rowBox === null) throw new Error('The session is not listed.');
+    await window.mouse.move(rowBox.x + 30, rowBox.y + 10);
+    await window.mouse.down({ button: 'right' });
+    const menu = window.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await window.mouse.up({ button: 'right' });
+    await expect(menu.getByRole('menuitem')).toHaveText(['Archive', 'Remove from List']);
+    await expect(menu).toHaveClass(/\bpaper\b/);
+    await expect(menu.getByRole('menuitem', { name: 'Archive' })).toBeFocused();
+    // At the pointer, which lies on whole pixels.
+    const menuBox = await menu.boundingBox();
+    expect(menuBox?.x).toBeCloseTo(rowBox.x + 30, 0);
+    expect(menuBox?.y).toBeCloseTo(rowBox.y + 10, 0);
+    await window.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    // Removing asks first, in the window, with the focus on Cancel, the default answer.
+    await row.click({ button: 'right' });
+    await window.getByRole('menuitem', { name: 'Remove from List' }).click();
+    const question = window.getByRole('alertdialog', {
+      name: 'Remove “Earlier session” from the list?',
+    });
+    await expect(question).toHaveClass(/\bpaper\b/);
+    await expect(question.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    await window.keyboard.press('Enter');
+    await expect(question).toHaveCount(0);
+    await expect(row).toBeVisible();
+    await row.click({ button: 'right' });
+    await window.getByRole('menuitem', { name: 'Remove from List' }).click();
+    await answerQuestion(window, 'Remove');
+    await expect(row).toHaveCount(0);
+    // A session that is not working is archived without a question.
+    const other = window.getByRole('button', { name: /Other session/ });
+    await other.click({ button: 'right' });
+    await window.getByRole('menuitem', { name: 'Archive' }).click();
+    await expect(other).toHaveCount(0);
+    await expect(window.getByRole('button', { name: 'Archived sessions' })).toBeEnabled();
+  } finally {
+    await app.close();
+    data.remove();
+  }
 });

@@ -9,7 +9,7 @@ const sessions = (statuses: SessionSummary['status'][]): SessionSummary[] =>
     sessionId: `p${String(index)}`,
     cwd: '/Users/me/web',
     status,
-    openedAt: 0,
+    activeAt: 0,
   }));
 
 describe('dockAttention', () => {

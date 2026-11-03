@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { SessionSummary } from '../shared/sessions';
@@ -7,7 +7,10 @@ import { SessionsSection, type SessionFolder } from './sessions-section';
 beforeAll(() => {
   initI18n(['en-US']);
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 function session(id: string, cwd: string, extra: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -16,7 +19,7 @@ function session(id: string, cwd: string, extra: Partial<SessionSummary> = {}): 
     sessionId: `p-${id}`,
     cwd,
     status: 'idle',
-    openedAt: 0,
+    activeAt: 0,
     ...extra,
   };
 }
@@ -32,6 +35,11 @@ const sessions = [
   session('s3', '/Users/me/website', { title: 'Landing page', status: 'closed' }),
   session('s4', '/Users/me/api', { provider: 'grok-build', title: '' }),
 ];
+
+// A thousand sessions, the list's limit, the first of them the most recently active.
+const many = Array.from({ length: 1_000 }, (_, index) =>
+  session(`s${String(index)}`, '/Users/me/web', { title: `Session ${String(index)}` }),
+);
 
 const region = () => screen.getByRole('region', { name: 'Sessions' });
 const rows = () =>
@@ -98,6 +106,78 @@ describe('SessionsSection', () => {
     expect(onOpenSession.mock.calls).toEqual([[sessions[0]]]);
   });
 
+  it('offers a session’s menu at a secondary click, in place of the page’s own', () => {
+    const onSessionMenu = vi.fn();
+    render(
+      <SessionsSection
+        sessions={sessions}
+        folders={folders}
+        onOpenSession={vi.fn()}
+        onSessionMenu={onSessionMenu}
+      />,
+    );
+    const shown = fireEvent.contextMenu(
+      within(region()).getByRole('button', { name: /Landing page/ }),
+    );
+    expect(shown).toBe(false);
+    expect(onSessionMenu.mock.calls).toEqual([[sessions[2]]]);
+  });
+
+  it('renders only the rows in view and a few on either side, each saying where it lies in the whole list', () => {
+    // The scroll area as the window lays it out, ten rows tall.
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(280);
+    render(<SessionsSection sessions={many} folders={[]} />);
+    const list = within(region()).getByRole('list', { name: 'Sessions' });
+    const places = () =>
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => Number(item.getAttribute('aria-posinset')));
+    // The list is as tall as all its rows; the ten in view render, and eight below them.
+    expect(list.style.height).toBe('28000px');
+    expect(places()).toEqual(range(1, 18));
+    const [first] = within(list).getAllByRole('listitem');
+    expect(first?.getAttribute('aria-setsize')).toBe('1000');
+    expect(first?.textContent).toBe('IdleSession 0web');
+    // Scrolled halfway, it renders the rows then in view, and eight on either side.
+    const area = list.parentElement;
+    if (area === null) throw new Error('no scroll area');
+    area.scrollTop = 500 * 28;
+    fireEvent.scroll(area);
+    expect(places()).toEqual(range(493, 518));
+    const row = within(list).getByText('Session 500').closest('li');
+    expect(row?.style.top).toBe('14000px');
+    expect(row?.style.height).toBe('28px');
+  });
+
+  it('renders the first rows until its scroll area is measured, as while it is out of sight', () => {
+    render(<SessionsSection sessions={many} folders={[]} />);
+    expect(within(region()).getAllByRole('listitem')).toHaveLength(48);
+  });
+
+  it('keeps the row with the keyboard focus while it is scrolled out of view', () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(280);
+    render(<SessionsSection sessions={many} folders={[]} onOpenSession={vi.fn()} />);
+    const list = within(region()).getByRole('list', { name: 'Sessions' });
+    const focused = within(list).getByRole('button', { name: /Session 2 / });
+    act(() => {
+      focused.focus();
+    });
+    const area = list.parentElement;
+    if (area === null) throw new Error('no scroll area');
+    area.scrollTop = 500 * 28;
+    fireEvent.scroll(area);
+    const places = () =>
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => Number(item.getAttribute('aria-posinset')));
+    expect(places()).toEqual([3, ...range(493, 518)]);
+    expect(document.activeElement).toBe(focused);
+    act(() => {
+      focused.blur();
+    });
+    expect(places()).toEqual(range(493, 518));
+  });
+
   it('shows every session again when the chosen workspace leaves the list', () => {
     const { rerender } = render(<SessionsSection sessions={sessions} folders={folders} />);
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'w2' } });
@@ -107,3 +187,8 @@ describe('SessionsSection', () => {
     expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('');
   });
 });
+
+// The whole numbers from first to last.
+function range(first: number, last: number): number[] {
+  return Array.from({ length: last - first + 1 }, (_, index) => first + index);
+}

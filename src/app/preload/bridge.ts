@@ -4,9 +4,12 @@ import type { ModelOption, ProviderId, SessionEvent } from '../../sessions/share
 import type {
   FolderChoices,
   ImageAction,
+  SessionAction,
+  SessionList,
   SessionSnapshot,
   SessionSummary,
 } from '../../sessions/shared/sessions';
+import type { Prompt } from '../../ui/shared/prompts';
 import type { FolderListing, WorkspaceList } from '../../workspaces/shared/workspaces';
 import { channels, type Bridge } from '../shared/bridge';
 
@@ -54,11 +57,14 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
         invoke(channels.workspaces.listFolder, id, path) as Promise<FolderListing>,
     },
     sessions: {
-      list: () => invoke(channels.sessions.list) as Promise<SessionSummary[]>,
+      list: () => invoke(channels.sessions.list) as Promise<SessionList>,
       onChange: (listener) =>
         subscribe(channels.sessions.changed, (value) => {
-          listener(value as SessionSummary[]);
+          listener(value as SessionList);
         }),
+      archived: () => invoke(channels.sessions.archived) as Promise<SessionSummary[]>,
+      resume: (id, request) => invoke(channels.sessions.resume, id, request) as Promise<void>,
+      showMenu: (id) => invoke(channels.sessions.showMenu, id) as Promise<SessionAction | null>,
       providers: () => invoke(channels.sessions.providers) as Promise<ProviderId[]>,
       dayFolder: () => invoke(channels.sessions.dayFolder) as Promise<string>,
       gateways: (provider) => invoke(channels.sessions.gateways, provider) as Promise<string[]>,
@@ -111,6 +117,14 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
         invoke(channels.approvals.answerApproval, sessionId, requestId, answer) as Promise<void>,
       answerQuestion: (sessionId, requestId, answer) =>
         invoke(channels.approvals.answerQuestion, sessionId, requestId, answer) as Promise<void>,
+    },
+    prompts: {
+      onPrompt: (listener) =>
+        subscribe(channels.prompts.show, (value) => {
+          const { id, prompt } = value as { id: number; prompt: Prompt };
+          listener(id, prompt);
+        }),
+      answer: (id, answer) => invoke(channels.prompts.answer, id, answer) as Promise<void>,
     },
   };
 }

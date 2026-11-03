@@ -1,10 +1,16 @@
-import { dialog, Menu, type BrowserWindow } from 'electron';
+import { dialog, type BrowserWindow } from 'electron';
 import type { Translate } from '../../i18n/main/i18n';
+import type { Prompts } from '../../ui/shared/prompts';
 import type { WorkspacesUi } from './workspaces';
 
-// The workspaces' questions and menu as macOS shows them, for the window that asked: the folder picker
-// and the trust question as sheets on the window, and a workspace's menu at the pointer.
-export function nativeWorkspacesUi(window: BrowserWindow, t: Translate): WorkspacesUi {
+// The workspaces' questions and menu for the window that asked: the folder picker as macOS's own sheet
+// on the window, and the trust question and a workspace's menu at the pointer as the window draws them,
+// in the app's own look (the prompts).
+export function windowWorkspacesUi(
+  window: BrowserWindow,
+  prompts: Prompts,
+  t: Translate,
+): WorkspacesUi {
   return {
     async pickFolder() {
       const { canceled, filePaths } = await dialog.showOpenDialog(window, {
@@ -15,35 +21,30 @@ export function nativeWorkspacesUi(window: BrowserWindow, t: Translate): Workspa
       return canceled ? undefined : filePaths[0];
     },
     async askTrust(name, path) {
-      const { response } = await dialog.showMessageBox(window, {
-        type: 'question',
+      const answer = await prompts.ask({
         message: t('workspaces.trust.message', { name }),
         detail: t('workspaces.trust.detail', { path }),
-        buttons: [t('workspaces.trust.trust'), t('workspaces.trust.distrust')],
-        defaultId: 0,
+        answers: [
+          { id: 'trust', label: t('workspaces.trust.trust') },
+          { id: 'distrust', label: t('workspaces.trust.distrust') },
+        ],
+        defaultId: 'trust',
         // Escape answers that the user does not trust the folder.
-        cancelId: 1,
+        cancelId: 'distrust',
       });
-      return response === 0;
+      return answer === 'trust';
     },
     showMenu(workspace, actions) {
-      Menu.buildFromTemplate([
-        {
-          label: t('workspaces.menu.trusted'),
-          type: 'checkbox',
-          checked: workspace.trusted,
-          click: () => {
-            actions.setTrusted(!workspace.trusted);
-          },
-        },
-        { type: 'separator' },
-        {
-          label: t('workspaces.menu.remove'),
-          click: () => {
-            actions.remove();
-          },
-        },
-      ]).popup({ window });
+      void prompts
+        .menu([
+          { id: 'trusted', label: t('workspaces.menu.trusted'), checked: workspace.trusted },
+          { separator: true },
+          { id: 'remove', label: t('workspaces.menu.remove') },
+        ])
+        .then((chosen) => {
+          if (chosen === 'trusted') actions.setTrusted(!workspace.trusted);
+          else if (chosen === 'remove') actions.remove();
+        });
     },
   };
 }

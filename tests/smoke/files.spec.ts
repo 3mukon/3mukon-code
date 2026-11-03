@@ -2,9 +2,10 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { expect, test, type ElectronApplication } from '@playwright/test';
-import { answerDialogs, dataFolder, launch } from './app';
+import { answerQuestion, dataFolder, launch, pickFolder } from './app';
 
-// Answers the next questions in native sheets with the button at this index, and counts them.
+// Answers the next questions in native sheets, such as the window's own before it closes, with the
+// button at this index, and counts them.
 async function answerSheets(app: ElectronApplication, response: number) {
   await app.evaluate(({ dialog }, response) => {
     const asked = globalThis as unknown as { sheets?: number };
@@ -33,8 +34,9 @@ test('a file opened from a tree is edited, saved with ⌘S, follows changes on d
     const app = await launch(data.path);
     try {
       const window = await app.firstWindow();
-      await answerDialogs(app, folder, true);
+      await pickFolder(app, folder);
       await window.getByRole('button', { name: 'Add workspace' }).click();
+      await answerQuestion(window, 'Trust');
       const workspace = window.getByRole('treeitem', { name: basename(folder), exact: true });
       await workspace.focus();
       await window.keyboard.press('ArrowRight');
@@ -68,13 +70,18 @@ test('a file opened from a tree is edited, saved with ⌘S, follows changes on d
       await expect(editor).not.toContainText('// mine');
       await expect(editor).toContainText('const d = 4;');
 
-      // Closing the panel with unsaved changes asks first; Don't Save closes it as it is.
+      // Closing the panel with unsaved changes asks first, in the window, with the focus on Save, the
+      // default answer; Don't Save closes it as it is.
       await editor.click();
       await window.keyboard.type('x');
-      await answerSheets(app, 2);
       await window.keyboard.press('Meta+w');
+      const question = window.getByRole('alertdialog', {
+        name: 'Do you want to save the changes you made to “notes.ts”?',
+      });
+      await expect(question.getByRole('button', { name: 'Save', exact: true })).toBeFocused();
+      await answerQuestion(window, 'Don’t Save');
       await expect(panel).toHaveCount(0);
-      expect(await sheetsAsked(app)).toBe(1);
+      await expect(question).toHaveCount(0);
       expect(readFileSync(notes, 'utf8')).toBe('const d = 4;\n');
 
       // A file that is not text opens as a notice.

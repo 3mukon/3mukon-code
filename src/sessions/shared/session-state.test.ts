@@ -211,6 +211,48 @@ describe('applyEvent', () => {
     });
   });
 
+  it('folds a session’s history at once, not running, and says when it could not be read', () => {
+    const closed = { ...initialSessionState(true), closed: true, mode: 'yolo' as const };
+    const past = applyEvent(closed, {
+      type: 'history',
+      events: [
+        { type: 'message', id: 'm1', role: 'user', text: 'Fix the build' },
+        { type: 'turn-started' },
+        { type: 'message-delta', id: 'm2', role: 'agent', text: 'On ' },
+        { type: 'message-delta', id: 'm2', role: 'agent', text: 'it.' },
+        { type: 'approval-requested', request: approval },
+        { type: 'title', title: 'Build fixes' },
+      ],
+    });
+    expect(past).toMatchObject({
+      closed: true,
+      mode: 'yolo',
+      title: 'Build fixes',
+      turnRunning: false,
+      loadingHistory: false,
+      historyFailed: false,
+    });
+    expect(past.timeline).toEqual([
+      { type: 'message', id: 'm1', role: 'user', text: 'Fix the build' },
+      { type: 'message', id: 'm2', role: 'agent', text: 'On it.' },
+      { type: 'approval', request: approval, resolution: 'cancelled' },
+    ]);
+    expect(openRequests(past)).toEqual([]);
+    const unread = applyEvent(closed, { type: 'history', events: [], failed: true });
+    expect(unread).toMatchObject({ loadingHistory: false, historyFailed: true, timeline: [] });
+  });
+
+  it('runs a resumed session again, its history kept', () => {
+    const past = applyEvent(
+      { ...initialSessionState(), closed: true, historyFailed: true },
+      { type: 'message', id: 'm1', role: 'user', text: 'Fix the build' },
+    );
+    const resumed = applyEvent(past, { type: 'resumed' });
+    expect(resumed).toMatchObject({ closed: false, historyFailed: false });
+    expect(resumed.timeline).toEqual(past.timeline);
+    expect(sessionStatus(resumed)).toBe('idle');
+  });
+
   it('keeps the user’s answer with its request, an approval’s with an approval and a question’s with a question', () => {
     const state = fold([
       { type: 'approval-requested', request: approval },

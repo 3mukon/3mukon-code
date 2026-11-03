@@ -175,6 +175,10 @@ export function createCodexProvider({
       const settings = sessionSettings(options, gatewaysDir);
       return CodexSession.open(settings, options.sessionId, connect, toolset, onEvent);
     },
+    // Read through a short-lived app-server, which lists the thread's turns without loading it.
+    history(sessionId, cwd) {
+      return withCodex(connect, cwd, (rpc) => pastEvents(rpc, sessionId, new Translator(cwd)));
+    },
     listSessions(cwd, limit) {
       return withCodex(connect, cwd, async (rpc): Promise<HistoryEntry[]> => {
         const { data } = await rpc.request<ThreadListResponse>('thread/list', {
@@ -224,6 +228,33 @@ async function initialize(rpc: Rpc, clientVersion: string): Promise<Rpc> {
   }
   rpc.notify('initialized');
   return rpc;
+}
+
+// A thread's past turns, page by page, as events. Codex lists the turns of a stored thread that no
+// app-server has loaded without loading it.
+async function pastEvents(
+  rpc: Rpc,
+  threadId: string,
+  translator: Translator,
+): Promise<SessionEvent[]> {
+  const events: SessionEvent[] = [];
+  let cursor: string | null = null;
+  do {
+    const page: ThreadTurnsListResponse = await rpc.request<ThreadTurnsListResponse>(
+      'thread/turns/list',
+      {
+        threadId,
+        itemsView: 'full',
+        sortDirection: 'asc',
+        ...(cursor === null ? {} : { cursor }),
+      },
+    );
+    for (const turn of page.data) {
+      for (const item of turn.items) events.push(...translator.history(item));
+    }
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  return events;
 }
 
 // One exchange with a short-lived app-server that starts no thread.
@@ -584,26 +615,11 @@ class CodexSession implements ProviderSession {
     };
   }
 
-  // The thread's past turns, page by page, then replay-finished.
+  // The thread's past turns, then replay-finished.
   private async replay(): Promise<void> {
-    let cursor: string | null = null;
-    do {
-      const page: ThreadTurnsListResponse = await this.rpc.request<ThreadTurnsListResponse>(
-        'thread/turns/list',
-        {
-          threadId: this.threadId,
-          itemsView: 'full',
-          sortDirection: 'asc',
-          ...(cursor === null ? {} : { cursor }),
-        },
-      );
-      for (const turn of page.data) {
-        for (const item of turn.items) {
-          for (const event of this.translator.history(item)) this.onEvent(event);
-        }
-      }
-      cursor = page.nextCursor;
-    } while (cursor !== null);
+    for (const event of await pastEvents(this.rpc, this.threadId, this.translator)) {
+      this.onEvent(event);
+    }
     this.onEvent({ type: 'replay-finished' });
   }
 
