@@ -2,7 +2,7 @@
 id: ADR-0013
 type: adr
 title: Draw the main process's menus and questions in the window's page, in the app's own look
-status: proposed
+status: accepted
 visibility: public
 date: 2026-11-02
 summary: The main process keeps deciding what it asks the user, but its context menus and confirmation questions go to the window's page as plain data, which draws them with the ui module's menu and question in the e-ink look and sends back the answer; macOS's menus and sheets, which cannot take that look, flows driven from the page and a window of its own per question were rejected, and the file panels and the question while a page unloads stay macOS's own
