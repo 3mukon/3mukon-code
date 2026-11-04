@@ -1,4 +1,4 @@
-/* A message's code, as highlight.js marks it up, in the syntax colours of the ui module's tokens, and
+/* Code in Markdown, as highlight.js marks it up, in the syntax colours of the ui module's tokens, and
    its math, as KaTeX sets it. */
 .hljs-comment,
 .hljs-quote {

@@ -273,6 +273,31 @@
       "unfoldedLines": "已展开的行",
       "foldLine": "折叠行",
       "unfoldLine": "展开行"
+    },
+    "view": {
+      "label": "视图",
+      "rendered": "渲染",
+      "raw": "原文"
+    },
+    "tree": {
+      "count_other": "{{count}} 项",
+      "more": "再显示 {{count}} 项（剩余 {{left}} 项）"
+    },
+    "table": {
+      "more": "再显示 {{count}} 行（剩余 {{left}} 行）"
+    },
+    "rendered": {
+      "failed": "这个 {{format}} 文件在第 {{line}} 行第 {{column}} 列无法解析。切换到原文修改。"
+    },
+    "formats": {
+      "markdown": "Markdown",
+      "json": "JSON",
+      "xml": "XML",
+      "yaml": "YAML",
+      "toml": "TOML",
+      "csv": "CSV",
+      "tsv": "TSV",
+      "svg": "SVG"
     }
   },
   "providers": {

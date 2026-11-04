@@ -1,5 +1,5 @@
 import type { AccountsList, ResetOutcome } from '../../accounts/shared/accounts';
-import type { CloseAnswer, OpenedFile, SaveResult } from '../../files/shared/files';
+import type { CloseAnswer, FileImage, OpenedFile, SaveResult } from '../../files/shared/files';
 import type { DroppedItem } from '../../panels/shared/panels';
 import type { ModelOption, ProviderId, SessionEvent } from '../../sessions/shared/events';
 import type {
@@ -129,6 +129,7 @@ export function createBridge(
           listener(value as string);
         }),
       confirmClose: (name) => invoke(channels.files.confirmClose, name) as Promise<CloseAnswer>,
+      image: (path) => invoke(channels.files.image, path) as Promise<FileImage | null>,
     },
     approvals: {
       answerApproval: (sessionId, requestId, answer) =>

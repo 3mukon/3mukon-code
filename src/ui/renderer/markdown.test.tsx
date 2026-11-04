@@ -1,11 +1,7 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { initI18n } from '../../i18n/renderer/i18n';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Markdown } from './markdown';
 
-beforeAll(() => {
-  initI18n(['en-US']);
-});
 afterEach(cleanup);
 
 // The TeX of each formula KaTeX set, from the MathML it adds for VoiceOver.
@@ -47,5 +43,38 @@ describe('Markdown', () => {
   it('keeps a table column’s alignment', () => {
     render(<Markdown text={'| Name | Count |\n| :-- | --: |\n| a | 1 |'} />);
     expect(screen.getByText('1').style.textAlign).toBe('right');
+  });
+
+  it('draws images as it is told, links to them by default, and hands links that are not web links to whoever follows them', () => {
+    const onLink = vi.fn();
+    const { container, rerender } = render(
+      <Markdown
+        text={'![chart](img/chart.png) [guide](docs/guide.md) [site](https://example.com)'}
+        onLink={onLink}
+      />,
+    );
+    // Without a way to draw it, an image is a link to it, never fetched.
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('link', { name: 'chart' }).getAttribute('href')).toBe('img/chart.png');
+    fireEvent.click(screen.getByRole('link', { name: 'guide' }));
+    expect(onLink).toHaveBeenCalledWith('docs/guide.md');
+    // A web link is left to the window, which opens it in the browser.
+    const web = fireEvent.click(screen.getByRole('link', { name: 'site' }));
+    expect(web).toBe(true);
+    expect(onLink).toHaveBeenCalledOnce();
+    rerender(
+      <Markdown
+        text="![chart](img/chart.png)"
+        image={(src, alt) => <span data-testid="drawn">{`${alt}:${src}`}</span>}
+      />,
+    );
+    expect(screen.getByTestId('drawn').textContent).toBe('chart:img/chart.png');
+  });
+
+  it('sets headings at a document’s sizes when asked, and at the activity’s otherwise', () => {
+    const { rerender } = render(<Markdown text="# Title" />);
+    expect(screen.getByRole('heading').tagName).toBe('H3');
+    rerender(<Markdown text="# Title" document />);
+    expect(screen.getByRole('heading').tagName).toBe('H1');
   });
 });

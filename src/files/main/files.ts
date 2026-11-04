@@ -1,7 +1,20 @@
-import { isAbsolute, normalize } from 'node:path';
-import type { OpenedFile, SaveResult } from '../shared/files';
+import { readFile, stat } from 'node:fs/promises';
+import { extname, isAbsolute, normalize } from 'node:path';
+import { MAX_IMAGE_BYTES, type FileImage, type OpenedFile, type SaveResult } from '../shared/files';
 import { readText, writeText } from './text-files';
 import { FileWatcher } from './watch';
+
+// The images a rendered Markdown file shows, by their extensions.
+const imageTypes: Record<string, string | undefined> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml',
+};
 
 // The files the window's editors read, write and watch. Only some files are open to them: those
 // inside a workspace's folder, those dropped on the window from the Finder, and those an editor has
@@ -33,6 +46,20 @@ export class FileService {
     const file = await readText(path);
     if (file.kind === 'text') this.granted.add(path);
     return file;
+  }
+
+  // An image a rendered Markdown file shows (ADR-0018): one the editors may read, of a type the window
+  // draws, of at most 10 MB, as data; null for any other.
+  async image(path: string): Promise<FileImage | null> {
+    const mediaType = imageTypes[extname(path).toLowerCase()];
+    if (mediaType === undefined || !this.allows(path)) return null;
+    try {
+      const info = await stat(path);
+      if (!info.isFile() || info.size > MAX_IMAGE_BYTES) return null;
+      return { mediaType, data: (await readFile(path)).toString('base64') };
+    } catch {
+      return null;
+    }
   }
 
   async save(path: string, text: string): Promise<SaveResult> {

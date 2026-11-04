@@ -72,6 +72,7 @@ function fakeBridge(
       watch: () => Promise.resolve(),
       onChange: () => () => undefined,
       confirmClose: () => Promise.resolve('cancel'),
+      image: () => Promise.resolve(null),
     },
     approvals: {
       answerApproval: () => Promise.resolve(),

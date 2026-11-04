@@ -23,6 +23,7 @@ function fakeBridge(file: OpenedFile) {
     watch: vi.fn<FilesBridge['watch']>(() => Promise.resolve()),
     onChange: () => () => undefined,
     confirmClose: vi.fn<FilesBridge['confirmClose']>(() => Promise.resolve('cancel')),
+    image: vi.fn<FilesBridge['image']>(() => Promise.resolve(null)),
   } satisfies FilesBridge;
   return {
     bridge,
@@ -40,6 +41,8 @@ async function show(file: OpenedFile) {
     <FileEditor
       bridge={bridge}
       path={path}
+      view="raw"
+      onFormat={vi.fn()}
       onUnsavedChange={onUnsavedChange}
       onHandle={(given) => {
         handle = given;

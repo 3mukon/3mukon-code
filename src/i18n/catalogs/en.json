@@ -275,6 +275,32 @@
       "unfoldedLines": "Unfolded lines",
       "foldLine": "Fold line",
       "unfoldLine": "Unfold line"
+    },
+    "view": {
+      "label": "View",
+      "rendered": "Rendered",
+      "raw": "Raw"
+    },
+    "tree": {
+      "count_one": "{{count}} entry",
+      "count_other": "{{count}} entries",
+      "more": "Show {{count}} more ({{left}} left)"
+    },
+    "table": {
+      "more": "Show {{count}} more rows ({{left}} left)"
+    },
+    "rendered": {
+      "failed": "This {{format}} doesn’t parse at line {{line}}, column {{column}}. Switch to Raw to fix it."
+    },
+    "formats": {
+      "markdown": "Markdown",
+      "json": "JSON",
+      "xml": "XML",
+      "yaml": "YAML",
+      "toml": "TOML",
+      "csv": "CSV",
+      "tsv": "TSV",
+      "svg": "SVG"
     }
   },
   "providers": {

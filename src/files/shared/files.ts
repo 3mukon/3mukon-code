@@ -16,6 +16,15 @@ export type OpenedFile =
 export type SaveResult =
   { saved: true } | { saved: false; reason: 'denied' | 'outside' | 'failed' };
 
+// The largest image a rendered Markdown file shows from beside it, in bytes.
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+// An image a rendered Markdown file shows, as its media type and its bytes in base64.
+export interface FileImage {
+  mediaType: string;
+  data: string;
+}
+
 // The user's answer when a panel with unsaved changes closes.
 export type CloseAnswer = 'save' | 'discard' | 'cancel';
 
@@ -32,4 +41,7 @@ export interface FilesBridge {
   onChange(listener: (path: string) => void): () => void;
   // Asks whether to save a file's changes before its panel closes.
   confirmClose(name: string): Promise<CloseAnswer>;
+  // An image a rendered Markdown file shows, where the editors may read it, of a type the window
+  // draws and of at most MAX_IMAGE_BYTES; null otherwise.
+  image(path: string): Promise<FileImage | null>;
 }

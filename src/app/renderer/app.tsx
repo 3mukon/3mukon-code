@@ -80,7 +80,12 @@ export function App({ bridge }: { bridge: Bridge }) {
   );
   const panels = usePanels();
   const area = useRef<PanelAreaHandle>(null);
-  const fileEditors = useFileEditors(bridge.files);
+  // The file editors, whose rendered Markdown opens the files it links to in panels.
+  const fileEditors = useFileEditors(bridge.files, {
+    onOpenFile: (path) => {
+      openItem({ kind: 'file', path });
+    },
+  });
   // The session whose oldest waiting request takes the keyboard focus, each time the key changes.
   const [requestFocus, setRequestFocus] = useState<{ sessionId: string; key: number } | null>(null);
 
@@ -224,7 +229,12 @@ export function App({ bridge }: { bridge: Bridge }) {
     const { content } = panel;
     if (content.kind === 'file') {
       const file = fileEditors.panel(panel.id, content.path);
-      return { body: file.body, unsaved: file.unsaved, confirmClose: file.confirmClose };
+      return {
+        body: file.body,
+        unsaved: file.unsaved,
+        confirmClose: file.confirmClose,
+        ...(file.actions === undefined ? {} : { actions: file.actions }),
+      };
     }
     if (content.kind === 'settings') {
       return {

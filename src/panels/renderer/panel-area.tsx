@@ -41,6 +41,8 @@ export interface PanelView {
   statusLabel?: string;
   unsaved?: boolean;
   confirmClose?: () => Promise<boolean>;
+  // Shown at the end of the panel's header, before its close button.
+  actions?: ReactNode;
   body?: ReactNode;
 }
 
@@ -423,6 +425,7 @@ export function PanelArea({
                 follow({ kind: 'panel', panelId: panel.id }, event);
               }}
               closeLabel={t('panels.close')}
+              {...(shown.actions === undefined ? {} : { actions: shown.actions })}
             >
               {shown.body}
             </Pane>

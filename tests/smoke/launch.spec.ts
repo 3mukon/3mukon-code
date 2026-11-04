@@ -103,6 +103,7 @@ test('the page reaches the main process only through the bridge’s functions', 
           'files',
           [
             'confirmClose:function',
+            'image:function',
             'onChange:function',
             'open:function',
             'save:function',

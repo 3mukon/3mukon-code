@@ -92,4 +92,19 @@ describe('FileService', () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(changed).not.toHaveBeenCalled();
   });
+
+  it('reads an image a rendered Markdown file shows, as data, only where the editors may read and of a type the window draws', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    writeFileSync(join(workspace, 'chart.png'), png);
+    writeFileSync(join(workspace, 'notes.txt'), 'not an image');
+    writeFileSync(join(elsewhere, 'away.png'), png);
+    expect(await files.image(join(workspace, 'chart.png'))).toEqual({
+      mediaType: 'image/png',
+      data: png.toString('base64'),
+    });
+    expect(await files.image(join(workspace, 'notes.txt'))).toBeNull();
+    expect(await files.image(join(elsewhere, 'away.png'))).toBeNull();
+    expect(await files.image(join(workspace, 'missing.png'))).toBeNull();
+    expect(await files.image(`${workspace}/../elsewhere/away.png`)).toBeNull();
+  });
 });

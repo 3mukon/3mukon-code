@@ -1,5 +1,5 @@
 import { EditorView } from '@codemirror/view';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { FilesBridge, OpenedFile } from '../shared/files';
@@ -25,6 +25,7 @@ function fakeBridge(onDisk: Record<string, string>) {
       };
     },
     confirmClose: vi.fn<FilesBridge['confirmClose']>(() => Promise.resolve('cancel')),
+    image: vi.fn<FilesBridge['image']>(() => Promise.resolve(null)),
   } satisfies FilesBridge;
   const change = async (path: string) => {
     await act(async () => {
@@ -52,6 +53,7 @@ function Panels({
     const panel = editors.panel(id, path);
     return (
       <section key={id} aria-label={id} data-unsaved={panel.unsaved}>
+        {panel.actions}
         {panel.body}
       </section>
     );
@@ -153,5 +155,43 @@ describe('useFileEditors', () => {
       viewIn('panel-1').dispatch({ changes: { from: 1, to: 2 } });
     });
     expect(unload()).toBe(false);
+  });
+});
+
+describe('rendered files', () => {
+  it('opens a file in a format that renders rendered, with a toggle to its raw text that keeps unsaved edits', async () => {
+    const { bridge } = fakeBridge({ '/w/notes.md': '# Notes\n' });
+    await showPanels(bridge, [['p1', '/w/notes.md']]);
+    const panel = screen.getByRole('region', { name: 'p1' });
+    expect(within(panel).getByRole('heading', { level: 1 }).textContent).toBe('Notes');
+    const raw = within(panel).getByRole('button', { name: 'Raw' });
+    fireEvent.click(raw);
+    expect(within(panel).queryByRole('heading')).toBeNull();
+    const element = panel.querySelector<HTMLElement>('.cm-editor');
+    const view = element === null ? null : EditorView.findFromDOM(element);
+    act(() => {
+      view?.dispatch({ changes: { from: view.state.doc.length, insert: '\nMore *text*\n' } });
+    });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Rendered' }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    });
+    // The rendered view shows the unsaved text; the editor, hidden, keeps it.
+    expect(panel.querySelector('article em')?.textContent).toBe('text');
+    expect(panel.dataset.unsaved).toBe('true');
+  });
+
+  it('opens a file that does not parse raw, and a file in no such format without a toggle', async () => {
+    const { bridge } = fakeBridge({ '/w/a.json': '{"a": }', '/w/main.ts': 'export {};\n' });
+    await showPanels(bridge, [
+      ['p1', '/w/a.json'],
+      ['p2', '/w/main.ts'],
+    ]);
+    const json = screen.getByRole('region', { name: 'p1' });
+    expect(within(json).getByRole('button', { name: 'Raw' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(json.querySelector('.cm-editor')).not.toBeNull();
+    expect(within(screen.getByRole('region', { name: 'p2' })).queryByRole('group')).toBeNull();
   });
 });

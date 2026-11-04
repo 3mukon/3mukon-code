@@ -15,6 +15,8 @@ interface TextEditorOptions {
   // CodeMirror's words in the window's language.
   phrases: Readonly<Record<string, string>>;
   onUnsavedChange(unsaved: boolean): void;
+  // Hears every change of the text, the user's and those from disk alike.
+  onTextChange?(): void;
 }
 
 // A file's text in CodeMirror. The editor knows the text on disk as it last read or wrote it, so that
@@ -44,7 +46,9 @@ export class TextEditor {
         editorSetup(options.phrases, options.label),
         this.language.of([]),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged && !this.reloading) this.noteUnsaved();
+          if (!update.docChanged) return;
+          if (!this.reloading) this.noteUnsaved();
+          options.onTextChange?.();
         }),
       ],
     });

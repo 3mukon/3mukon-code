@@ -326,6 +326,7 @@ export function serveBridge({
   handle(channels.files.confirmClose, z.tuple([fileName]), (window, file) =>
     filesUi(window).confirmClose(file),
   );
+  handle(channels.files.image, z.tuple([path]), (_window, file) => files.image(file));
   handle(channels.settings.get, z.tuple([]), () => settings.get());
   handle(channels.settings.set, z.tuple([settingsChange]), (_window, given) => {
     const change: Partial<AppSettings> = {};

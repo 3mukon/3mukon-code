@@ -8,7 +8,18 @@ import {
   type SaveResult,
 } from '../shared/files';
 import { PHRASES } from './editor-setup';
+import { formatOf, type FileFormat } from './formats';
+import { parse, RenderedView, type FileView } from './rendered-view';
 import { TextEditor } from './text-editor';
+
+// How long the rendered view waits after the text last changed before it renders it anew.
+const RENDER_WAIT_MS = 150;
+
+// A file's format, and whether its text parses in it as the file opens.
+export interface FoundFormat {
+  format: FileFormat;
+  parses: boolean;
+}
 
 // What others may do with an editor showing a file.
 export interface EditorHandle {
@@ -29,9 +40,16 @@ type Bar =
 interface FileEditorProps {
   bridge: FilesBridge;
   path: string;
+  // Whether the panel shows the file rendered or raw; rendered applies only to a file in a format
+  // that renders.
+  view: FileView;
   onUnsavedChange: (unsaved: boolean) => void;
   // The editor's handle once it shows the file, and null once it no longer does.
   onHandle: (handle: EditorHandle | null) => void;
+  // The file's format once its text has opened, or null for a file that renders in none.
+  onFormat: (found: FoundFormat | null) => void;
+  // Opens another file in a panel, as a link in a rendered Markdown file asks.
+  onOpenFile?: ((path: string) => void) | undefined;
 }
 
 const noticeKeys = {
@@ -42,25 +60,56 @@ const noticeKeys = {
   outside: 'files.notice.outside',
 } as const satisfies Record<FileNotice, string>;
 
-// A file's panel body: the file in the editor, or a notice for a file it cannot edit. ⌘S saves it
-// from anywhere in the panel. When the file changes on disk, an editor without unsaved changes shows
+// A file's panel body: the file in the editor, or a notice for a file it cannot edit, and, for a file in
+// a format that renders (ADR-0018), its rendered view in the editor's place while the panel shows it
+// rendered, the editor staying with its unsaved changes; the view follows the editor's text. ⌘S saves
+// it from anywhere in the panel. When the file changes on disk, an editor without unsaved changes shows
 // the new text; one with unsaved changes says so above its text and offers to reload it or keep
 // editing, after which saving overwrites the file. A removed file says so too, and saving writes it
 // again; a save that fails says why.
-export function FileEditor({ bridge, path, onUnsavedChange, onHandle }: FileEditorProps) {
+export function FileEditor({
+  bridge,
+  path,
+  view,
+  onUnsavedChange,
+  onHandle,
+  onFormat,
+  onOpenFile,
+}: FileEditorProps) {
   const { t } = useTranslation();
   const [opened, setOpened] = useState<OpenedFile | null>(null);
+  // The text as the editor holds it, which the rendered view shows, and the file's format.
+  const [text, setText] = useState('');
+  const [format, setFormat] = useState<FileFormat | null>(null);
   const [bar, setBar] = useState<Bar | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<TextEditor | null>(null);
   const handle = useRef<EditorHandle | null>(null);
   const name = nameOf(path);
 
+  const reportFormat = useEffectEvent((found: FoundFormat | null) => {
+    onFormat(found);
+  });
+
+  // The file as it opens, with its format: by the file's name, or, without an extension, by how its
+  // text begins, which counts only if it parses.
   useEffect(() => {
     let live = true;
     bridge.open(path).then(
       (file) => {
-        if (live) setOpened(file);
+        if (!live) return;
+        setOpened(file);
+        if (file.kind !== 'text') return;
+        setText(file.text);
+        const found = formatOf(path, file.text);
+        const parses = found !== null && parse(found.format, file.text).kind !== 'failed';
+        if (found === null || (found.sniffed && !parses)) {
+          setFormat(null);
+          reportFormat(null);
+        } else {
+          setFormat(found.format);
+          reportFormat({ format: found.format, parses });
+        }
       },
       () => {
         if (live) setOpened({ kind: 'notice', notice: 'unreadable' });
@@ -77,6 +126,7 @@ export function FileEditor({ bridge, path, onUnsavedChange, onHandle }: FileEdit
   const handOver = useEffectEvent((shown: EditorHandle | null) => {
     onHandle(shown);
   });
+
   const phrases = useEffectEvent(() =>
     Object.fromEntries(
       (Object.keys(PHRASES) as (keyof typeof PHRASES)[]).map((phrase) => [
@@ -88,12 +138,19 @@ export function FileEditor({ bridge, path, onUnsavedChange, onHandle }: FileEdit
 
   useEffect(() => {
     if (opened?.kind !== 'text' || host.current === null) return;
+    let wait: ReturnType<typeof setTimeout> | undefined;
     const shown = new TextEditor(host.current, opened, {
       name,
       label: name,
       phrases: phrases(),
       onUnsavedChange: (unsaved) => {
         reportUnsaved(unsaved);
+      },
+      onTextChange: () => {
+        clearTimeout(wait);
+        wait = setTimeout(() => {
+          setText(shown.contents().text);
+        }, RENDER_WAIT_MS);
       },
     });
     editor.current = shown;
@@ -130,12 +187,19 @@ export function FileEditor({ bridge, path, onUnsavedChange, onHandle }: FileEdit
     };
     handOver(handle.current);
     return () => {
+      clearTimeout(wait);
       shown.destroy();
       editor.current = null;
       handle.current = null;
       handOver(null);
     };
   }, [bridge, path, name, opened]);
+
+  const rendered = view === 'rendered' && format !== null;
+  // Back in the raw view, the editor takes the keyboard.
+  useEffect(() => {
+    if (!rendered) editor.current?.focus();
+  }, [rendered]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const onlyCommand = event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey;
@@ -193,7 +257,16 @@ export function FileEditor({ bridge, path, onUnsavedChange, onHandle }: FileEdit
           </div>
         )}
       </div>
-      <div ref={host} className="relative min-h-0 min-w-0" />
+      <div ref={host} className={`relative min-h-0 min-w-0 ${rendered ? 'hidden' : ''}`} />
+      {rendered && (
+        <RenderedView
+          bridge={bridge}
+          path={path}
+          format={format}
+          text={text}
+          onOpenFile={onOpenFile}
+        />
+      )}
     </div>
   );
 }

@@ -86,6 +86,7 @@ export const channels = {
     watch: 'files:watch',
     changed: 'files:changed',
     confirmClose: 'files:confirm-close',
+    image: 'files:image',
   },
   approvals: {
     answerApproval: 'approvals:answer-approval',

@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { FilesBridge } from '../shared/files';
-import { FileEditor, nameOf, type EditorHandle } from './file-editor';
+import { FileEditor, nameOf, type EditorHandle, type FoundFormat } from './file-editor';
+import { ViewToggle, type FileView } from './rendered-view';
 
 // A panel that shows a file, as whoever lays out the panels shows it: the editor as its body, whether
-// it holds unsaved changes, and what to ask before it closes, which resolves with whether it may.
+// it holds unsaved changes, what to ask before it closes, which resolves with whether it may, and for
+// a file in a format that renders, the toggle between its rendered view and its raw text, for the
+// panel's header.
 export interface FilePanel {
   body: ReactNode;
   unsaved: boolean;
   confirmClose: () => Promise<boolean>;
+  actions?: ReactNode;
+}
+
+export interface FileEditorsOptions {
+  // Opens another file in a panel, as a link in a rendered Markdown file asks.
+  onOpenFile?: (path: string) => void;
 }
 
 export interface FileEditors {
@@ -19,12 +28,18 @@ interface Shown {
   handle: EditorHandle;
 }
 
-// The window's file editors, one per panel that shows a file. The main process watches the files they
-// show and tells them when one changes on disk. Closing a panel with unsaved changes asks whether to
+// The window's file editors, one per panel that shows a file. A file in a format that renders opens
+// rendered, or raw when it does not parse, and each panel keeps its own choice while it is open
+// (ADR-0018). The main process watches the files they show and tells them when one changes on disk. Closing a panel with unsaved changes asks whether to
 // save them first, and while any editor holds unsaved changes, the page holds back its unload, so
 // that the main process asks before the window closes, the app quits or the page loads again.
-export function useFileEditors(bridge: FilesBridge): FileEditors {
+export function useFileEditors(
+  bridge: FilesBridge,
+  { onOpenFile }: FileEditorsOptions = {},
+): FileEditors {
   const shown = useRef(new Map<string, Shown>());
+  // How each panel that shows a file in a format that renders shows it.
+  const [views, setViews] = useState<ReadonlyMap<string, FileView>>(() => new Map());
   const [watched, setWatched] = useState<readonly string[]>([]);
   const [unsaved, setUnsaved] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -64,10 +79,34 @@ export function useFileEditors(bridge: FilesBridge): FileEditors {
     });
   };
 
+  const setView = (panelId: string, view: FileView | null) => {
+    setViews((current) => {
+      if ((current.get(panelId) ?? null) === view) return current;
+      const next = new Map(current);
+      if (view === null) next.delete(panelId);
+      else next.set(panelId, view);
+      return next;
+    });
+  };
+  // A file found in a format opens rendered, or raw when it does not parse; one the panel already
+  // shows keeps the panel's choice.
+  const found = (panelId: string, format: FoundFormat | null) => {
+    setViews((current) => {
+      if (format === null) {
+        if (!current.has(panelId)) return current;
+        const next = new Map(current);
+        next.delete(panelId);
+        return next;
+      }
+      if (current.has(panelId)) return current;
+      return new Map(current).set(panelId, format.parses ? 'rendered' : 'raw');
+    });
+  };
   const register = (panelId: string, path: string, handle: EditorHandle | null) => {
     if (handle === null) {
       shown.current.delete(panelId);
       setPanelUnsaved(panelId, false);
+      setView(panelId, null);
     } else {
       shown.current.set(panelId, { path, handle });
     }
@@ -80,29 +119,49 @@ export function useFileEditors(bridge: FilesBridge): FileEditors {
   };
 
   return {
-    panel: (panelId, path) => ({
-      body: (
-        <FileEditor
-          key={path}
-          bridge={bridge}
-          path={path}
-          onUnsavedChange={(value) => {
-            setPanelUnsaved(panelId, value);
-          }}
-          onHandle={(handle) => {
-            register(panelId, path, handle);
-          }}
-        />
-      ),
-      unsaved: unsaved.has(panelId),
-      confirmClose: async () => {
-        const editor = shown.current.get(panelId);
-        if (editor?.handle.unsaved() !== true) return true;
-        const answer = await bridge.confirmClose(nameOf(path));
-        if (answer === 'save') return editor.handle.save();
-        return answer === 'discard';
-      },
-    }),
+    panel: (panelId, path) => {
+      const view = views.get(panelId);
+      return {
+        body: (
+          <FileEditor
+            key={path}
+            bridge={bridge}
+            path={path}
+            view={view ?? 'raw'}
+            onUnsavedChange={(value) => {
+              setPanelUnsaved(panelId, value);
+            }}
+            onHandle={(handle) => {
+              register(panelId, path, handle);
+            }}
+            onFormat={(format) => {
+              found(panelId, format);
+            }}
+            onOpenFile={onOpenFile}
+          />
+        ),
+        ...(view === undefined
+          ? {}
+          : {
+              actions: (
+                <ViewToggle
+                  view={view}
+                  onChange={(next) => {
+                    setView(panelId, next);
+                  }}
+                />
+              ),
+            }),
+        unsaved: unsaved.has(panelId),
+        confirmClose: async () => {
+          const editor = shown.current.get(panelId);
+          if (editor?.handle.unsaved() !== true) return true;
+          const answer = await bridge.confirmClose(nameOf(path));
+          if (answer === 'save') return editor.handle.save();
+          return answer === 'discard';
+        },
+      };
+    },
   };
 }
 
