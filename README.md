@@ -28,6 +28,12 @@ Build the app and its disk image into `dist/`:
 corepack pnpm run package
 ```
 
+Build the app and install it into `/Applications`, or into the folder given, in place of an earlier copy, which must not be running:
+
+```bash
+sh scripts/install.sh
+```
+
 Run every check:
 
 ```bash

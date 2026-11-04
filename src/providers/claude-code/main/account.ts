@@ -1,23 +1,10 @@
 import { execFile } from 'node:child_process';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
 import type { SDKControlGetUsageResponse, SDKRateLimitInfo } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { SignIn, UsageWindow, WindowSpan } from '../../../accounts/shared/accounts';
 
 // How long Claude Code may take to say how it is signed in.
 const STATUS_TIMEOUT_MS = 15_000;
-
-// The Claude Code binary that the pinned SDK brings for macOS on Apple silicon, the one platform the
-// app runs on (ADR-0004), which the SDK runs the sessions with. The SDK exports no package.json, so the
-// binary's package is found from the SDK's entry.
-export function bundledClaudeBinary(): string {
-  const sdk = createRequire(import.meta.url).resolve('@anthropic-ai/claude-agent-sdk');
-  const native = createRequire(sdk).resolve(
-    '@anthropic-ai/claude-agent-sdk-darwin-arm64/package.json',
-  );
-  return join(dirname(native), 'claude');
-}
 
 // What `claude auth status --json` says, as far as the app reads it (ADR-0017); it also names the
 // account, which the app leaves alone.

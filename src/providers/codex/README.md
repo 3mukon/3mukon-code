@@ -33,7 +33,7 @@ tags: []
 - Signing in: Codex signs in through its own `codex login`, which the app runs in a terminal, and keeps its credentials itself; this module never reads or passes them (ADR-0008, ADR-0016).
 - Codex's own question tool that waits for the answer: Codex offers `request_user_input` only in its plan collaboration mode, which needs its experimental API, and this version does not turn that on; sessions ask through Codex's async one instead (ADR-0012).
 - Overriding the automatic reviewer's denials, Codex's command-policy amendments, collaboration modes, reviews, and Codex's own file and command methods.
-- Hosting: the main process runs the adapter, and the packaged app must keep the Codex binary outside the asar archive.
+- Hosting: the main process runs the adapter. electron-builder.yml unpacks the Codex binary, with the tools beside it, beside the app's archive, and `bundledCodexBinary` (`main/binary.ts`) gives its path there in the packaged app.
 
 ## Interface
 

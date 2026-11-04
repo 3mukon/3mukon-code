@@ -37,12 +37,8 @@ import type {
 } from '../../../sessions/shared/events';
 import type { SendableImageType } from '../../../sessions/shared/images';
 import type { AccountNews, AccountSource } from '../../../accounts/main/source';
-import {
-  bundledClaudeBinary,
-  eventWindows,
-  experimentalWindows,
-  readClaudeSignIn,
-} from './account';
+import { eventWindows, experimentalWindows, readClaudeSignIn } from './account';
+import { bundledClaudeBinary } from './binary';
 import { defaultGatewaysDir, existingGatewayPath, gatewayPath, listGateways } from './gateways';
 import { approvalResult, questionResult, toRequest, type ClaudeRequest } from './requests';
 import { sandboxFolders, sandboxSettings, type SandboxFolders } from './sandbox';
@@ -192,6 +188,7 @@ async function probeUsage(): Promise<SDKControlGetUsageResponse> {
   const probe = query({
     prompt: input,
     options: {
+      pathToClaudeCodeExecutable: bundledClaudeBinary(),
       cwd,
       persistSession: false,
       env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
@@ -249,6 +246,7 @@ async function probeModels(gatewayFile: string | null): Promise<ModelOption[]> {
   const probe = query({
     prompt: input,
     options: {
+      pathToClaudeCodeExecutable: bundledClaudeBinary(),
       cwd,
       persistSession: false,
       env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
@@ -511,6 +509,7 @@ class ClaudeCodeSession implements ProviderSession {
       query: query({
         prompt: input,
         options: {
+          pathToClaudeCodeExecutable: bundledClaudeBinary(),
           cwd: settings.cwd,
           permissionMode: nativeModes[settings.mode],
           // Lets a session switch to yolo later; it starts in, and stays in, the mode chosen.

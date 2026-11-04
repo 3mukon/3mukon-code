@@ -27,6 +27,7 @@ import {
   windowTerminalUi,
 } from '../../terminal/main/native';
 import { Terminals } from '../../terminal/main/terminals';
+import { loginShellPath } from './shell-path';
 import { startToolset, type RunningToolset } from '../../toolset/main/server';
 import { windowWorkspacesUi } from '../../workspaces/main/native';
 import { fileStorage } from '../../workspaces/main/storage';
@@ -64,7 +65,13 @@ void app
       translator.use(preferredLanguages(current.language, systemLanguages));
       nativeTheme.themeSource = current.appearance;
     });
-    const toolset = await startToolsetIfPossible(version);
+    // Opened from the Finder, a packaged app has macOS's minimal PATH, so it takes the login shell's,
+    // which the agents' commands and the providers' tools need (ADR-0019), while the toolset starts.
+    const [toolset, shellPath] = await Promise.all([
+      startToolsetIfPossible(version),
+      app.isPackaged ? loginShellPath(loginShell()) : Promise.resolve(null),
+    ]);
+    if (shellPath !== null) process.env.PATH = shellPath;
     const adapters = providers(data, version, toolset);
     // The sessions the app starts, kept in its data, which later runs list and resume, with the text
     // of each one's messages, which the lists search.

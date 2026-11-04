@@ -23,6 +23,7 @@
     "test": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
     "test:smoke": "electron-vite build && playwright test",
     "test:live": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run --config vitest.live.config.ts",
+    "test:package": "sh scripts/package.sh && playwright test --config playwright.package.config.ts",
     "codex:protocol": "node scripts/codex-protocol.mjs"
   },
   "devDependencies": {

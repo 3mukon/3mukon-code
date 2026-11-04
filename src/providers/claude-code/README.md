@@ -12,7 +12,7 @@ tags: []
 
 ## Responsibilities
 
-- `createClaudeCodeProvider` (`main/adapter.ts`) implements the sessions module's `Provider` with `@anthropic-ai/claude-agent-sdk`, which runs the Claude Code binary it brings along (`@anthropic-ai/claude-agent-sdk-darwin-arm64`):
+- `createClaudeCodeProvider` (`main/adapter.ts`) implements the sessions module's `Provider` with `@anthropic-ai/claude-agent-sdk`, which runs the Claude Code binary it brings along (`@anthropic-ai/claude-agent-sdk-darwin-arm64`), from the path `bundledClaudeBinary` (`main/binary.ts`) gives every session and probe: in the packaged app the binary lies beside the app's archive, where macOS can run it, while the SDK would look for it inside:
   - Start: a streaming query under a new session id, in the chosen permission mode (`auto` unless the user chose `yolo`) and on the chosen sandbox level (`workspace-write` unless the user chose another), with Claude Code's own system prompt and with its settings and CLAUDE.md files loaded as in the CLI. A chosen model and reasoning effort go in as the query's `model` and `effort`. Text and thinking arrive as they are written (partial messages); Claude Code shows thinking as summaries (`--thinking-display summarized`, through `extraArgs`), which recent models leave out unless asked for and which it drops itself where the API refuses them. A message's images go before its text as base64 image blocks.
   - Messages during a turn: a message sent while a turn runs goes into the query's input, with its images, from which Claude Code takes it into the running turn between tool calls, or else runs it as the next turn; a result whose `queued_turn_count` is above 0 ends the turn and starts that next one, before which a gateway asked for meanwhile does not switch.
   - Resume: replays the session's transcript (`getSessionMessages`), then continues the session (`resume`).
@@ -34,7 +34,7 @@ tags: []
 - Signing in: Claude Code signs in through its own `claude auth login`, which the app runs in a terminal, or `/login`, and keeps its credentials itself; this module never reads or passes them (ADR-0008, ADR-0016). Without a sign-in, a turn fails with Claude Code's own message.
 - The app's toolset (ADR-0012): Claude Code asks the user through its own AskUserQuestion in every mode, and its sessions do not open the toolset.
 - Subagents' activity and Claude Code's background tasks: not shown in this version.
-- Hosting: the main process runs the adapter. A packaged app opened from the Finder does not inherit the shell's PATH, which Claude Code's commands may need; packaging has to provide it.
+- Hosting: the main process runs the adapter. A packaged app opened from the Finder takes the login shell's PATH as it starts (ADR-0019), which Claude Code's commands need; electron-builder.yml unpacks the binary beside the app's archive.
 
 ## Interface
 
