@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
-import type { SessionSummary } from '../shared/sessions';
+import type { SessionsBridge, SessionSummary } from '../shared/sessions';
 import { SessionsSection, type SessionFolder } from './sessions-section';
 
 beforeAll(() => {
@@ -41,6 +41,11 @@ const many = Array.from({ length: 1_000 }, (_, index) =>
   session(`s${String(index)}`, '/Users/me/web', { title: `Session ${String(index)}` }),
 );
 
+// A search that finds nothing, for the tests that do not search.
+const unsearched: Pick<SessionsBridge, 'search'> = {
+  search: () => Promise.resolve({ matches: [], unread: 0 }),
+};
+
 const region = () => screen.getByRole('region', { name: 'Sessions' });
 const rows = () =>
   within(region())
@@ -49,7 +54,7 @@ const rows = () =>
 
 describe('SessionsSection', () => {
   it('shows the heading row alone without sessions or folders', () => {
-    render(<SessionsSection sessions={[]} folders={[]} />);
+    render(<SessionsSection bridge={unsearched} sessions={[]} folders={[]} />);
     expect(region().textContent).toBe('Sessions');
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(within(region()).getByRole('button', { name: 'New session' })).toHaveProperty(
@@ -59,7 +64,7 @@ describe('SessionsSection', () => {
   });
 
   it('shows every session with its status and its folder, whose path is the tooltip', () => {
-    render(<SessionsSection sessions={sessions} folders={folders} />);
+    render(<SessionsSection bridge={unsearched} sessions={sessions} folders={folders} />);
     expect(rows()).toEqual([
       'RunningFix the buildweb',
       'Waiting for youCodex CLIui',
@@ -71,7 +76,7 @@ describe('SessionsSection', () => {
   });
 
   it('narrows the list to the sessions in one workspace and its subfolders', () => {
-    render(<SessionsSection sessions={sessions} folders={folders} />);
+    render(<SessionsSection bridge={unsearched} sessions={sessions} folders={folders} />);
     const filter = screen.getByRole('combobox', { name: 'Filter sessions by workspace' });
     expect(
       within(filter)
@@ -94,6 +99,7 @@ describe('SessionsSection', () => {
     const onOpenSession = vi.fn();
     render(
       <SessionsSection
+        bridge={unsearched}
         sessions={sessions}
         folders={folders}
         onNewSession={onNewSession}
@@ -110,6 +116,7 @@ describe('SessionsSection', () => {
     const onPressSession = vi.fn();
     render(
       <SessionsSection
+        bridge={unsearched}
         sessions={sessions}
         folders={folders}
         onOpenSession={vi.fn()}
@@ -130,6 +137,7 @@ describe('SessionsSection', () => {
       const onReadAhead = vi.fn();
       render(
         <SessionsSection
+          bridge={unsearched}
           sessions={sessions}
           folders={folders}
           onOpenSession={vi.fn()}
@@ -175,6 +183,7 @@ describe('SessionsSection', () => {
     const onSessionMenu = vi.fn();
     render(
       <SessionsSection
+        bridge={unsearched}
         sessions={sessions}
         folders={folders}
         onOpenSession={vi.fn()}
@@ -191,7 +200,7 @@ describe('SessionsSection', () => {
   it('renders only the rows in view and a few on either side, each saying where it lies in the whole list', () => {
     // The scroll area as the window lays it out, ten rows tall.
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(280);
-    render(<SessionsSection sessions={many} folders={[]} />);
+    render(<SessionsSection bridge={unsearched} sessions={many} folders={[]} />);
     const list = within(region()).getByRole('list', { name: 'Sessions' });
     const places = () =>
       within(list)
@@ -215,13 +224,15 @@ describe('SessionsSection', () => {
   });
 
   it('renders the first rows until its scroll area is measured, as while it is out of sight', () => {
-    render(<SessionsSection sessions={many} folders={[]} />);
+    render(<SessionsSection bridge={unsearched} sessions={many} folders={[]} />);
     expect(within(region()).getAllByRole('listitem')).toHaveLength(48);
   });
 
   it('keeps the row with the keyboard focus while it is scrolled out of view', () => {
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(280);
-    render(<SessionsSection sessions={many} folders={[]} onOpenSession={vi.fn()} />);
+    render(
+      <SessionsSection bridge={unsearched} sessions={many} folders={[]} onOpenSession={vi.fn()} />,
+    );
     const list = within(region()).getByRole('list', { name: 'Sessions' });
     const focused = within(list).getByRole('button', { name: /Session 2 / });
     act(() => {
@@ -244,10 +255,14 @@ describe('SessionsSection', () => {
   });
 
   it('shows every session again when the chosen workspace leaves the list', () => {
-    const { rerender } = render(<SessionsSection sessions={sessions} folders={folders} />);
+    const { rerender } = render(
+      <SessionsSection bridge={unsearched} sessions={sessions} folders={folders} />,
+    );
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'w2' } });
     expect(rows()).toHaveLength(1);
-    rerender(<SessionsSection sessions={sessions} folders={folders.slice(0, 1)} />);
+    rerender(
+      <SessionsSection bridge={unsearched} sessions={sessions} folders={folders.slice(0, 1)} />,
+    );
     expect(rows()).toHaveLength(4);
     expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('');
   });
@@ -257,3 +272,142 @@ describe('SessionsSection', () => {
 function range(first: number, last: number): number[] {
   return Array.from({ length: last - first + 1 }, (_, index) => first + index);
 }
+
+describe('SessionsSection search', () => {
+  // A search of the sessions' conversations that finds these, by id, with their passages.
+  function conversations(found: Record<string, string | undefined>, unread = 0) {
+    return {
+      search: vi.fn<SessionsBridge['search']>(() =>
+        Promise.resolve({
+          matches: Object.entries(found).map(([id, snippet]) => ({
+            id,
+            ...(snippet === undefined ? {} : { snippet }),
+          })),
+          unread,
+        }),
+      ),
+    };
+  }
+
+  it('opens a search field in the filter’s place from the magnifying glass after it, and closes it with Escape', () => {
+    render(<SessionsSection bridge={unsearched} sessions={sessions} folders={folders} />);
+    const glass = within(region()).getByRole('button', { name: 'Search sessions' });
+    // The glass comes just after the filter, on the heading's row.
+    expect(glass.previousElementSibling?.querySelector('select')).not.toBeNull();
+    fireEvent.click(glass);
+    const field = within(region()).getByRole('searchbox', { name: 'Search sessions' });
+    expect(document.activeElement).toBe(field);
+    expect(within(region()).queryByRole('combobox')).toBeNull();
+    fireEvent.change(field, { target: { value: 'build' } });
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(within(region()).queryByRole('searchbox')).toBeNull();
+    within(region()).getByRole('combobox', { name: 'Filter sessions by workspace' });
+    expect(rows()).toHaveLength(4);
+  });
+
+  it('closes the field left empty, and keeps it open while it has a query', () => {
+    render(<SessionsSection bridge={unsearched} sessions={sessions} folders={[]} />);
+    fireEvent.click(within(region()).getByRole('button', { name: 'Search sessions' }));
+    fireEvent.blur(within(region()).getByRole('searchbox'));
+    expect(within(region()).queryByRole('searchbox')).toBeNull();
+    fireEvent.click(within(region()).getByRole('button', { name: 'Search sessions' }));
+    fireEvent.change(within(region()).getByRole('searchbox'), { target: { value: 'page' } });
+    fireEvent.blur(within(region()).getByRole('searchbox'));
+    expect(within(region()).queryByRole('searchbox')).not.toBeNull();
+  });
+
+  it('keeps the list as it is until the main process answers, then narrows it to the sessions found within the chosen workspace', async () => {
+    vi.useFakeTimers();
+    try {
+      const bridge = conversations({ s1: undefined, s3: 'the landing page', s4: 'the api' }, 2);
+      render(<SessionsSection sessions={sessions} folders={folders} bridge={bridge} />);
+      fireEvent.change(within(region()).getByRole('combobox'), { target: { value: 'w1' } });
+      fireEvent.click(within(region()).getByRole('button', { name: 'Search sessions' }));
+      const field = within(region()).getByRole('searchbox');
+      expect(field.getAttribute('placeholder')).toBe('Search in web');
+      fireEvent.change(field, { target: { value: 'BUILD' } });
+      expect(rows()).toHaveLength(2);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(bridge.search.mock.calls).toEqual([['BUILD', false]]);
+      // s3 and s4, found too, lie outside the chosen workspace.
+      expect(rows()).toEqual([expect.stringContaining('Fix the build')]);
+      within(region()).getByText('Reading 2 more sessions…');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says that no session matches only once the main process knows it, and keeps saying it as the query lengthens', async () => {
+    vi.useFakeTimers();
+    try {
+      const bridge = conversations({ s2: 'the parser' });
+      render(<SessionsSection sessions={sessions} folders={[]} bridge={bridge} />);
+      fireEvent.click(within(region()).getByRole('button', { name: 'Search sessions' }));
+      const field = within(region()).getByRole('searchbox');
+      fireEvent.change(field, { target: { value: 'pars' } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(rows()).toEqual([expect.stringContaining('Codex CLI')]);
+      // A longer query keeps what was found until its own answer comes.
+      bridge.search.mockResolvedValue({ matches: [], unread: 0 });
+      fireEvent.change(field, { target: { value: 'parsx' } });
+      expect(rows()).toEqual([expect.stringContaining('Codex CLI')]);
+      expect(within(region()).queryByText('No sessions match')).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(rows()).toEqual([]);
+      within(region()).getByText('No sessions match');
+      // Lengthened further, it finds no more, so the notice stays while its answer is asked for.
+      fireEvent.change(field, { target: { value: 'parsxy' } });
+      within(region()).getByText('No sessions match');
+      // Shortened, it may find more, so the notice goes until its answer comes.
+      bridge.search.mockResolvedValue({ matches: [{ id: 's3' }], unread: 0 });
+      fireEvent.change(field, { target: { value: 'par' } });
+      expect(within(region()).queryByText('No sessions match')).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(rows()).toEqual([expect.stringContaining('Landing page')]);
+      // A query unlike the one answered shows the whole list until its answer comes.
+      fireEvent.change(field, { target: { value: 'build' } });
+      expect(rows()).toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks again while the main process still reads sessions for searching, saying nothing of none meanwhile', async () => {
+    vi.useFakeTimers();
+    try {
+      const bridge = conversations({}, 3);
+      render(<SessionsSection sessions={sessions} folders={[]} bridge={bridge} />);
+      fireEvent.click(within(region()).getByRole('button', { name: 'Search sessions' }));
+      fireEvent.change(within(region()).getByRole('searchbox'), { target: { value: 'parser' } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(rows()).toEqual([]);
+      within(region()).getByText('Reading 3 more sessions…');
+      expect(within(region()).queryByText('No sessions match')).toBeNull();
+      bridge.search.mockResolvedValue({ matches: [{ id: 's2' }, { id: 's3' }], unread: 0 });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(bridge.search).toHaveBeenCalledTimes(2);
+      expect(rows()).toEqual([
+        expect.stringContaining('Codex CLI'),
+        expect.stringContaining('Landing page'),
+      ]);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(bridge.search).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

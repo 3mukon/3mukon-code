@@ -1,6 +1,8 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, shell } from 'electron';
+import type { AppSettings } from '../../settings/shared/settings';
+import { settingsSwitch } from '../shared/bridge';
 import { isWebUrl } from './links';
 
 // The page the window shows: electron-vite dev serves the renderer and sets this variable, which a
@@ -11,7 +13,8 @@ export function pageUrl(): string {
   return pathToFileURL(join(import.meta.dirname, '../renderer/index.html')).href;
 }
 
-export function createMainWindow(): BrowserWindow {
+// The app's window, whose page starts in the settings given, the language among them.
+export function createMainWindow(settings: AppSettings): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -30,6 +33,7 @@ export function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      additionalArguments: [settingsSwitch + encodeURIComponent(JSON.stringify(settings))],
     },
   });
   window.once('ready-to-show', () => {

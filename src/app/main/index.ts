@@ -1,10 +1,10 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, nativeTheme } from 'electron';
 import { dockAttention } from '../../approvals/main/dock';
 import { FileService } from '../../files/main/files';
 import { keepUnsavedChanges, windowFilesUi } from '../../files/main/native';
-import { mainTranslator } from '../../i18n/main/i18n';
+import { switchableTranslator } from '../../i18n/main/i18n';
 import { createClaudeCodeProvider } from '../../providers/claude-code/main/adapter';
 import { createCodexProvider } from '../../providers/codex/main/adapter';
 import { createGrokBuildProvider } from '../../providers/grok-build/main/adapter';
@@ -14,6 +14,9 @@ import { SessionHost } from '../../sessions/main/host';
 import { windowSessionsUi } from '../../sessions/main/native';
 import type { Provider } from '../../sessions/main/provider';
 import { recordStorage, SessionRecords } from '../../sessions/main/records';
+import { textStorage } from '../../sessions/main/texts';
+import { Settings, settingsStorage } from '../../settings/main/settings';
+import { preferredLanguages } from '../../settings/shared/settings';
 import { startToolset, type RunningToolset } from '../../toolset/main/server';
 import { windowWorkspacesUi } from '../../workspaces/main/native';
 import { fileStorage } from '../../workspaces/main/storage';
@@ -25,20 +28,36 @@ import { createMainWindow, pageUrl } from './window';
 
 // How long quitting waits for the sessions and the toolset to close.
 const CLOSE_TIMEOUT_MS = 5_000;
+// How long after the app opens its search starts catching up on the sessions it has no text for,
+// so that it leaves the providers alone while the window opens (ADR-0014).
+const CATCH_UP_AFTER_MS = 10_000;
 
 void app
   .whenReady()
   .then(async () => {
     const data = app.getPath('userData');
     const version = app.getVersion();
-    // The locale comes first, so that a --lang switch, which the smoke tests pass, applies to the main
-    // process's strings as it does to the window's.
-    const t = mainTranslator([app.getLocale(), ...app.getPreferredSystemLanguages()]);
+    // The language and the appearance follow the settings, which the settings panel changes. Of the
+    // system's languages the locale comes first, so that a --lang switch, which the smoke tests pass,
+    // applies to the main process's strings as it does to the window's.
+    const settings = new Settings(settingsStorage(data));
+    const systemLanguages = [app.getLocale(), ...app.getPreferredSystemLanguages()];
+    const translator = switchableTranslator(
+      preferredLanguages(settings.get().language, systemLanguages),
+    );
+    const t = translator.t;
+    nativeTheme.themeSource = settings.get().appearance;
+    settings.onChange((current) => {
+      translator.use(preferredLanguages(current.language, systemLanguages));
+      nativeTheme.themeSource = current.appearance;
+    });
     const toolset = await startToolsetIfPossible(version);
-    // The sessions the app starts, kept in its data, which later runs list and resume.
+    // The sessions the app starts, kept in its data, which later runs list and resume, with the text
+    // of each one's messages, which the lists search.
     const sessions = new SessionHost(
       providers(data, version, toolset),
       new SessionRecords(recordStorage(data)),
+      textStorage(join(data, 'session-texts')),
     );
     const workspaces = new Workspaces(fileStorage(data));
     // The editors' files: those in the workspaces, and those dropped on a window.
@@ -54,6 +73,7 @@ void app
       sessionsUi: (window) => windowSessionsUi(window, windowPrompts(window), t),
       files,
       filesUi: (window) => windowFilesUi(windowPrompts(window), t),
+      settings,
       page: pageUrl(),
     });
     closeBeforeQuitting(sessions, toolset);
@@ -72,10 +92,13 @@ void app
       keepUnsavedChanges(window, t);
     });
 
-    createMainWindow();
+    createMainWindow(settings.get());
+    setTimeout(() => {
+      void sessions.catchUp();
+    }, CATCH_UP_AFTER_MS);
     // Clicking the Dock icon of a running app without windows opens a new one.
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+      if (BrowserWindow.getAllWindows().length === 0) createMainWindow(settings.get());
     });
   })
   .catch((error: unknown) => {

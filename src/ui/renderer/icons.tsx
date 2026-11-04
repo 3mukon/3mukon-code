@@ -1,5 +1,6 @@
 import {
   Archive as LucideArchive,
+  ArchiveRestore as LucideArchiveRestore,
   Brain as LucideBrain,
   Check as LucideCheck,
   ChevronDown as LucideChevronDown,
@@ -12,6 +13,7 @@ import {
   Pencil as LucidePencil,
   Plus as LucidePlus,
   Search as LucideSearch,
+  Settings as LucideSettings,
   ShieldCheck as LucideShieldCheck,
   ShieldOff as LucideShieldOff,
   Terminal as LucideTerminal,
@@ -52,3 +54,5 @@ export const Check = decorative(LucideCheck);
 export const ShieldCheck = decorative(LucideShieldCheck);
 export const CircleQuestionMark = decorative(LucideCircleQuestionMark);
 export const Archive = decorative(LucideArchive);
+export const ArchiveRestore = decorative(LucideArchiveRestore);
+export const Gear = decorative(LucideSettings);

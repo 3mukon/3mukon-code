@@ -21,3 +21,12 @@ export function initI18n(preferred: readonly string[] = navigator.languages): La
   document.documentElement.lang = language;
   return language;
 }
+
+// Picks the window's language again from the preferred languages, as the user's choice of language
+// changes, and marks the page with it.
+export function switchLanguage(preferred: readonly string[]): Language {
+  const language = resolveLanguage(preferred);
+  void i18next.changeLanguage(language);
+  document.documentElement.lang = language;
+  return language;
+}

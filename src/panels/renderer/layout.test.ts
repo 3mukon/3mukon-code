@@ -24,7 +24,11 @@ function run(...actions: PanelsAction[]): PanelsState {
 function shape(layout: Layout | null): string {
   if (layout === null) return 'empty';
   if (layout.type === 'panel') {
-    return layout.content.kind === 'file' ? layout.content.path : `page ${layout.content.folder}`;
+    const { content } = layout;
+    if (content.kind === 'file') return content.path;
+    return content.kind === 'session-page' || content.kind === 'session'
+      ? `page ${content.folder}`
+      : content.kind;
   }
   return `${layout.direction}(${shape(layout.first)}, ${shape(layout.second)})`;
 }
@@ -220,12 +224,16 @@ describe('helpers', () => {
     expect(sameContent(page('/web'), page('/api'))).toBe(false);
     expect(sameContent(session('s1'), session('s2'))).toBe(false);
     expect(sameContent(file('/web'), page('/web'))).toBe(false);
+    expect(sameContent({ kind: 'settings' }, { kind: 'settings' })).toBe(true);
+    expect(sameContent({ kind: 'archived' }, { kind: 'settings' })).toBe(false);
   });
 
-  it('finds the folder a panel’s content is in', () => {
+  it('finds the folder a panel’s content is in, which the archived sessions and the settings lack', () => {
     expect(folderOf(page('/web'))).toBe('/web');
     expect(folderOf(file('/web/src/a.ts'))).toBe('/web/src');
     expect(folderOf(file('/a.ts'))).toBe('/');
+    expect(folderOf({ kind: 'archived' })).toBeNull();
+    expect(folderOf({ kind: 'settings' })).toBeNull();
   });
 
   it('keeps the panels in the order they were opened', () => {

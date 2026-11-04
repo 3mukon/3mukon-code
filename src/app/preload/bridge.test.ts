@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ResumeRequest } from '../../sessions/shared/sessions';
+import type { AppSettings } from '../../settings/shared/settings';
 import { createBridge, type Ipc } from './bridge';
 
 function fakeIpc() {
@@ -21,10 +22,13 @@ function fakeIpc() {
   return { ipc, send };
 }
 
+// The settings the window opened with.
+const opening: AppSettings = { language: 'zh-Hans', appearance: 'dark' };
+
 describe('createBridge', () => {
   it('invokes one channel for each call, with the call’s values, and returns the answer', async () => {
     const { ipc } = fakeIpc();
-    const bridge = createBridge(ipc, () => '');
+    const bridge = createBridge(ipc, () => '', opening);
     expect(await bridge.workspaces.get()).toBe('answer');
     await bridge.workspaces.add();
     await bridge.workspaces.select('w1');
@@ -32,6 +36,10 @@ describe('createBridge', () => {
     await bridge.workspaces.listFolder('w1', 'src/app');
     await bridge.sessions.list();
     await bridge.sessions.archived();
+    await bridge.sessions.act('s2', 'unarchive');
+    await bridge.sessions.search('build', true);
+    await bridge.settings.get();
+    await bridge.settings.set({ appearance: 'light' });
     const resumed: ResumeRequest = {
       mode: 'yolo',
       gateway: null,
@@ -86,6 +94,10 @@ describe('createBridge', () => {
       ['workspaces:list-folder', 'w1', 'src/app'],
       ['sessions:list'],
       ['sessions:archived'],
+      ['sessions:act', 's2', 'unarchive'],
+      ['sessions:search', 'build', true],
+      ['settings:get'],
+      ['settings:set', { appearance: 'light' }],
       ['sessions:resume', 's1', resumed],
       ['sessions:show-menu', 's1'],
       ['sessions:models', 'codex', null],
@@ -135,7 +147,7 @@ describe('createBridge', () => {
   it('sends dropped items as the paths of their files', async () => {
     const { ipc } = fakeIpc();
     const paths = new Map([['web', '/Users/me/web']]);
-    const bridge = createBridge(ipc, (file) => paths.get(file.name) ?? '');
+    const bridge = createBridge(ipc, (file) => paths.get(file.name) ?? '', opening);
     await bridge.workspaces.addDropped([new File([], 'web'), new File([], 'text')]);
     await bridge.panels.itemsAt([new File([], 'web')]);
     expect(ipc.invoke.mock.calls).toEqual([
@@ -146,12 +158,14 @@ describe('createBridge', () => {
 
   it('passes on what the main process reports, without its event, until the page stops listening', () => {
     const { ipc, send } = fakeIpc();
-    const bridge = createBridge(ipc, () => '');
+    const bridge = createBridge(ipc, () => '', opening);
     const workspaces = vi.fn();
     const sessions = vi.fn();
     const events = vi.fn();
     const files = vi.fn();
+    const settings = vi.fn();
     const stop = bridge.workspaces.onChange(workspaces);
+    bridge.settings.onChange(settings);
     bridge.sessions.onChange(sessions);
     bridge.sessions.onEvent(events);
     bridge.files.onChange(files);
@@ -159,11 +173,15 @@ describe('createBridge', () => {
     send('sessions:changed', { sessions: [], archived: 2, shown: [] });
     send('sessions:event', { id: 's1', seq: 1, event: { type: 'turn-started' } });
     send('files:changed', '/Users/me/web/a.ts');
+    send('settings:changed', { language: 'en', appearance: 'system' });
     stop();
     send('workspaces:changed', { workspaces: [], selectedId: null });
     expect(workspaces.mock.calls).toEqual([[{ workspaces: [], selectedId: null }]]);
     expect(sessions.mock.calls).toEqual([[{ sessions: [], archived: 2, shown: [] }]]);
     expect(events.mock.calls).toEqual([['s1', 1, { type: 'turn-started' }]]);
     expect(files.mock.calls).toEqual([['/Users/me/web/a.ts']]);
+    expect(settings.mock.calls).toEqual([[{ language: 'en', appearance: 'system' }]]);
+    // The settings the window opened with need no call.
+    expect(bridge.settings.initial).toEqual(opening);
   });
 });

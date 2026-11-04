@@ -10,6 +10,8 @@ import type { SessionHost } from '../../sessions/main/host';
 import { dayFolder, makeDayFolder } from '../../sessions/main/folders';
 import { copyImage, copyText, type SessionsUi } from '../../sessions/main/native';
 import { MAX_IMAGE_BASE64, MAX_IMAGES, SENDABLE_IMAGE_TYPES } from '../../sessions/shared/images';
+import type { Settings } from '../../settings/main/settings';
+import type { AppSettings } from '../../settings/shared/settings';
 import type { Workspaces, WorkspacesUi } from '../../workspaces/main/workspaces';
 import { channels } from '../shared/bridge';
 import { isAppPage } from './links';
@@ -28,6 +30,8 @@ interface BridgeServices {
   files: FileService;
   // The question the editors ask, attached to the window that asked.
   filesUi: (window: BrowserWindow) => FilesUi;
+  // The app's settings, which the settings panel changes.
+  settings: Settings;
   // The page the app's windows show.
   page: string;
 }
@@ -107,6 +111,16 @@ const questionAnswer = z.discriminatedUnion('decision', [
     .strict(),
   z.object({ decision: z.literal('decline') }).strict(),
 ]);
+// What a session's menu does, and a search's query.
+const sessionAction = z.enum(['archive', 'unarchive', 'remove']);
+const searchQuery = z.string().max(1_000);
+// A change to the settings: any of them, each one of its choices.
+const settingsChange = z
+  .object({
+    language: z.enum(['system', 'en', 'zh-Hans']).optional(),
+    appearance: z.enum(['system', 'light', 'dark']).optional(),
+  })
+  .strict();
 const choice = z
   .object({
     provider,
@@ -128,6 +142,7 @@ export function serveBridge({
   sessionsUi,
   files,
   filesUi,
+  settings,
   page,
 }: BridgeServices): void {
   function handle<Values extends unknown[]>(
@@ -169,6 +184,14 @@ export function serveBridge({
   );
   handle(channels.sessions.showMenu, z.tuple([id]), (window, session) =>
     sessions.showMenu(session, sessionsUi(window)),
+  );
+  handle(channels.sessions.act, z.tuple([id, sessionAction]), (window, session, action) =>
+    sessions.act(session, action, sessionsUi(window)),
+  );
+  handle(
+    channels.sessions.search,
+    z.tuple([searchQuery, z.boolean()]),
+    (_window, query, archived) => sessions.search(query, archived),
   );
   handle(channels.sessions.providers, z.tuple([]), () => sessions.providerIds());
   handle(channels.sessions.dayFolder, z.tuple([]), () => dayFolder(homedir(), new Date()));
@@ -283,6 +306,13 @@ export function serveBridge({
   handle(channels.files.confirmClose, z.tuple([fileName]), (window, file) =>
     filesUi(window).confirmClose(file),
   );
+  handle(channels.settings.get, z.tuple([]), () => settings.get());
+  handle(channels.settings.set, z.tuple([settingsChange]), (_window, given) => {
+    const change: Partial<AppSettings> = {};
+    if (given.language !== undefined) change.language = given.language;
+    if (given.appearance !== undefined) change.appearance = given.appearance;
+    settings.set(change);
+  });
   // The page's answer to a menu or question it was asked to draw.
   handle(
     channels.prompts.answer,
@@ -303,6 +333,9 @@ export function serveBridge({
   });
   files.onChange((file) => {
     broadcast(channels.files.changed, file);
+  });
+  settings.onChange((current) => {
+    broadcast(channels.settings.changed, current);
   });
 }
 

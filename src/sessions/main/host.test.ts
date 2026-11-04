@@ -7,6 +7,7 @@ import type { SessionAction, SessionList, SessionSettings } from '../shared/sess
 import { SessionHost, type SessionsMenuUi } from './host';
 import type { Provider, ProviderSession, ResumeOptions, SessionEventListener } from './provider';
 import { SessionRecords, type SessionRecord } from './records';
+import { memoryTextStorage } from './texts';
 
 // Sessions start in real folders, which the host checks.
 let root: string;
@@ -893,5 +894,121 @@ describe('SessionHost archive and removal', () => {
     const unknown = menuUi('remove');
     expect(await host.showMenu('missing', unknown)).toBeNull();
     expect(unknown.sessionMenu).not.toHaveBeenCalled();
+  });
+});
+
+describe('SessionHost search', () => {
+  it('keeps each session’s text as its history is read and as its turns end, and forgets a removed one’s', async () => {
+    const claude = fakeProvider('claude-code');
+    const texts = new Map<string, string>();
+    const host = new SessionHost(
+      [claude.provider],
+      memoryRecords([kept()]).records,
+      memoryTextStorage(texts),
+    );
+    host.snapshot('kept');
+    await settle();
+    expect(texts.get('kept')).toBe('Fix the build');
+    const id = await host.start('claude-code', { cwd: folder('a') });
+    claude.listeners[0]?.({ type: 'message', id: 'u1', role: 'user', text: 'Write the docs' });
+    claude.listeners[0]?.({ type: 'message', id: 'a1', role: 'agent', text: 'Docs written.' });
+    expect(texts.has(id)).toBe(false);
+    claude.listeners[0]?.({ type: 'turn-ended', outcome: 'completed' });
+    await settle();
+    expect(texts.get(id)).toBe('Write the docs\n\nDocs written.');
+    await host.remove(id);
+    await settle();
+    expect(texts.has(id)).toBe(false);
+  });
+
+  it('finds the sessions of a list whose title and conversation hold every word, saying how many it has not read', async () => {
+    const claude = fakeProvider('claude-code');
+    const texts = new Map([['older', 'We moved the parser to Rust.']]);
+    const host = new SessionHost(
+      [claude.provider],
+      memoryRecords([
+        kept(),
+        kept({ id: 'older', sessionId: 'claude-8', title: 'Speed up', activeAt: 500 }),
+        kept({ id: 'unread', sessionId: 'claude-7', title: 'Unread', activeAt: 400 }),
+        kept({ id: 'shelved', sessionId: 'claude-6', title: 'Parser idea', archived: true }),
+      ]).records,
+      memoryTextStorage(texts),
+    );
+    // A session read in this run is searched as it is now.
+    host.snapshot('kept');
+    await settle();
+    expect(await host.search('PARSER rust', false)).toEqual({
+      matches: [{ id: 'older', snippet: 'We moved the parser to Rust.' }],
+      unread: 1,
+    });
+    expect(await host.search('fix build', false)).toEqual({
+      matches: [{ id: 'kept', snippet: 'Fix the build' }],
+      unread: 1,
+    });
+    // The archived list is searched apart, by title too.
+    expect(await host.search('parser', true)).toEqual({ matches: [{ id: 'shelved' }], unread: 1 });
+    expect(await host.search('  ', false)).toEqual({ matches: [], unread: 1 });
+  });
+
+  it('catches up on the sessions without a text, the most recently active first, one at a time and once', async () => {
+    const claude = fakeProvider('claude-code');
+    const failing = fakeProvider('codex');
+    failing.history.mockRejectedValue(new Error('offline'));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const texts = new Map([
+      ['kept', 'Already kept'],
+      ['gone', 'A session the records no longer keep'],
+    ]);
+    const host = new SessionHost(
+      [claude.provider, failing.provider],
+      memoryRecords([
+        kept(),
+        kept({ id: 'older', sessionId: 'claude-8', activeAt: 500 }),
+        kept({ id: 'newer', sessionId: 'claude-7', activeAt: 2_000, archived: true }),
+        kept({ id: 'offline', provider: 'codex', sessionId: 'thread-1', activeAt: 100 }),
+      ]).records,
+      memoryTextStorage(texts),
+    );
+    await host.catchUp();
+    expect(claude.history.mock.calls.map(([sessionId]) => sessionId)).toEqual([
+      'claude-7',
+      'claude-8',
+    ]);
+    expect(texts.get('newer')).toBe('Fix the build');
+    expect(texts.get('older')).toBe('Fix the build');
+    expect(texts.get('kept')).toBe('Already kept');
+    expect(texts.has('gone')).toBe(false);
+    // A session whose history cannot be read is no longer counted as unread in this run.
+    expect((await host.search('build', false)).unread).toBe(0);
+    // Nothing is read twice, nor kept in the sessions' state.
+    await host.catchUp();
+    expect(claude.history).toHaveBeenCalledTimes(2);
+    expect(host.snapshot('older')?.state.loadingHistory).toBe(true);
+  });
+
+  it('stops catching up as the app quits', async () => {
+    const claude = fakeProvider('claude-code');
+    const host = new SessionHost(
+      [claude.provider],
+      memoryRecords([kept(), kept({ id: 'older', sessionId: 'claude-8', activeAt: 500 })]).records,
+    );
+    await host.closeAll();
+    await host.catchUp();
+    expect(claude.history).not.toHaveBeenCalled();
+  });
+
+  it('does what a session’s menu would without its menu, asking first where the menu asks', async () => {
+    const host = new SessionHost(
+      [fakeProvider('claude-code').provider],
+      memoryRecords([kept({ archived: true }), kept({ id: 'other', sessionId: 'claude-8' })])
+        .records,
+    );
+    const ui = menuUi(null, false);
+    expect(await host.act('kept', 'unarchive', ui)).toBe('unarchive');
+    expect(host.list().archived).toBe(0);
+    expect(await host.act('other', 'remove', ui)).toBeNull();
+    expect(ui.confirmRemove).toHaveBeenCalledOnce();
+    expect(ui.sessionMenu).not.toHaveBeenCalled();
+    expect(await host.act('gone', 'remove', ui)).toBeNull();
   });
 });

@@ -466,3 +466,35 @@ describe('PanelArea', () => {
     expect(divider.style.left).toBe('60%');
   });
 });
+
+describe('PanelArea panels without a folder', () => {
+  it('shows the archived sessions and the settings by the titles given them, and leaves ⌘D to the window there', () => {
+    function Own() {
+      const panels = usePanels();
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              panels.open([{ kind: 'settings' }]);
+            }}
+          >
+            Open the settings
+          </button>
+          <PanelArea
+            panels={panels}
+            bridge={{ itemsAt: () => Promise.resolve([]) }}
+            clearsWindowButtons={false}
+            view={(shown) => (shown.content.kind === 'settings' ? { title: 'Settings' } : {})}
+          />
+        </>
+      );
+    }
+    render(<Own />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open the settings' }));
+    const settings = panel('Settings');
+    expect(within(settings).queryByTitle(/\//)).toBeNull();
+    expect(fireEvent.keyDown(window, { key: 'd', metaKey: true })).toBe(true);
+    expect(screen.getAllByRole('region')).toHaveLength(1);
+  });
+});

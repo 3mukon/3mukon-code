@@ -1,22 +1,16 @@
-import { useId, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
+import { useId, useState, type PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus } from '../../ui/renderer/icons';
+import { Plus, Search } from '../../ui/renderer/icons';
+import { SearchField } from '../../ui/renderer/search-field';
 import { Select } from '../../ui/renderer/select';
 import { StatusDot } from '../../ui/renderer/status-dot';
-import type { SessionSummary } from '../shared/sessions';
+import type { SessionsBridge, SessionSummary } from '../shared/sessions';
+import { folderName, useReadAhead, useVisibleRows } from './rows';
 import { statusDots } from './timeline';
+import { useSessionSearch } from './use-search';
 
-// The height of a session's row, in pixels, by which the lists lay out their rows.
+// The height of a session's row, in pixels, by which the list lays out its rows.
 export const ROW_HEIGHT = 28;
-// How many rows beyond those in view the lists render on either side, so that scrolling shows no gap
-// before the next render.
-const OVERSCAN = 8;
-// How many rows a list takes to be in view until its scroll area is measured, as while it is out of
-// sight.
-const UNMEASURED_ROWS = 40;
-// How long the pointer or the keyboard focus stays on a row, in milliseconds, before the session's
-// history is read ahead, so that a pointer passing over the list reads nothing.
-const READ_AHEAD_AFTER = 150;
 
 // A folder the list can be narrowed to, such as a workspace.
 export interface SessionFolder {
@@ -30,6 +24,8 @@ interface SessionsSectionProps {
   sessions: SessionSummary[];
   // The folders the filter offers, in order.
   folders: SessionFolder[];
+  // What searches the sessions' titles and conversations, as the main process holds them.
+  bridge: Pick<SessionsBridge, 'search'>;
   // Opens a new session page; New session stays disabled without it.
   onNewSession?: () => void;
   // Shows a session, as a click on it in the list asks.
@@ -43,14 +39,19 @@ interface SessionsSectionProps {
   onReadAhead?: (session: SessionSummary) => void;
 }
 
-// The sidebar's Sessions section: its heading with New session just after it and, while there are
-// folders to choose, the filter just after that; then the sessions, each labelled with its folder,
-// which a click or Return shows, whose presses go to whoever drags them elsewhere and whose menu a
-// secondary click offers, of which only the rows in view are rendered. The filter narrows the list to the sessions in
-// one folder or below it. Without sessions it shows the heading row alone.
+// The sidebar's Sessions section: its heading with New session just after it, then, while there are
+// folders to choose, the filter, and a magnifying glass that opens a search field in the filter's
+// place; then the sessions, each labelled with its folder, which a click or Return shows, whose
+// presses go to whoever drags them elsewhere and whose menu a secondary click offers, of which only
+// the rows in view are rendered. The filter narrows the list to the sessions in one folder or below
+// it, and a search narrows it further, as the main process answers, to the sessions whose title or
+// conversation holds every word of the query, saying how many sessions it has yet to read, or, once
+// it knows, that none match. Escape, or leaving the field empty, closes the search. The heading's row keeps its height whatever it shows, its items
+// on one centre line. Without sessions the section shows the heading row alone.
 export function SessionsSection({
   sessions,
   folders,
+  bridge,
   onNewSession,
   onOpenSession,
   onSessionMenu,
@@ -60,10 +61,17 @@ export function SessionsSection({
   const { t } = useTranslation();
   const heading = useId();
   const [filterId, setFilterId] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
   // A folder that has left the list no longer narrows it.
   const filter = folders.find((folder) => folder.id === filterId);
-  const shown =
+  const inFolder =
     filter === undefined ? sessions : sessions.filter((session) => isIn(session.cwd, filter.path));
+  const found = useSessionSearch(bridge, inFolder, searchOpen ? query : '', false);
+  const closeSearch = () => {
+    setQuery('');
+    setSearchOpen(false);
+  };
 
   return (
     <section aria-labelledby={heading} className="flex min-h-0 flex-1 flex-col gap-1">
@@ -72,7 +80,7 @@ export function SessionsSection({
           {t('sessions.heading')}
         </h2>
         {/* New session, a plus icon whose name VoiceOver reads and the tooltip shows; the negative
-            margin keeps the heading's row height. */}
+            margins of the row's buttons and search field keep the heading's row height. */}
         <button
           type="button"
           disabled={onNewSession === undefined}
@@ -83,23 +91,60 @@ export function SessionsSection({
         >
           <Plus className="size-4" />
         </button>
-        {folders.length > 0 && (
-          <Select
-            label={t('sessions.filter')}
-            value={filter?.id ?? ''}
-            options={[
-              { value: '', label: t('sessions.allWorkspaces') },
-              ...folders.map((folder) => ({ value: folder.id, label: folder.name })),
-            ]}
-            onChange={(value) => {
-              setFilterId(value === '' ? null : value);
-            }}
+        {searchOpen ? (
+          <SearchField
+            compact
+            autoFocus
+            label={t('sessions.search.open')}
+            placeholder={
+              filter === undefined
+                ? t('sessions.search.placeholder')
+                : t('sessions.search.placeholderIn', { folder: filter.name })
+            }
+            value={query}
+            onChange={setQuery}
+            onClose={closeSearch}
+            clearLabel={t('sessions.search.clear')}
           />
+        ) : (
+          <>
+            {folders.length > 0 && (
+              <Select
+                label={t('sessions.filter')}
+                value={filter?.id ?? ''}
+                options={[
+                  // "All" where the filter sits, to leave the magnifying glass room beside it.
+                  { value: '', label: t('sessions.allWorkspaces'), short: t('sessions.all') },
+                  ...folders.map((folder) => ({ value: folder.id, label: folder.name })),
+                ]}
+                onChange={(value) => {
+                  setFilterId(value === '' ? null : value);
+                }}
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setSearchOpen(true);
+              }}
+              aria-label={t('sessions.search.open')}
+              title={t('sessions.search.open')}
+              className="-my-0.5 grid size-5 shrink-0 place-items-center rounded-md text-faint hover:bg-hover hover:text-ink"
+            >
+              <Search className="size-3.5" />
+            </button>
+          </>
         )}
       </div>
-      {shown.length > 0 && (
+      {found.searching && found.unread > 0 && (
+        <p role="status" className="px-2 text-[11px] text-faint">
+          {t('sessions.search.unread', { count: found.unread })}
+        </p>
+      )}
+      {found.none && <p className="px-2 text-[11px] text-faint">{t('sessions.search.none')}</p>}
+      {found.sessions.length > 0 && (
         <SessionRows
-          sessions={shown}
+          sessions={found.sessions}
           labelledBy={heading}
           className="min-h-0"
           {...(onOpenSession === undefined ? {} : { onOpen: onOpenSession })}
@@ -127,15 +172,13 @@ interface SessionRowsProps {
   onPress?: (session: SessionSummary, press: PointerEvent<HTMLElement>) => void;
   // Reads a session's history ahead of showing it.
   onReadAhead?: (session: SessionSummary) => void;
-  // The id of a dropdown the rows lie in, which a row hides as it shows its session.
-  closes?: string;
 }
 
 // Session rows in a scroll area of their own, which renders only the rows in view and a few on either
 // side, so that a long list costs no more to show than a short one. Each row tells VoiceOver where it
 // lies in the whole list, and the row with the keyboard focus stays while it is scrolled out of view,
 // keeping the focus.
-export function SessionRows({
+function SessionRows({
   sessions,
   labelledBy,
   className,
@@ -143,45 +186,13 @@ export function SessionRows({
   onMenu,
   onPress,
   onReadAhead,
-  closes,
 }: SessionRowsProps) {
   const [area, setArea] = useState<HTMLDivElement | null>(null);
-  // The first row in view and how many rows the view holds; none until the area is measured.
-  const [view, setView] = useState({ first: 0, rows: 0 });
   // The session whose row has the keyboard focus.
   const [focused, setFocused] = useState<string | null>(null);
   const count = sessions.length;
-
-  // Measured again as the area scrolls or changes size, and as the list's length changes, which can
-  // scroll it.
-  useLayoutEffect(() => {
-    if (area === null) return;
-    const measure = () => {
-      const first = Math.floor(area.scrollTop / ROW_HEIGHT);
-      const rows = Math.ceil(area.clientHeight / ROW_HEIGHT);
-      setView((shown) => (shown.first === first && shown.rows === rows ? shown : { first, rows }));
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(area);
-    area.addEventListener('scroll', measure, { passive: true });
-    return () => {
-      observer.disconnect();
-      area.removeEventListener('scroll', measure);
-    };
-  }, [area, count]);
-
-  const start = Math.max(0, Math.min(view.first, count) - OVERSCAN);
-  const end = Math.min(
-    count,
-    view.first + (view.rows === 0 ? UNMEASURED_ROWS : view.rows) + OVERSCAN,
-  );
   const kept = focused === null ? -1 : sessions.findIndex((session) => session.id === focused);
-  const rendered = [
-    ...(kept !== -1 && kept < start ? [kept] : []),
-    ...Array.from({ length: Math.max(0, end - start) }, (_, offset) => start + offset),
-    ...(kept >= end ? [kept] : []),
-  ];
+  const rendered = useVisibleRows(area, count, ROW_HEIGHT, kept);
 
   return (
     // Positioned, so that the statuses for VoiceOver alone stay inside the scroll area.
@@ -210,7 +221,6 @@ export function SessionRows({
                 {...(onMenu === undefined ? {} : { onMenu })}
                 {...(onPress === undefined ? {} : { onPress })}
                 {...(onReadAhead === undefined ? {} : { onReadAhead })}
-                {...(closes === undefined ? {} : { closes })}
               />
             </li>
           );
@@ -230,49 +240,28 @@ interface SessionRowProps {
   onPress?: (session: SessionSummary, press: PointerEvent<HTMLElement>) => void;
   // Reads the session's history ahead of showing it.
   onReadAhead?: (session: SessionSummary) => void;
-  // The id of a dropdown the row lies in, which the row hides as it shows its session.
-  closes?: string;
 }
 
-// A session as the lists show it, filling its row: its status as a dot and in words for VoiceOver, its
+// A session as the list shows it, filling its row: its status as a dot and in words for VoiceOver, its
 // title or else its provider's name, and its folder's name, with the path in the tooltip. A click or
 // Return shows it, a press goes to whoever drags it elsewhere, and a secondary click or VoiceOver's
-// menu command offers its menu. The history of a session that is not running is read ahead once, as
-// a press on the row begins, or once the pointer or the keyboard focus has stayed on it, so that its
-// page has it as it opens.
-function SessionRow({ session, onOpen, onMenu, onPress, onReadAhead, closes }: SessionRowProps) {
+// menu command offers its menu. The history of a session that is not running is read ahead as the
+// user reaches for the row.
+function SessionRow({ session, onOpen, onMenu, onPress, onReadAhead }: SessionRowProps) {
   const { t } = useTranslation();
-  const readAhead = useRef<{ timer?: ReturnType<typeof setTimeout>; done: boolean }>({
-    done: false,
-  });
-  const readNow = () => {
-    clearTimeout(readAhead.current.timer);
-    if (readAhead.current.done || session.status !== 'closed' || onReadAhead === undefined) return;
-    readAhead.current.done = true;
-    onReadAhead(session);
-  };
-  const readSoon = () => {
-    clearTimeout(readAhead.current.timer);
-    readAhead.current.timer = setTimeout(readNow, READ_AHEAD_AFTER);
-  };
-  const readNothing = () => {
-    clearTimeout(readAhead.current.timer);
-  };
-  const hiding =
-    closes === undefined ? {} : ({ popoverTarget: closes, popoverTargetAction: 'hide' } as const);
+  const readAhead = useReadAhead(session, onReadAhead);
   return (
     <button
       type="button"
       disabled={onOpen === undefined}
-      {...hiding}
       onPointerDown={(event) => {
-        readNow();
+        readAhead.now();
         onPress?.(session, event);
       }}
-      onPointerEnter={readSoon}
-      onPointerLeave={readNothing}
-      onFocus={readSoon}
-      onBlur={readNothing}
+      onPointerEnter={readAhead.soon}
+      onPointerLeave={readAhead.never}
+      onFocus={readAhead.soon}
+      onBlur={readAhead.never}
       onClick={() => {
         onOpen?.(session);
       }}
@@ -300,10 +289,4 @@ function SessionRow({ session, onOpen, onMenu, onPress, onReadAhead, closes }: S
 // Whether the path is the folder or lies inside it.
 function isIn(path: string, folder: string): boolean {
   return path === folder || path.startsWith(folder.endsWith('/') ? folder : `${folder}/`);
-}
-
-// The last name in a path, or the path itself for the startup disk's root.
-function folderName(path: string): string {
-  const name = path.replace(/\/+$/, '').split('/').at(-1);
-  return name === undefined || name === '' ? path : name;
 }

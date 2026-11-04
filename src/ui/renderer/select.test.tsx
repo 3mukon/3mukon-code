@@ -26,6 +26,20 @@ describe('Select', () => {
     expect(shown?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('shows an option’s short text in its place where it has one, and its label in the list', () => {
+    render(
+      <Select
+        label="Show"
+        value=""
+        options={[{ value: '', label: 'Everything', short: 'All' }, ...options.slice(1)]}
+        onChange={vi.fn()}
+      />,
+    );
+    const select = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Show' });
+    expect(select.parentElement?.firstElementChild?.textContent).toBe('All');
+    expect(within(select).getAllByRole('option')[0]?.textContent).toBe('Everything');
+  });
+
   it('opens its list as e-ink draws it: a sheet of paper under a dashed line, without a shadow', () => {
     render(<Select label="Show" value="one" options={options} onChange={vi.fn()} />);
     const classes = screen.getByRole('combobox', { name: 'Show' }).className.split(' ');

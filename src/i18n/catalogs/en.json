@@ -27,7 +27,24 @@
     "newSession": "New session",
     "filter": "Filter sessions by workspace",
     "allWorkspaces": "All workspaces",
+    "all": "All",
     "archived": "Archived sessions",
+    "search": {
+      "open": "Search sessions",
+      "placeholder": "Search",
+      "placeholderIn": "Search in {{folder}}",
+      "clear": "Clear search",
+      "none": "No sessions match",
+      "unread_one": "Reading {{count}} more session…",
+      "unread_other": "Reading {{count}} more sessions…"
+    },
+    "archivedPanel": {
+      "search": "Search archived sessions",
+      "count_one": "{{count}} session",
+      "count_other": "{{count}} sessions",
+      "empty": "No archived sessions",
+      "none": "No archived sessions match"
+    },
     "status": {
       "running": "Running",
       "waiting": "Waiting for you",
@@ -179,6 +196,20 @@
     "close": "Close panel",
     "resize": "Resize panels",
     "unsaved": "Unsaved changes"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "languageDetail": "Of the window, its menus and its questions. System takes macOS’s preferred languages.",
+    "appearance": "Appearance",
+    "appearanceDetail": "System follows macOS’s appearance.",
+    "system": "System",
+    "light": "Light",
+    "dark": "Dark",
+    "languages": {
+      "en": "English",
+      "zhHans": "简体中文"
+    }
   },
   "files": {
     "notice": {

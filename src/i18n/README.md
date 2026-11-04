@@ -14,8 +14,8 @@ tags: []
 
 - The catalogs (`catalogs/en.json`, `catalogs/zh-Hans.json`): every UI string, under nested keys, in both languages, for the window and for the main process's dialogs and menus. `scripts/checks/catalogs.sh` keeps their keys equal, and TypeScript checks every key the code uses against the English catalog (`shared/i18next.d.ts`), in both processes.
 - The language choice (`shared/language.ts`): among the preferred languages, most preferred first, the first English or Simplified Chinese one; English if there is none.
-- The window's runtime (`renderer/i18n.ts`): `initI18n` starts i18next for react-i18next in the language `resolveLanguage` picks from `navigator.languages`, which in Electron lists the languages preferred in macOS's settings, and sets the page's `lang` so that VoiceOver uses a matching voice.
-- The main process's runtime (`main/i18n.ts`): `mainTranslator` gives a translation function, `Translate`, in the language picked from the languages it is given. Its text goes to native dialogs and to the menus and questions a window's page draws, which show it as text, never as markup, so values are not escaped.
+- The window's runtime (`renderer/i18n.ts`): `initI18n` starts i18next for react-i18next in the language `resolveLanguage` picks from `navigator.languages`, which in Electron lists the languages preferred in macOS's settings, and sets the page's `lang` so that VoiceOver uses a matching voice; `switchLanguage` picks again, as the user's choice of language changes, and marks the page anew.
+- The main process's runtime (`main/i18n.ts`): `mainTranslator` gives a translation function, `Translate`, in the language picked from the languages it is given, and `switchableTranslator` one whose language its `use` picks again, as the user's choice of language changes. Its text goes to native dialogs and to the menus and questions a window's page draws, which show it as text, never as markup, so values are not escaped.
 
 ## Not responsible for
 
@@ -24,8 +24,8 @@ tags: []
 
 ## Interface
 
-- `initI18n(preferred?)` from `renderer/i18n.ts`, called once by the app module before React renders. Components translate with react-i18next's `useTranslation`.
-- `mainTranslator(preferred)` and `Translate` from `main/i18n.ts`, for main-process code.
+- `initI18n(preferred?)` from `renderer/i18n.ts`, called once by the app module before React renders, and `switchLanguage(preferred)`, which the settings module calls. Components translate with react-i18next's `useTranslation`.
+- `mainTranslator(preferred)`, `switchableTranslator(preferred)`, `SwitchableTranslator` and `Translate` from `main/i18n.ts`, for main-process code.
 - A new string goes into both catalogs in the same change.
 
 ## Dependencies

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mainTranslator } from './i18n';
+import { mainTranslator, switchableTranslator } from './i18n';
 
 describe('mainTranslator', () => {
   it('translates in the first English or Simplified Chinese language preferred', () => {
@@ -12,5 +12,16 @@ describe('mainTranslator', () => {
     expect(mainTranslator(['en-US'])('workspaces.trust.message', { name: '<a> & b' })).toBe(
       'Do you trust the files in “<a> & b”?',
     );
+  });
+});
+
+describe('switchableTranslator', () => {
+  it('translates in the language picked last', () => {
+    const translator = switchableTranslator(['en-US']);
+    expect(translator.t('workspaces.trust.trust')).toBe('Trust');
+    translator.use(['zh-Hans']);
+    expect(translator.t('workspaces.trust.trust')).toBe('信任');
+    translator.use(['fr-FR']);
+    expect(translator.t('workspaces.trust.trust')).toBe('Trust');
   });
 });

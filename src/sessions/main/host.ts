@@ -23,15 +23,25 @@ import type {
   SessionAction,
   SessionEventsListener,
   SessionList,
+  SessionSearch,
   SessionSettings,
   SessionSnapshot,
   SessionSummary,
 } from '../shared/sessions';
 import type { Provider, ProviderSession, SessionEventListener, StartOptions } from './provider';
 import type { SessionRecord, SessionRecords } from './records';
+import { searchWords } from '../shared/search';
+import { matchOf, memoryTextStorage, textOf, type TextStorage } from './texts';
 
 // How long a provider has to list its models before the list fails.
 const MODELS_TIMEOUT_MS = 60_000;
+
+// The events after which a session's text is kept anew: its history read, a turn ended, the session
+// closed.
+const TEXT_EVENTS = new Set<SessionEvent['type']>(['history', 'turn-ended', 'closed']);
+
+// How many sessions' texts a search reads at a time.
+const SEARCH_READS = 16;
 
 // What a history holds that the host leaves out of it: the settings it reports, since the app keeps
 // the settings a session last had for itself, and the ends of a replay or a session.
@@ -106,15 +116,31 @@ export class SessionHost {
   private readonly eventListeners = new Set<SessionEventsListener>();
   // The models each provider and gateway offer, found once per run of the app.
   private readonly modelLists = new Map<string, Promise<ModelOption[]>>();
+  // The text of each session's messages, which a search by conversation reads (ADR-0014): the
+  // sessions that have one, once listed, and those whose history could not be read in this run.
+  private readonly texts: TextStorage;
+  private readonly stored = new Set<string>();
+  private readonly textsListed: Promise<void>;
+  private readonly unreadable = new Set<string>();
+  // Set as the app quits, which stops the catch-up.
+  private closing = false;
 
-  constructor(providers: readonly Provider[], records: SessionRecords) {
+  constructor(
+    providers: readonly Provider[],
+    records: SessionRecords,
+    texts: TextStorage = memoryTextStorage(),
+  ) {
     this.providers = new Map(providers.map((provider) => [provider.id, provider]));
     this.records = records;
+    this.texts = texts;
     for (const record of records.all()) {
       const hosted = pastSession(record);
       hosted.summary = this.summaryOf(hosted, record.sessionId);
       this.sessions.set(hosted.id, hosted);
     }
+    this.textsListed = texts.ids().then((ids) => {
+      for (const id of ids) this.stored.add(id);
+    }, reportText);
   }
 
   // The providers sessions can start with, in the order the app gave them.
@@ -328,6 +354,7 @@ export class SessionHost {
     if (hosted === undefined) return;
     this.sessions.delete(id);
     this.records.remove(id);
+    this.forgetText(id);
     this.notify();
     await this.close(hosted);
   }
@@ -338,9 +365,16 @@ export class SessionHost {
     const shown = this.sessions.get(id)?.summary;
     if (shown === undefined) return null;
     const action = await ui.sessionMenu(shown);
-    // What the list shows now, which may have changed while the menu was open.
+    if (action === null) return null;
+    return this.act(id, action, ui);
+  }
+
+  // Does to the session what its menu would, once the user confirms where the menu asks; resolves
+  // with what was done, or null.
+  async act(id: string, action: SessionAction, ui: SessionsMenuUi): Promise<SessionAction | null> {
+    // What the list shows now, which may have changed while a menu was open.
     const summary = this.sessions.get(id)?.summary;
-    if (action === null || summary === undefined) return null;
+    if (summary === undefined) return null;
     switch (action) {
       case 'archive': {
         const working = summary.status === 'running' || summary.status === 'waiting';
@@ -375,7 +409,71 @@ export class SessionHost {
 
   // Closes every session and its provider process, as the app does when it quits.
   async closeAll(): Promise<void> {
+    this.closing = true;
     await Promise.allSettled([...this.sessions.values()].map((hosted) => this.close(hosted)));
+  }
+
+  // The sessions of the Sessions list, or of the archived list, whose title and conversation hold every
+  // word of the query, whatever its case, each with the passage of the conversation where the first
+  // word it holds appears, and how many sessions of the list have no text yet. A session read in this
+  // run is searched as its state is now, others as their kept text.
+  async search(query: string, archived: boolean): Promise<SessionSearch> {
+    const words = searchWords(query);
+    await this.textsListed;
+    const listed = [...this.sessions.values()].filter(
+      (hosted) =>
+        hosted.summary !== undefined && (archived ? hosted.archived : this.listed(hosted)),
+    );
+    const matches: SessionSearch['matches'] = [];
+    let unread = 0;
+    const look = async (hosted: Hosted) => {
+      let text: string | undefined;
+      if (!hosted.state.loadingHistory) text = textOf(hosted.state);
+      else if (this.stored.has(hosted.id)) text = await this.texts.read(hosted.id);
+      else if (!this.unreadable.has(hosted.id)) unread += 1;
+      const match = matchOf(words, hosted.summary?.title ?? '', text ?? '');
+      if (match !== null) matches.push({ id: hosted.id, ...match });
+    };
+    for (let start = 0; start < listed.length; start += SEARCH_READS) {
+      await Promise.all(listed.slice(start, start + SEARCH_READS).map(look));
+    }
+    return { matches, unread };
+  }
+
+  // Reads, one at a time and the most recently active first, the history of each session that has no
+  // text yet, keeping its text alone, without resuming it; a session read otherwise meanwhile is
+  // skipped, and one whose history cannot be read is tried again in the next run. Texts of sessions
+  // the app no longer has go first. Stops as the app quits.
+  async catchUp(): Promise<void> {
+    await this.textsListed;
+    for (const id of this.stored) {
+      if (!this.sessions.has(id)) this.forgetText(id);
+    }
+    const waiting = [...this.sessions.values()]
+      .filter((hosted) => !this.stored.has(hosted.id))
+      .sort((left, right) => right.activeAt - left.activeAt);
+    for (const hosted of waiting) {
+      const { sessionId } = hosted;
+      if (this.closing) return;
+      if (sessionId === undefined || this.stored.has(hosted.id) || hosted.reading !== undefined) {
+        continue;
+      }
+      if (this.sessions.get(hosted.id) !== hosted) continue;
+      if (!hosted.state.loadingHistory) {
+        this.keepText(hosted);
+        continue;
+      }
+      try {
+        const past = await this.provider(hosted.provider).history(sessionId, hosted.cwd);
+        // Read otherwise, or gone, meanwhile.
+        if (this.stored.has(hosted.id) || this.sessions.get(hosted.id) !== hosted) continue;
+        this.stored.add(hosted.id);
+        await this.texts.write(hosted.id, textOf(applyEvent(initialSessionState(), pastOf(past))));
+      } catch (error) {
+        this.unreadable.add(hosted.id);
+        console.error('A session’s history could not be read for searching:', error);
+      }
+    }
   }
 
   private provider(providerId: ProviderId): Provider {
@@ -502,6 +600,22 @@ export class SessionHost {
     for (const listener of this.eventListeners) listener(hosted.id, hosted.seq, event);
     this.keep(hosted);
     this.report(hosted);
+    if (TEXT_EVENTS.has(event.type)) this.keepText(hosted);
+  }
+
+  // Keeps the text of the session's messages as they are now, once the provider has started it and
+  // its history, if any, has been read.
+  private keepText(hosted: Hosted): void {
+    if (hosted.sessionId === undefined || hosted.state.loadingHistory) return;
+    this.stored.add(hosted.id);
+    this.unreadable.delete(hosted.id);
+    this.texts.write(hosted.id, textOf(hosted.state)).catch(reportText);
+  }
+
+  private forgetText(id: string): void {
+    this.stored.delete(id);
+    this.unreadable.delete(id);
+    this.texts.remove(id).catch(reportText);
   }
 
   // Keeps what a later run needs to list the session, show its history and resume it as it is now,
@@ -657,4 +771,8 @@ function withoutSecrets(
       ]),
     ),
   };
+}
+
+function reportText(error: unknown): void {
+  console.error('A session’s text could not be kept or read for searching:', error);
 }

@@ -27,7 +27,22 @@
     "newSession": "新建会话",
     "filter": "按工作区筛选会话",
     "allWorkspaces": "所有工作区",
+    "all": "全部",
     "archived": "已归档的会话",
+    "search": {
+      "open": "搜索会话",
+      "placeholder": "搜索",
+      "placeholderIn": "在 {{folder}} 中搜索",
+      "clear": "清除搜索",
+      "none": "没有匹配的会话",
+      "unread_other": "还在读取 {{count}} 个会话…"
+    },
+    "archivedPanel": {
+      "search": "搜索已归档的会话",
+      "count_other": "{{count}} 个会话",
+      "empty": "没有已归档的会话",
+      "none": "没有匹配的已归档会话"
+    },
     "status": {
       "running": "运行中",
       "waiting": "等待你的回应",
@@ -179,6 +194,20 @@
     "close": "关闭面板",
     "resize": "调整面板大小",
     "unsaved": "未存储的更改"
+  },
+  "settings": {
+    "title": "设置",
+    "language": "语言",
+    "languageDetail": "窗口及其菜单和提问所用的语言。“跟随系统”采用 macOS 的首选语言。",
+    "appearance": "外观",
+    "appearanceDetail": "“跟随系统”采用 macOS 的外观。",
+    "system": "跟随系统",
+    "light": "浅色",
+    "dark": "深色",
+    "languages": {
+      "en": "English",
+      "zhHans": "简体中文"
+    }
   },
   "files": {
     "notice": {

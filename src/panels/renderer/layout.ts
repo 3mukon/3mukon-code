@@ -109,8 +109,8 @@ export function contentOf(item: DraggedItem): PanelContent {
   }
 }
 
-// Whether two contents show the same: a session page for the same folder, the same session, or the
-// same file.
+// Whether two contents show the same: a session page for the same folder, the same session, the same
+// file, the archived sessions or the settings.
 export function sameContent(a: PanelContent, b: PanelContent): boolean {
   switch (a.kind) {
     case 'session-page':
@@ -119,14 +119,27 @@ export function sameContent(a: PanelContent, b: PanelContent): boolean {
       return b.kind === 'session' && b.id === a.id;
     case 'file':
       return b.kind === 'file' && b.path === a.path;
+    case 'archived':
+    case 'settings':
+      return b.kind === a.kind;
   }
 }
 
-// The folder a panel's content is in, where a session page opened from it starts.
-export function folderOf(content: PanelContent): string {
-  if (content.kind !== 'file') return content.folder;
-  const parent = content.path.slice(0, content.path.lastIndexOf('/'));
-  return parent === '' ? '/' : parent;
+// The folder a panel's content is in, where a session page opened from it starts; none for the
+// archived sessions or the settings.
+export function folderOf(content: PanelContent): string | null {
+  switch (content.kind) {
+    case 'session-page':
+    case 'session':
+      return content.folder;
+    case 'file': {
+      const parent = content.path.slice(0, content.path.lastIndexOf('/'));
+      return parent === '' ? '/' : parent;
+    }
+    case 'archived':
+    case 'settings':
+      return null;
+  }
 }
 
 // The panels in reading order: a split's first part before its second.

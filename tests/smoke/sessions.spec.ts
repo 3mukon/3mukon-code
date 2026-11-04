@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { channels } from '../../src/app/shared/bridge';
@@ -315,6 +315,66 @@ test('a session has its history read ahead as the pointer rests on its row, and 
   }
 });
 
+test('the Sessions list searches by title and by conversation, from a field in the filter’s place', async () => {
+  const data = dataFolder();
+  const record = (id: string, title: string, activeAt: number) => ({
+    id,
+    provider: 'claude-code',
+    sessionId: `p-${id}`,
+    cwd: '/Users/me/web',
+    title,
+    activeAt,
+    mode: 'auto',
+    gateway: null,
+    model: null,
+    effort: null,
+    sandbox: 'workspace-write',
+  });
+  writeFileSync(
+    join(data.path, 'sessions.json'),
+    JSON.stringify({
+      sessions: [record('first', 'Fix the build', 2), record('second', 'Write the docs', 1)],
+    }),
+  );
+  // The text the app keeps of each session's messages, which a search by conversation reads; with
+  // every session read, a search that finds nothing can say so.
+  mkdirSync(join(data.path, 'session-texts'));
+  writeFileSync(
+    join(data.path, 'session-texts', 'first.txt'),
+    'Fix the build.\n\nThe build passes again.',
+  );
+  writeFileSync(
+    join(data.path, 'session-texts', 'second.txt'),
+    'Why does the parser fail?\n\nThe flaky parser test now retries.',
+  );
+  const app = await launch(data.path);
+  try {
+    const window = await app.firstWindow();
+    const list = window.getByRole('list', { name: 'Sessions' });
+    await expect(list.getByRole('listitem')).toHaveCount(2);
+    await window.getByRole('button', { name: 'Search sessions' }).click();
+    const field = window.getByRole('searchbox', { name: 'Search sessions' });
+    await expect(field).toBeFocused();
+    // By conversation: only the second session's messages speak of the parser.
+    await field.fill('PARSER retries');
+    await expect(list.getByRole('listitem')).toHaveCount(1);
+    await expect(list.getByRole('button', { name: /Write the docs/ })).toBeVisible();
+    // By title.
+    await field.fill('build');
+    await expect(list.getByRole('listitem')).toHaveCount(1);
+    await expect(list.getByRole('button', { name: /Fix the build/ })).toBeVisible();
+    await field.fill('nothing like it');
+    await expect(window.getByText('No sessions match')).toBeVisible();
+    // Escape closes the field, and the list is whole again.
+    await field.press('Escape');
+    await expect(field).toHaveCount(0);
+    await expect(list.getByRole('listitem')).toHaveCount(2);
+  } finally {
+    await app.close();
+    data.remove();
+  }
+});
+
 test('the Sessions list renders only the rows in view, and the archived sessions load only as their list opens', async () => {
   const data = dataFolder();
   // The app's records of an earlier run: the 1,000 sessions the Sessions list keeps, the first the
@@ -372,18 +432,22 @@ test('the Sessions list renders only the rows in view, and the archived sessions
       return root.scrollHeight - root.clientHeight;
     });
     expect(overflow).toBe(0);
-    // The archived sessions are not in the window until their list opens.
+    // The archived sessions are not in the window until their panel opens.
     await expect(window.getByText('Archived 0')).toHaveCount(0);
     await window.getByRole('button', { name: 'Archived sessions' }).click();
-    const dropdown = window.getByRole('group', { name: 'Archived sessions' });
-    await expect(dropdown.getByRole('button', { name: /Archived 0 / })).toBeInViewport();
-    await expect(dropdown.getByRole('listitem')).toHaveCount(3);
-    // One shown from there opens in a panel titled by it, as the dropdown closes.
-    await dropdown.getByRole('button', { name: /Archived 1 / }).click();
-    await expect(
-      window.getByRole('main').getByRole('region', { name: 'Archived 1' }),
-    ).toBeVisible();
-    await expect(dropdown).toBeHidden();
+    const main = window.getByRole('main');
+    const panel = main.getByRole('region', { name: 'Archived sessions' });
+    await expect(panel.getByText('3 sessions')).toBeVisible();
+    const archived = panel.getByRole('list', { name: 'Archived sessions' });
+    await expect(archived.getByRole('button', { name: /Archived 0 / })).toBeInViewport();
+    await expect(archived.getByRole('listitem')).toHaveCount(3);
+    // Its search finds them by title.
+    await panel.getByRole('searchbox', { name: 'Search archived sessions' }).fill('archived 2');
+    await expect(archived.getByRole('listitem')).toHaveCount(1);
+    // One shown from there opens in a panel titled by it, beside the archived sessions' own.
+    await archived.getByRole('button', { name: /Archived 2 / }).click();
+    await expect(main.getByRole('region', { name: 'Archived 2' })).toBeVisible();
+    await expect(panel).toBeVisible();
   } finally {
     await app.close();
     data.remove();

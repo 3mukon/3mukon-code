@@ -44,6 +44,15 @@ export interface SessionList {
   shown: SessionSummary[];
 }
 
+// What a search finds among the sessions of one list, the Sessions list's or the archived list's:
+// those whose title and conversation hold every word of the query, whatever its case, each with the
+// passage of its conversation where the first word it holds appears, and how many sessions of the list
+// the app has not read yet.
+export interface SessionSearch {
+  matches: { id: string; snippet?: string }[];
+  unread: number;
+}
+
 // The settings a session runs with. A null gateway is the provider's own configuration, a null model
 // or effort the provider's default.
 export interface SessionSettings {
@@ -122,6 +131,11 @@ export interface SessionsBridge {
   // Offers the session's menu at the pointer, does what the user chooses once they confirm where it
   // asks, and resolves with what was done, or null.
   showMenu(id: string): Promise<SessionAction | null>;
+  // Does what the session's menu would, once the user confirms where the menu asks, and resolves with
+  // what was done, or null.
+  act(id: string, action: SessionAction): Promise<SessionAction | null>;
+  // Searches the sessions of the Sessions list, or of the archived list, by title and conversation.
+  search(query: string, archived: boolean): Promise<SessionSearch>;
   // The providers the app can start sessions with, in order.
   providers(): Promise<ProviderId[]>;
   // Where a session page opens while no workspace has been added: a folder of the day's date in the

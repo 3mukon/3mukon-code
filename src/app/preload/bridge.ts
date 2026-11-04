@@ -6,9 +6,11 @@ import type {
   ImageAction,
   SessionAction,
   SessionList,
+  SessionSearch,
   SessionSnapshot,
   SessionSummary,
 } from '../../sessions/shared/sessions';
+import type { AppSettings } from '../../settings/shared/settings';
 import type { Prompt } from '../../ui/shared/prompts';
 import type { FolderListing, WorkspaceList } from '../../workspaces/shared/workspaces';
 import { channels, type Bridge } from '../shared/bridge';
@@ -25,7 +27,11 @@ export interface Ipc {
 // The bridge the page gets: a function for each call the main process answers, and subscriptions to
 // what it reports. The page never holds Electron's own objects, and a dropped item reaches the main
 // process only as the path of a file the page was given, never as a path the page names.
-export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bridge {
+export function createBridge(
+  ipc: Ipc,
+  pathForFile: (file: File) => string,
+  initialSettings: AppSettings,
+): Bridge {
   // What the main process answers and reports has the shape the call's interface gives.
   const invoke = (channel: string, ...values: unknown[]) => ipc.invoke(channel, ...values);
   function subscribe(channel: string, listener: (value: unknown) => void): () => void {
@@ -65,6 +71,10 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
       archived: () => invoke(channels.sessions.archived) as Promise<SessionSummary[]>,
       resume: (id, request) => invoke(channels.sessions.resume, id, request) as Promise<void>,
       showMenu: (id) => invoke(channels.sessions.showMenu, id) as Promise<SessionAction | null>,
+      act: (id, action) =>
+        invoke(channels.sessions.act, id, action) as Promise<SessionAction | null>,
+      search: (query, archived) =>
+        invoke(channels.sessions.search, query, archived) as Promise<SessionSearch>,
       providers: () => invoke(channels.sessions.providers) as Promise<ProviderId[]>,
       dayFolder: () => invoke(channels.sessions.dayFolder) as Promise<string>,
       gateways: (provider) => invoke(channels.sessions.gateways, provider) as Promise<string[]>,
@@ -118,6 +128,15 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
         invoke(channels.approvals.answerApproval, sessionId, requestId, answer) as Promise<void>,
       answerQuestion: (sessionId, requestId, answer) =>
         invoke(channels.approvals.answerQuestion, sessionId, requestId, answer) as Promise<void>,
+    },
+    settings: {
+      initial: initialSettings,
+      get: () => invoke(channels.settings.get) as Promise<AppSettings>,
+      set: (change) => invoke(channels.settings.set, change) as Promise<void>,
+      onChange: (listener) =>
+        subscribe(channels.settings.changed, (value) => {
+          listener(value as AppSettings);
+        }),
     },
     prompts: {
       onPrompt: (listener) =>

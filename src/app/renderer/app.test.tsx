@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import { initialSessionState } from '../../sessions/shared/session-state';
 import type { SessionList, SessionSummary } from '../../sessions/shared/sessions';
+import type { AppSettings } from '../../settings/shared/settings';
 import type { WorkspaceList } from '../../workspaces/shared/workspaces';
 import type { Bridge } from '../shared/bridge';
 import { App } from './app';
@@ -39,6 +40,8 @@ function fakeBridge(
       archived: () => Promise.resolve(archived),
       resume: () => Promise.resolve(),
       showMenu: () => Promise.resolve(null),
+      act: () => Promise.resolve(null),
+      search: () => Promise.resolve({ matches: [], unread: 0 }),
       providers: () => Promise.resolve(['claude-code']),
       dayFolder: () => Promise.resolve('/Users/me/3mukon-code/2026-10-28'),
       gateways: () => Promise.resolve([]),
@@ -74,13 +77,14 @@ function fakeBridge(
       answerApproval: () => Promise.resolve(),
       answerQuestion: () => Promise.resolve(),
     },
+    settings: {
+      initial: { language: 'system', appearance: 'system' },
+      get: () => Promise.resolve({ language: 'system', appearance: 'system' }),
+      set: () => Promise.resolve(),
+      onChange: () => () => undefined,
+    },
     prompts: { onPrompt: () => () => undefined, answer: () => Promise.resolve() },
   };
-}
-
-// Opens a popover as the browser would tell it, which happy-dom does not.
-function opened(popover: HTMLElement) {
-  fireEvent(popover, Object.assign(new Event('toggle'), { oldState: 'closed', newState: 'open' }));
 }
 
 // Renders the shell and lets the bridge's first answers arrive.
@@ -211,24 +215,25 @@ describe('App', () => {
     const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
     fireEvent.click(within(sidebar).getByRole('button', { name: label }));
     within(screen.getByRole('main')).getByRole('region', { name: 'Update the docs' });
-    // Just after the archived sessions' button, which keeps its place beside the window buttons; with
-    // the sidebar hidden, both lie in the top-left panel's header.
+    // Just after the archived sessions' button and the settings' gear, which keep their places beside
+    // the window buttons; with the sidebar hidden, all three lie in the top-left panel's header.
     const named = (element: Element | null | undefined) =>
       [...(element?.querySelectorAll('button') ?? [])].map((button) =>
         button.getAttribute('aria-label'),
       );
     expect(named(within(sidebar).getByRole('button', { name: label }).parentElement)).toEqual([
       'Archived sessions',
+      'Settings',
       label,
     ]);
     fireEvent.keyDown(window, { key: 'b', metaKey: true });
     const header = within(screen.getByRole('main'))
       .getByRole('region', { name: 'Update the docs' })
       .querySelector('header');
-    expect(named(header?.firstElementChild)).toEqual(['Archived sessions', label]);
+    expect(named(header?.firstElementChild)).toEqual(['Archived sessions', 'Settings', label]);
   });
 
-  it('lists archived sessions apart, from the button beside the window buttons, and shows one from there', async () => {
+  it('lists archived sessions apart, in a panel the button beside the window buttons opens, which shows one and acts on it', async () => {
     const summary = (id: string, title: string, archived: boolean): SessionSummary => ({
       id,
       provider: 'codex',
@@ -239,25 +244,84 @@ describe('App', () => {
       activeAt: 1,
       ...(archived ? { archived: true } : {}),
     });
-    await renderApp(
-      fakeBridge({ workspaces: [], selectedId: null }, [
-        summary('s1', 'Fix the build', false),
-        summary('s2', 'Old idea', true),
-      ]),
-    );
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      summary('s1', 'Fix the build', false),
+      summary('s2', 'Old idea', true),
+    ]);
+    const act = vi.fn<Bridge['sessions']['act']>(() => Promise.resolve('unarchive'));
+    bridge.sessions.act = act;
+    await renderApp(bridge);
     const sessions = screen.getByRole('region', { name: 'Sessions' });
     within(sessions).getByText('Fix the build');
     expect(within(sessions).queryByText('Old idea')).toBeNull();
+    const main = screen.getByRole('main');
     const button = screen.getByRole('button', { name: 'Archived sessions' });
     expect(button).toHaveProperty('disabled', false);
-    const dropdown = document.getElementById(button.getAttribute('popovertarget') ?? '');
-    if (dropdown === null) throw new Error('no dropdown');
-    opened(dropdown);
-    fireEvent.click(await within(dropdown).findByRole('button', { name: /Old idea/ }));
-    // Its panel is titled by it, and its page has its provider, though the Sessions list lacks it.
-    const panel = within(screen.getByRole('main')).getByRole('region', { name: 'Old idea' });
+    fireEvent.click(button);
+    const archived = within(main).getByRole('region', { name: 'Archived sessions' });
+    expect(within(archived).getByText('1 session')).toBeTruthy();
+    // A second click focuses the same panel.
+    fireEvent.click(button);
+    expect(within(main).getAllByRole('region', { name: 'Archived sessions' })).toHaveLength(1);
+    // A session clicked there opens in a panel titled by it, whose page has its provider, though the
+    // Sessions list lacks it.
+    fireEvent.click(await within(archived).findByRole('button', { name: /Old idea/ }));
+    const panel = within(main).getByRole('region', { name: 'Old idea' });
     await waitFor(() => {
       expect(within(panel).getByText('Codex CLI')).toBeTruthy();
+    });
+    // Its row unarchives it without its menu.
+    fireEvent.click(within(archived).getByRole('button', { name: 'Unarchive' }));
+    expect(act.mock.calls).toEqual([['s2', 'unarchive']]);
+  });
+
+  it('opens the settings in a panel of their own with the gear or ⌘,, and the window takes the language they choose', async () => {
+    const bridge = fakeBridge();
+    let current: AppSettings = { language: 'system', appearance: 'system' };
+    const listeners = new Set<(settings: AppSettings) => void>();
+    const set = vi.fn<Bridge['settings']['set']>((change) => {
+      current = { ...current, ...change };
+      for (const listener of listeners) listener(current);
+      return Promise.resolve();
+    });
+    bridge.settings = {
+      initial: current,
+      get: () => Promise.resolve(current),
+      set,
+      onChange: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    await renderApp(bridge);
+    const main = screen.getByRole('main');
+    const gear = screen.getByRole('button', { name: 'Settings' });
+    // The gear lies just after the archived sessions' button, beside the window buttons.
+    expect(screen.getByRole('button', { name: 'Archived sessions' }).nextElementSibling).toBe(gear);
+    fireEvent.click(gear);
+    const settings = within(main).getByRole('region', { name: 'Settings' });
+    expect(fireEvent.keyDown(window, { key: ',', metaKey: true })).toBe(false);
+    expect(within(main).getAllByRole('region', { name: 'Settings' })).toHaveLength(1);
+    const language = within(settings).getByRole('radiogroup', { name: 'Language' });
+    within(language).getByRole('radio', { name: 'System', checked: true });
+    // Choosing Simplified Chinese changes the window's language at once.
+    await act(async () => {
+      fireEvent.click(within(language).getByRole('radio', { name: '简体中文' }));
+      await Promise.resolve();
+    });
+    expect(set).toHaveBeenCalledWith({ language: 'zh-Hans' });
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: '会话' })).toBeTruthy();
+    });
+    expect(document.documentElement.lang).toBe('zh-Hans');
+    await act(async () => {
+      fireEvent.click(within(main).getByRole('radio', { name: 'English' }));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Sessions' })).toBeTruthy();
     });
   });
 

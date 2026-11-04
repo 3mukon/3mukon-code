@@ -166,13 +166,17 @@ export function PanelArea({
       if (command === null || focused === undefined) return;
       let nextFocus: string | undefined;
       switch (command.type) {
-        case 'split':
-          panels.open([{ kind: 'session-page', folder: folderOf(focused.content) }], {
+        case 'split': {
+          // A panel without a folder, such as the settings, has no folder to open a page in.
+          const folder = folderOf(focused.content);
+          if (folder === null) return;
+          panels.open([{ kind: 'session-page', folder }], {
             kind: 'beside',
             panelId: focused.id,
             side: command.side,
           });
           break;
+        }
         case 'close':
           whenClosable(focused, () => {
             panels.close(focused.id);
@@ -378,6 +382,8 @@ export function PanelArea({
         if (box === undefined) return null;
         const own = describe(panel.content, t('panels.sessionPage'));
         const shown = view?.(panel) ?? {};
+        const detail = shown.detail ?? own.detail;
+        const detailTitle = shown.detailTitle ?? own.path;
         return (
           <div
             key={panel.id}
@@ -393,8 +399,8 @@ export function PanelArea({
                 };
               }}
               title={shown.title ?? own.title}
-              detail={shown.detail ?? own.detail}
-              detailTitle={shown.detailTitle ?? own.path}
+              {...(detail === undefined ? {} : { detail })}
+              {...(detailTitle === undefined ? {} : { detailTitle })}
               {...(shown.status === undefined ? {} : { status: shown.status })}
               {...(shown.statusLabel === undefined ? {} : { statusLabel: shown.statusLabel })}
               unsaved={shown.unsaved ?? false}
@@ -562,13 +568,31 @@ function openingAt(target: DropTarget): Target {
 }
 
 // A panel's own title, and its folder's name with the full path: a session page or session goes by
-// the given title, a file by its name.
-function describe(content: PanelContent, sessionPage: string) {
-  const path = folderOf(content);
-  const folder = nameOf(path);
-  return content.kind === 'file'
-    ? { title: nameOf(content.path), detail: folder, path: content.path }
-    : { title: sessionPage, detail: folder, path };
+// the given title, a file by its name; the archived sessions and the settings have neither, and go by
+// the title whoever composes the area gives them.
+function describe(
+  content: PanelContent,
+  sessionPage: string,
+): { title: string; detail?: string; path?: string } {
+  switch (content.kind) {
+    case 'file':
+      return {
+        title: nameOf(content.path),
+        detail: nameOf(folderOfFile(content.path)),
+        path: content.path,
+      };
+    case 'session-page':
+    case 'session':
+      return { title: sessionPage, detail: nameOf(content.folder), path: content.folder };
+    case 'archived':
+    case 'settings':
+      return { title: '' };
+  }
+}
+
+function folderOfFile(path: string): string {
+  const parent = path.slice(0, path.lastIndexOf('/'));
+  return parent === '' ? '/' : parent;
 }
 
 // The last name in a path, or the path itself for the startup disk's root.

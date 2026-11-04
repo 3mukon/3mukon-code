@@ -4,16 +4,20 @@ import { Request } from '../../approvals/renderer/requests';
 import { WaitingButton } from '../../approvals/renderer/waiting-button';
 import { nextWaiting } from '../../approvals/shared/waiting';
 import { useFileEditors } from '../../files/renderer/use-file-editors';
-import { contentOf, panelsOf, type Panel } from '../../panels/renderer/layout';
+import { contentOf, panelsOf, sameContent, type Panel } from '../../panels/renderer/layout';
 import { PanelArea, type PanelAreaHandle, type PanelView } from '../../panels/renderer/panel-area';
 import { usePanels } from '../../panels/renderer/use-panels';
-import type { SessionSummary } from '../../sessions/shared/sessions';
-import { ArchivedSessions } from '../../sessions/renderer/archived-sessions';
+import type { PanelContent } from '../../panels/shared/panels';
+import type { SessionAction, SessionSummary } from '../../sessions/shared/sessions';
+import { ArchivedButton, ArchivedPanel } from '../../sessions/renderer/archived-panel';
 import { SessionPage } from '../../sessions/renderer/session-page';
 import { SessionsSection } from '../../sessions/renderer/sessions-section';
 import { statusDots } from '../../sessions/renderer/timeline';
 import { preloadOffers } from '../../sessions/renderer/use-offers';
 import { useSessions } from '../../sessions/renderer/use-sessions';
+import { SettingsPanel } from '../../settings/renderer/settings-panel';
+import { useSettings } from '../../settings/renderer/use-settings';
+import { Gear } from '../../ui/renderer/icons';
 import { useWorkspaces } from '../../workspaces/renderer/use-workspaces';
 import type { TreeItem } from '../../workspaces/renderer/workspace-tree';
 import { WorkspacesSection } from '../../workspaces/renderer/workspaces-section';
@@ -33,13 +37,15 @@ import { PromptHost } from './prompt-host';
 // it from the keyboard. New session opens a session page in the selected workspace's folder, or while
 // there is none in the day's folder in ~/3mukon-code; a session in the lists shows in its first
 // panel, or opens in one, and so does a file opened from a tree. The lists have a session's history
-// read ahead as the user reaches for it. A session's menu archives, unarchives or removes it, and a
-// removed session's panels close. Session pages and sessions fill their panels, titled by the session
-// once it runs, a page going on as its session's page once it starts it, and files open in editors,
-// which mark unsaved changes and ask about them before their panels close. As the window opens, it
-// asks for what session pages offer, each provider's models among them, so that a page has them when
-// it opens.
-// The menus and questions the main process asks the user show over it, in the app's own look.
+// read ahead as the user reaches for it, and search through the bridge. A session's menu archives,
+// unarchives or removes it, and a removed session's panels close. Session pages and sessions fill
+// their panels, titled by the session once it runs, a page going on as its session's page once it
+// starts it, and files open in editors, which mark unsaved changes and ask about them before their
+// panels close. The archived sessions' button opens their panel, and ⌘, or the gear just after the
+// app's name opens the settings' panel; each shows in one panel, which opening it again focuses. The
+// window's language follows the settings. As the window opens, it asks for what session pages offer,
+// each provider's models among them, so that a page has them when it opens. The menus and questions
+// the main process asks the user show over it, in the app's own look.
 export function App({ bridge }: { bridge: Bridge }) {
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -48,6 +54,7 @@ export function App({ bridge }: { bridge: Bridge }) {
   // The archived session last opened from the archived list, as the list showed it, until the main
   // process gives it among the sessions the window has shown.
   const [opening, setOpening] = useState<SessionSummary | null>(null);
+  const settings = useSettings(bridge.settings);
   const panels = usePanels();
   const area = useRef<PanelAreaHandle>(null);
   const fileEditors = useFileEditors(bridge.files);
@@ -79,16 +86,32 @@ export function App({ bridge }: { bridge: Bridge }) {
     else panels.open([{ kind: 'session', id: session.id, folder: session.cwd }]);
   };
 
-  // A session's menu, from either list; the panels of a session removed from the lists close.
-  const showSessionMenu = (session: SessionSummary) => {
-    bridge.sessions.showMenu(session.id).then((done) => {
-      if (done !== 'remove') return;
-      for (const panel of panelsOf(panels.layout)) {
-        if (panel.content.kind === 'session' && panel.content.id === session.id) {
-          panels.close(panel.id);
-        }
+  // The archived sessions' panel, or the settings', of which one shows: opening it again focuses it.
+  const openOwnPanel = (content: PanelContent) => {
+    const shown = panelsOf(panels.layout).find((panel) => sameContent(panel.content, content));
+    if (shown !== undefined) panels.focus(shown.id);
+    else panels.open([content]);
+  };
+
+  // The panels of a session removed from the lists close.
+  const afterAction = (session: SessionSummary) => (done: SessionAction | null) => {
+    if (done !== 'remove') return;
+    for (const panel of panelsOf(panels.layout)) {
+      if (panel.content.kind === 'session' && panel.content.id === session.id) {
+        panels.close(panel.id);
       }
-    }, reportMenu);
+    }
+  };
+
+  // A session's menu, from either list.
+  const showSessionMenu = (session: SessionSummary) => {
+    bridge.sessions.showMenu(session.id).then(afterAction(session), reportMenu);
+  };
+
+  // What an archived session's row does without its menu: unarchive it, or remove it once the user
+  // confirms.
+  const actOnArchived = (session: SessionSummary, action: SessionAction) => {
+    bridge.sessions.act(session.id, action).then(afterAction(session), reportMenu);
   };
 
   // Reads a session's history ahead of showing it, from either list.
@@ -102,17 +125,27 @@ export function App({ bridge }: { bridge: Bridge }) {
     setRequestFocus((previous) => ({ sessionId: session.id, key: (previous?.key ?? 0) + 1 }));
   };
 
-  // Beside the window buttons: the archived sessions' button, then the count of sessions waiting on
-  // the user, which shows the one that has waited longest.
+  // Beside the window buttons: the archived sessions' button, the settings' gear, whose panel ⌘, opens
+  // too, then the count of sessions waiting on the user, which shows the one that has waited longest.
   const besideWindowButtons = (
     <div className="flex shrink-0 items-center gap-1">
-      <ArchivedSessions
-        bridge={bridge.sessions}
+      <ArchivedButton
         count={sessions.archived}
-        onOpenSession={openSession}
-        onSessionMenu={showSessionMenu}
-        onReadAhead={readAhead}
+        onOpen={() => {
+          openOwnPanel({ kind: 'archived' });
+        }}
       />
+      <button
+        type="button"
+        onClick={() => {
+          openOwnPanel({ kind: 'settings' });
+        }}
+        aria-label={t('settings.title')}
+        title={t('settings.title')}
+        className="grid size-5 shrink-0 place-items-center rounded-md text-faint [-webkit-app-region:no-drag] hover:bg-hover hover:text-ink"
+      >
+        <Gear className="size-3.5" />
+      </button>
       <WaitingButton sessions={sessions.sessions} onShow={showWaiting} />
     </div>
   );
@@ -137,6 +170,28 @@ export function App({ bridge }: { bridge: Bridge }) {
     if (content.kind === 'file') {
       const file = fileEditors.panel(panel.id, content.path);
       return { body: file.body, unsaved: file.unsaved, confirmClose: file.confirmClose };
+    }
+    if (content.kind === 'settings') {
+      return {
+        title: t('settings.title'),
+        body: <SettingsPanel settings={settings.settings} onChange={settings.change} />,
+      };
+    }
+    if (content.kind === 'archived') {
+      return {
+        title: t('sessions.archived'),
+        detail: t('sessions.archivedPanel.count', { count: sessions.archived }),
+        body: (
+          <ArchivedPanel
+            bridge={bridge.sessions}
+            count={sessions.archived}
+            onOpenSession={openSession}
+            onSessionMenu={showSessionMenu}
+            onAct={actOnArchived}
+            onReadAhead={readAhead}
+          />
+        ),
+      };
     }
     const sessionId = content.kind === 'session' ? content.id : null;
     const summary = sessionId === null ? undefined : summaryOf(sessionId);
@@ -206,6 +261,20 @@ export function App({ bridge }: { bridge: Bridge }) {
     };
   });
 
+  // ⌘, opens the settings' panel, or focuses it.
+  useEffect(() => {
+    const openSettings = (event: KeyboardEvent) => {
+      const onlyCommand = event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey;
+      if (!onlyCommand || event.key !== ',') return;
+      event.preventDefault();
+      openOwnPanel({ kind: 'settings' });
+    };
+    window.addEventListener('keydown', openSettings);
+    return () => {
+      window.removeEventListener('keydown', openSettings);
+    };
+  });
+
   useEffect(() => {
     const toggleSidebar = (event: KeyboardEvent) => {
       const onlyCommand = event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey;
@@ -228,8 +297,8 @@ export function App({ bridge }: { bridge: Bridge }) {
       >
         <div className="flex h-full w-[220px] flex-col border-r border-line">
           {/* The sidebar's part of the title bar, where macOS draws the traffic lights, with the
-              archived sessions' button and the count of sessions waiting on the user just after
-              them; no line separates it from the rest of the sidebar. */}
+              archived sessions' button, the settings' gear and the count of sessions waiting on the
+              user just after them; no line separates it from the rest of the sidebar. */}
           <div className="flex h-10 shrink-0 items-center pl-[84px] [-webkit-app-region:drag]">
             {sidebarOpen && besideWindowButtons}
           </div>
@@ -249,6 +318,7 @@ export function App({ bridge }: { bridge: Bridge }) {
             <SessionsSection
               sessions={sessions.sessions}
               folders={workspaces.workspaces}
+              bridge={bridge.sessions}
               onNewSession={openNewSession}
               onOpenSession={openSession}
               onSessionMenu={showSessionMenu}

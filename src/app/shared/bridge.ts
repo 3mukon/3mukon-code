@@ -2,6 +2,7 @@ import type { ApprovalsBridge } from '../../approvals/shared/approvals';
 import type { FilesBridge } from '../../files/shared/files';
 import type { PanelsBridge } from '../../panels/shared/panels';
 import type { SessionsBridge } from '../../sessions/shared/sessions';
+import type { SettingsBridge } from '../../settings/shared/settings';
 import type { Prompt } from '../../ui/shared/prompts';
 import type { WorkspacesBridge } from '../../workspaces/shared/workspaces';
 
@@ -13,6 +14,7 @@ export interface Bridge {
   panels: PanelsBridge;
   files: FilesBridge;
   approvals: ApprovalsBridge;
+  settings: SettingsBridge;
   prompts: PromptsBridge;
 }
 
@@ -24,6 +26,10 @@ export interface PromptsBridge {
   // Answers the prompt: a menu's chosen item's id, or null, or a question's answer's id.
   answer(id: number, answer: string | null): Promise<void>;
 }
+
+// The command-line switch by which a window's page gets the settings as the window opens, before it
+// can ask for them, with the settings as URI-encoded JSON.
+export const settingsSwitch = '--app-settings=';
 
 // The bridge's IPC channels: one per call the main process answers, and one per notification it sends.
 export const channels = {
@@ -42,6 +48,8 @@ export const channels = {
     archived: 'sessions:archived',
     resume: 'sessions:resume',
     showMenu: 'sessions:show-menu',
+    act: 'sessions:act',
+    search: 'sessions:search',
     providers: 'sessions:providers',
     dayFolder: 'sessions:day-folder',
     gateways: 'sessions:gateways',
@@ -78,6 +86,11 @@ export const channels = {
   approvals: {
     answerApproval: 'approvals:answer-approval',
     answerQuestion: 'approvals:answer-question',
+  },
+  settings: {
+    get: 'settings:get',
+    set: 'settings:set',
+    changed: 'settings:changed',
   },
   prompts: {
     show: 'prompts:show',

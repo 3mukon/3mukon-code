@@ -1,7 +1,8 @@
-import { homedir } from 'node:os';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { withApp } from './app';
+import { answerQuestion, dataFolder, launch, pickFolder, withApp } from './app';
 
 test('the app opens its window on the built page, without Node.js and sandboxed', async () => {
   await withApp(async (electronApp) => {
@@ -39,7 +40,7 @@ test('the page reaches the main process only through the bridge’s functions', 
       };
     });
     expect(bridge).toEqual({
-      parts: ['approvals', 'files', 'panels', 'prompts', 'sessions', 'workspaces'],
+      parts: ['approvals', 'files', 'panels', 'prompts', 'sessions', 'settings', 'workspaces'],
       calls: [
         [
           'workspaces',
@@ -56,6 +57,7 @@ test('the page reaches the main process only through the bridge’s functions', 
         [
           'sessions',
           [
+            'act:function',
             'archived:function',
             'choices:function',
             'confirmYolo:function',
@@ -74,6 +76,7 @@ test('the page reaches the main process only through the bridge’s functions', 
             'rememberChoice:function',
             'resume:function',
             'saveImage:function',
+            'search:function',
             'send:function',
             'setEffort:function',
             'setGateway:function',
@@ -97,6 +100,7 @@ test('the page reaches the main process only through the bridge’s functions', 
           ],
         ],
         ['approvals', ['answerApproval:function', 'answerQuestion:function']],
+        ['settings', ['get:function', 'initial:object', 'onChange:function', 'set:function']],
         ['prompts', ['answer:function', 'onPrompt:function']],
       ],
       electron: [],
@@ -148,8 +152,12 @@ test('the traffic lights are centred in the 40px title bar, on one line with the
     const button = await window.getByRole('button', { name: 'Archived sessions' }).boundingBox();
     if (button === null) throw new Error('The archived sessions’ button is not shown.');
     expect(button.y + button.height / 2).toBe(13 + 14 / 2);
-    // It lies just after them.
+    // It lies just after them, and the settings' gear just after it, on the same line.
     expect(button.x).toBe(84);
+    const gear = await window.getByRole('button', { name: 'Settings' }).boundingBox();
+    if (gear === null) throw new Error('The settings’ gear is not shown.');
+    expect(gear.y + gear.height / 2).toBe(13 + 14 / 2);
+    expect(gear.x).toBe(button.x + button.width + 4);
   });
 });
 
@@ -174,6 +182,46 @@ test('Add workspace and New session are plus icons just after their headings, on
     const sessions = await window.getByRole('heading', { name: 'Sessions' }).boundingBox();
     expect(workspaces?.y).toBeLessThan(sessions?.y ?? 0);
   });
+});
+
+test('the Sessions heading, New session, the workspace filter and the search glass share one centre line', async () => {
+  const data = dataFolder();
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), 'smoke-row-')));
+  try {
+    const app = await launch(data.path);
+    try {
+      const window = await app.firstWindow();
+      await pickFolder(app, folder);
+      await window.getByRole('button', { name: 'Add workspace' }).click();
+      await answerQuestion(window, 'Trust');
+      const sessions = window.getByRole('region', { name: 'Sessions' });
+      const parts = [
+        sessions.getByRole('heading', { name: 'Sessions' }),
+        sessions.getByRole('button', { name: 'New session' }),
+        sessions.getByRole('combobox', { name: 'Filter sessions by workspace' }),
+        // The filter's own text, which stands on the heading's baseline.
+        sessions.locator('span[aria-hidden="true"]').filter({ hasText: /^All$/ }),
+        sessions.getByRole('button', { name: 'Search sessions' }),
+      ];
+      await expect(parts[2] ?? sessions).toBeVisible();
+      const middles = await Promise.all(
+        parts.map(async (part) => {
+          const box = await part.boundingBox();
+          if (box === null) throw new Error('A part of the heading’s row is not shown.');
+          return box.y + box.height / 2;
+        }),
+      );
+      for (const middle of middles) expect(Math.abs(middle - (middles[0] ?? 0))).toBeLessThan(0.5);
+      // The filter's select covers nothing beside its text: the glass takes its own click.
+      await sessions.getByRole('button', { name: 'Search sessions' }).click();
+      await expect(sessions.getByRole('searchbox', { name: 'Search sessions' })).toBeFocused();
+    } finally {
+      await app.close();
+    }
+  } finally {
+    data.remove();
+    rmSync(folder, { recursive: true, force: true });
+  }
 });
 
 test('the sidebar heading is bold and sits just below the title bar', async () => {
