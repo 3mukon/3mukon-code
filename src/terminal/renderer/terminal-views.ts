@@ -2,6 +2,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal, type ITheme } from '@xterm/xterm';
 import type { TerminalBridge } from '../shared/terminal';
+import { FirstDraw } from './first-draw';
 
 // What a terminal says once its program ends, in the window's language.
 export type ExitNote = (code: number) => string;
@@ -13,6 +14,8 @@ interface View {
   // moving or splitting the panel keeps what the terminal shows.
   element: HTMLDivElement;
   opened: boolean;
+  // Keeps the element clear until the program's first output has been drawn.
+  firstDraw: FirstDraw;
 }
 
 // How many lines a terminal keeps above what shows, in memory while its panel is open.
@@ -20,10 +23,11 @@ const SCROLLBACK = 5_000;
 
 // The window's terminals as xterm.js draws them (ADR-0015), one emulator per terminal, kept while the
 // terminal's panel is open and moved with it; a terminal's program starts once its emulator gives its
-// size. What a terminal prints goes to its emulator, held until
-// the emulator exists, and what the user types goes back through the bridge; nothing else reads or
-// keeps either (ADR-0016). The emulators take their colours and font from the tokens, and take them
-// anew when the appearance changes.
+// size. A new terminal stays clear until its emulator has drawn the program's first output, such as
+// the shell's prompt, and then fades in, so that its prompt shows whole (first-draw.ts). What a
+// terminal prints goes to its emulator, held until the emulator exists, and what the user types goes
+// back through the bridge; nothing else reads or keeps either (ADR-0016). The emulators take their
+// colours and font from the tokens, and take them anew when the appearance changes.
 export class TerminalViews {
   private readonly views = new Map<string, View>();
   // What terminals printed, and the exits of their programs, before their emulators existed.
@@ -36,12 +40,12 @@ export class TerminalViews {
   ) {
     bridge.onOutput((id, data) => {
       const view = this.views.get(id);
-      if (view !== undefined) view.terminal.write(data);
+      if (view !== undefined) write(view, data);
       else this.early.set(id, [...(this.early.get(id) ?? []), data]);
     });
     bridge.onExit((id, code) => {
       const view = this.views.get(id);
-      if (view !== undefined) view.terminal.write(`\r\n\x1b[2m${this.exitNote(code)}\x1b[22m\r\n`);
+      if (view !== undefined) this.writeExit(view, code);
       else this.exits.set(id, code);
     });
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -60,11 +64,12 @@ export class TerminalViews {
     if (first) {
       view.terminal.open(view.element);
       view.opened = true;
-      for (const data of this.early.get(id) ?? []) view.terminal.write(data);
+      view.firstDraw.open();
+      for (const data of this.early.get(id) ?? []) write(view, data);
       this.early.delete(id);
       const code = this.exits.get(id);
       if (code !== undefined) {
-        view.terminal.write(`\r\n\x1b[2m${this.exitNote(code)}\x1b[22m\r\n`);
+        this.writeExit(view, code);
         this.exits.delete(id);
       }
     }
@@ -93,10 +98,19 @@ export class TerminalViews {
 
   // Forgets the terminal, as its panel closes.
   dispose(id: string): void {
-    this.views.get(id)?.terminal.dispose();
+    const view = this.views.get(id);
+    view?.firstDraw.dispose();
+    view?.terminal.dispose();
     this.views.delete(id);
     this.early.delete(id);
     this.exits.delete(id);
+  }
+
+  // Says that the terminal's program has ended, and shows the terminal as soon as that is drawn.
+  private writeExit(view: View, code: number): void {
+    view.terminal.write(`\r\n\x1b[2m${this.exitNote(code)}\x1b[22m\r\n`, () => {
+      view.firstDraw.now();
+    });
   }
 
   private create(id: string): View {
@@ -132,11 +146,22 @@ export class TerminalViews {
       this.bridge.resize(id, cols, rows).catch(report);
     });
     const element = document.createElement('div');
-    element.className = 'h-full w-full';
-    const view: View = { terminal, fit, element, opened: false };
+    // Clear until the program's first output has been drawn, and then fading in.
+    element.className = 'h-full w-full opacity-0 transition-opacity motion-reduce:transition-none';
+    const firstDraw = new FirstDraw(() => {
+      element.classList.remove('opacity-0');
+    });
+    const view: View = { terminal, fit, element, opened: false, firstDraw };
     this.views.set(id, view);
     return view;
   }
+}
+
+// Gives the emulator what the program printed; once it has taken it in, the terminal may show.
+function write(view: View, data: string): void {
+  view.terminal.write(data, () => {
+    view.firstDraw.output();
+  });
 }
 
 // The emulator's colours in the e-ink look, from the tokens as the page now has them (DOC-mod-ui): ink
@@ -145,7 +170,9 @@ export class TerminalViews {
 // cyan in the paper's softer ink, their bright forms in full ink, rather than hues that change with
 // the appearance. Black and white take the paper's and the ink's sides of the appearance, so that both
 // stay readable. The selection is the darker paper the user's messages sit on, and the scroll bar is
-// drawn in the lines' ink.
+// drawn in the lines' ink. The clear background is the paper's colour made clear, which the emulator
+// draws as nothing and gives as the paper to a program that asks for the terminal's background, as
+// Codex does to shade its composer and choose its text colours: plain clear would tell it black.
 export function themeFromTokens(): ITheme {
   const style = getComputedStyle(document.documentElement);
   const token = (name: string) => style.getPropertyValue(`--${name}`).trim();
@@ -154,7 +181,7 @@ export function themeFromTokens(): ITheme {
   const soft = token('muted');
   const faint = token('faint');
   return {
-    background: 'rgba(0, 0, 0, 0)',
+    background: clear(token('frame')),
     foreground: ink,
     cursor: ink,
     cursorAccent: token('frame'),
@@ -180,6 +207,23 @@ export function themeFromTokens(): ITheme {
     brightCyan: ink,
     brightWhite: dark ? ink : soft,
   };
+}
+
+// The colour made wholly clear, keeping its red, green and blue, as the window draws them.
+function clear(css: string): string {
+  const [red, green, blue] = rgbOf(css);
+  return `rgba(${String(red)}, ${String(green)}, ${String(blue)}, 0)`;
+}
+
+// A CSS colour's red, green and blue as the window's canvas draws it, whatever its notation; black
+// for one it cannot draw.
+function rgbOf(css: string): [number, number, number] {
+  const context = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  if (context === null) return [0, 0, 0];
+  context.fillStyle = css;
+  context.fillRect(0, 0, 1, 1);
+  const [red = 0, green = 0, blue = 0] = context.getImageData(0, 0, 1, 1).data;
+  return [red, green, blue];
 }
 
 // The tokens' monospaced font, SF Mono on macOS.

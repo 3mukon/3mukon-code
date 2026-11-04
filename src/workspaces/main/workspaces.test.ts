@@ -35,6 +35,7 @@ function memoryStorage(initial: StoredWorkspaces = { workspaces: [], selectedId:
 function answers({ pick, trust = {} }: { pick?: string; trust?: Record<string, boolean> } = {}) {
   const asked: string[] = [];
   let menu: WorkspaceActions | undefined;
+  let folderMenus = 0;
   const ui: WorkspacesUi = {
     pickFolder: () => Promise.resolve(pick),
     askTrust: (name) => {
@@ -45,8 +46,12 @@ function answers({ pick, trust = {} }: { pick?: string; trust?: Record<string, b
       menu = actions;
       return Promise.resolve(null);
     },
+    showFolderMenu: () => {
+      folderMenus += 1;
+      return Promise.resolve('open-in-terminal');
+    },
   };
-  return { ui, asked, menu: () => menu };
+  return { ui, asked, menu: () => menu, folderMenus: () => folderMenus };
 }
 
 const names = (list: WorkspaceList) => list.workspaces.map((workspace) => workspace.name);
@@ -118,6 +123,7 @@ describe('Workspaces', () => {
         return true;
       },
       showMenu: vi.fn(),
+      showFolderMenu: vi.fn(),
     };
     await Promise.all([workspaces.addFolders([web], ui), workspaces.add(ui)]);
     expect(overlapped).toBe(false);
@@ -176,14 +182,27 @@ describe('Workspaces', () => {
     await workspaces.addFolders([web, api], answers().ui);
     const [id] = workspaces.list().workspaces.map((workspace) => workspace.id);
     const user = answers();
-    await workspaces.showMenu(id ?? '', user.ui);
+    await workspaces.showMenu(id ?? '', '', user.ui);
     user.menu()?.setTrusted(false);
     expect(workspaces.list().workspaces[0]?.trusted).toBe(false);
     user.menu()?.remove();
     expect(names(workspaces.list())).toEqual(['api']);
     const nobody = answers();
-    expect(await workspaces.showMenu('unknown', nobody.ui)).toBeNull();
+    expect(await workspaces.showMenu('unknown', '', nobody.ui)).toBeNull();
     expect(nobody.menu()).toBeUndefined();
+  });
+
+  it('shows a folder’s menu for a folder inside a workspace, leaving Open in Terminal to the window', async () => {
+    const workspaces = new Workspaces(memoryStorage());
+    await workspaces.addFolders([web], answers().ui);
+    const [id] = workspaces.list().workspaces.map((workspace) => workspace.id);
+    const user = answers();
+    expect(await workspaces.showMenu(id ?? '', 'src/app', user.ui)).toBe('open-in-terminal');
+    expect(user.folderMenus()).toBe(1);
+    expect(user.menu()).toBeUndefined();
+    const nobody = answers();
+    expect(await workspaces.showMenu('unknown', 'src', nobody.ui)).toBeNull();
+    expect(nobody.folderMenus()).toBe(0);
   });
 
   it('keeps the list and the selection in the app’s data', async () => {

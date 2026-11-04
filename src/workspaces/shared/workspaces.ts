@@ -41,10 +41,12 @@ export interface WorkspacesBridge {
   // Adds the folders among the dropped items, asking for each whether the user trusts it.
   addDropped(items: readonly File[]): Promise<void>;
   select(id: string): Promise<void>;
-  // Shows the workspace's menu, from which the user opens its folder in a terminal, changes their
-  // trust answer or removes it; resolves with what the window is to do, opening the folder in a
-  // terminal, or null.
-  showMenu(id: string): Promise<WorkspaceMenuChoice | null>;
+  // Shows the menu of a row of the workspace's tree, by its path relative to the workspace's folder:
+  // the workspace's own for '', from which the user opens its folder in a terminal, changes their
+  // trust answer or removes it, and a folder's inside it for its path, from which the user opens the
+  // folder in a terminal; resolves with what the window is to do, opening the folder in a terminal,
+  // or null.
+  showMenu(id: string, path: string): Promise<WorkspaceMenuChoice | null>;
   listFolder(id: string, path: string): Promise<FolderListing>;
 }
 

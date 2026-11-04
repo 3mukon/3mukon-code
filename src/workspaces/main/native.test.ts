@@ -53,4 +53,15 @@ describe('windowWorkspacesUi', () => {
       expect(actions.remove).toHaveBeenCalledTimes(called === 'remove' ? 1 : 0);
     }
   });
+
+  it('offers Open in Terminal in the menu of a folder inside a workspace', async () => {
+    for (const chosen of ['open-in-terminal', null] as const) {
+      const menu = vi.fn<Prompts['menu']>(() => Promise.resolve(chosen));
+      const answer = await windowWorkspacesUi(window, { menu, ask: vi.fn() }, t).showFolderMenu();
+      expect(menu.mock.calls[0]?.[0]).toEqual([
+        { id: 'open-in-terminal', label: 'Open in Terminal' },
+      ]);
+      expect(answer).toBe(chosen);
+    }
+  });
 });

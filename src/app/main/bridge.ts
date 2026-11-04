@@ -183,8 +183,8 @@ export function serveBridge({
   handle(channels.workspaces.select, z.tuple([id]), (_window, workspace) => {
     workspaces.select(workspace);
   });
-  handle(channels.workspaces.showMenu, z.tuple([id]), (window, workspace) =>
-    workspaces.showMenu(workspace, workspacesUi(window)),
+  handle(channels.workspaces.showMenu, z.tuple([id, path]), (window, workspace, folder) =>
+    workspaces.showMenu(workspace, folder, workspacesUi(window)),
   );
   handle(channels.workspaces.listFolder, z.tuple([id, path]), (_window, workspace, folder) =>
     workspaces.listFolder(workspace, folder),

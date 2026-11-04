@@ -61,7 +61,7 @@ interface WorkspaceTreeProps {
   onPressItem?: (item: TreeItem, press: PointerEvent<HTMLElement>) => void;
   // Opens a row elsewhere, as dropping it would.
   onOpenItem?: (item: TreeItem) => void;
-  // Opens a terminal in a workspace's folder, as its menu asks.
+  // Opens a terminal in a workspace's folder, or in a folder inside it, as the row's menu asks.
   onOpenInTerminal?: ((folder: string) => void) | undefined;
 }
 
@@ -69,7 +69,8 @@ interface WorkspaceTreeProps {
 // folders open; a folder read again each time it opens shows what it holds then. A click opens or
 // closes a folder at once, and a workspace once no second press has followed it within the wait
 // (click-wait.ts); a double click selects a workspace without opening or closing it, and Return or
-// Space selects it too; a workspace's menu opens with a secondary click or VoiceOver's menu command.
+// Space selects it too; a workspace's menu, or a folder's inside it, opens with a secondary click or
+// VoiceOver's menu command.
 // The keyboard moves as in macOS lists: up and down, right to open or go in, left to close or go out,
 // Home and End. A press on any row goes to whoever drags rows elsewhere, and every row opens
 // elsewhere with ⌘↓, as in the Finder, or with Return or Space on a file.
@@ -334,10 +335,10 @@ export function WorkspaceTree({
             if (event.target === event.currentTarget) setFocusKey(item.key);
           }}
           onContextMenu={(event) => {
-            if (item.kind !== 'workspace' || !isOwnRow(event)) return;
+            if (item.kind === 'file' || !isOwnRow(event)) return;
             event.preventDefault();
-            const folder = item.workspace.path;
-            bridge.showMenu(item.workspace.id).then((chosen) => {
+            const folder = itemOf(item).path;
+            bridge.showMenu(item.workspace.id, item.path).then((chosen) => {
               if (chosen === 'open-in-terminal') onOpenInTerminal?.(folder);
             }, report);
           }}

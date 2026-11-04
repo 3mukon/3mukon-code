@@ -47,5 +47,11 @@ export function windowWorkspacesUi(
       else if (chosen === 'remove') actions.remove();
       return null;
     },
+    async showFolderMenu() {
+      const chosen = await prompts.menu([
+        { id: 'open-in-terminal', label: t('workspaces.menu.openInTerminal') },
+      ]);
+      return chosen === 'open-in-terminal' ? 'open-in-terminal' : null;
+    },
   };
 }

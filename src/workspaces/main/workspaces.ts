@@ -20,6 +20,8 @@ export interface WorkspacesUi {
   // Shows the workspace's menu; choosing one of its items calls the matching action, and resolves
   // with what the window is to do, or null.
   showMenu(workspace: Workspace, actions: WorkspaceActions): Promise<WorkspaceMenuChoice | null>;
+  // Shows the menu of a folder inside a workspace; resolves with what the window is to do, or null.
+  showFolderMenu(): Promise<WorkspaceMenuChoice | null>;
 }
 
 export interface WorkspaceActions {
@@ -112,9 +114,12 @@ export class Workspaces {
     this.update({ workspaces, selectedId });
   }
 
-  showMenu(id: string, ui: WorkspacesUi): Promise<WorkspaceMenuChoice | null> {
+  // The menu of a row of the workspace's tree: the workspace's own for '', and a folder's inside it
+  // for its path, relative to the workspace's folder.
+  showMenu(id: string, path: string, ui: WorkspacesUi): Promise<WorkspaceMenuChoice | null> {
     const workspace = this.list().workspaces.find((candidate) => candidate.id === id);
     if (workspace === undefined) return Promise.resolve(null);
+    if (path !== '') return ui.showFolderMenu();
     return ui.showMenu(workspace, {
       setTrusted: (trusted) => {
         this.setTrusted(id, trusted);

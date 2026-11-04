@@ -64,8 +64,8 @@ export function createBridge(
           items.map((item) => pathForFile(item)),
         ) as Promise<void>,
       select: (id) => invoke(channels.workspaces.select, id) as Promise<void>,
-      showMenu: (id) =>
-        invoke(channels.workspaces.showMenu, id) as Promise<WorkspaceMenuChoice | null>,
+      showMenu: (id, path) =>
+        invoke(channels.workspaces.showMenu, id, path) as Promise<WorkspaceMenuChoice | null>,
       listFolder: (id, path) =>
         invoke(channels.workspaces.listFolder, id, path) as Promise<FolderListing>,
     },

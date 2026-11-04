@@ -274,28 +274,37 @@ describe('WorkspacesSection', () => {
     expect(bridge.select).not.toHaveBeenCalled();
   });
 
-  it('opens a workspace’s menu with a secondary click on its row, but not from the rows inside it', async () => {
+  it('opens the menu of a workspace’s row, or of a folder’s inside it, with a secondary click, and none for a file', async () => {
     const bridge = renderSection();
     fireEvent.contextMenu(line('web'));
-    expect(bridge.showMenu.mock.calls).toEqual([['w1']]);
+    expect(bridge.showMenu.mock.calls).toEqual([['w1', '']]);
     fireEvent.click(line('web'));
     await waitForSecondClick();
+    // A folder's row opens its own menu, and not its workspace's too.
+    fireEvent.contextMenu(line('src'));
     fireEvent.contextMenu(line('README.md'));
-    expect(bridge.showMenu).toHaveBeenCalledOnce();
+    expect(bridge.showMenu.mock.calls).toEqual([
+      ['w1', ''],
+      ['w1', 'src'],
+    ]);
   });
 
-  it('opens a terminal in the workspace’s folder when its menu asks for one', async () => {
+  it('opens a terminal in the folder of the row whose menu asks for one', async () => {
     const bridge = fakeBridge();
     bridge.showMenu.mockResolvedValue('open-in-terminal');
     const onOpenInTerminal = vi.fn();
     render(<WorkspacesSection bridge={bridge} list={list} onOpenInTerminal={onOpenInTerminal} />);
     fireEvent.contextMenu(line('web'));
     await settle();
-    expect(onOpenInTerminal.mock.calls).toEqual([[list.workspaces[0]?.path]]);
-    bridge.showMenu.mockResolvedValue(null);
-    fireEvent.contextMenu(line('web'));
+    fireEvent.click(line('web'));
+    await waitForSecondClick();
+    fireEvent.contextMenu(line('src'));
     await settle();
-    expect(onOpenInTerminal).toHaveBeenCalledOnce();
+    expect(onOpenInTerminal.mock.calls).toEqual([['/Users/me/web'], ['/Users/me/web/src']]);
+    bridge.showMenu.mockResolvedValue(null);
+    fireEvent.contextMenu(line('src'));
+    await settle();
+    expect(onOpenInTerminal).toHaveBeenCalledTimes(2);
   });
 
   it('hands a press on a row to whoever drags it elsewhere, as a folder or a file by its absolute path, and never drags as the system does', async () => {

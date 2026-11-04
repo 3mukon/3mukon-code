@@ -32,7 +32,7 @@ describe('createBridge', () => {
     expect(await bridge.workspaces.get()).toBe('answer');
     await bridge.workspaces.add();
     await bridge.workspaces.select('w1');
-    await bridge.workspaces.showMenu('w1');
+    await bridge.workspaces.showMenu('w1', 'src');
     await bridge.workspaces.listFolder('w1', 'src/app');
     await bridge.sessions.list();
     await bridge.sessions.archived();
@@ -90,7 +90,7 @@ describe('createBridge', () => {
       ['workspaces:get'],
       ['workspaces:add'],
       ['workspaces:select', 'w1'],
-      ['workspaces:show-menu', 'w1'],
+      ['workspaces:show-menu', 'w1', 'src'],
       ['workspaces:list-folder', 'w1', 'src/app'],
       ['sessions:list'],
       ['sessions:archived'],
