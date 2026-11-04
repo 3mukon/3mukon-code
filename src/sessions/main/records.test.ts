@@ -124,4 +124,16 @@ describe('recordStorage', () => {
     );
     expect(recordStorage(folder).load()).toEqual([codex]);
   });
+
+  it('keeps the context a session last took, and leaves out one of another shape rather than the session', () => {
+    const counted: SessionRecord = { ...codex, context: { used: 25_000, size: 200_000 } };
+    const unsized: SessionRecord = { ...codex, id: 'a6', context: { used: 1_000, size: null } };
+    writeFileSync(
+      join(folder, 'sessions.json'),
+      JSON.stringify({
+        sessions: [counted, unsized, { ...codex, id: 'a7', context: { used: -1, size: 0 } }],
+      }),
+    );
+    expect(recordStorage(folder).load()).toEqual([counted, unsized, { ...codex, id: 'a7' }]);
+  });
 });

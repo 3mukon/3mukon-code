@@ -430,7 +430,7 @@ describe('SessionHost', () => {
 });
 
 describe('SessionHost history', () => {
-  it('keeps each session it starts, with its title, its latest activity and the settings it has now, for later runs', async () => {
+  it('keeps each session it starts, with its title, its latest activity, the context it takes and the settings it has now, for later runs', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(5_000);
     const claude = fakeProvider('claude-code');
@@ -469,15 +469,18 @@ describe('SessionHost history', () => {
     emit({ type: 'title', title: 'Build fixes' });
     vi.setSystemTime(7_000);
     emit({ type: 'turn-ended', outcome: 'completed' });
+    emit({ type: 'context', used: 25_000, size: 200_000 });
     const titled = { ...started, title: 'Fix the build' };
     const switched = { ...titled, activeAt: 6_000, model: null, effort: null };
+    const ended = { ...switched, mode: 'auto' as const, title: 'Build fixes', activeAt: 7_000 };
     expect(saved.slice(1)).toEqual([
       [titled],
       [{ ...titled, activeAt: 6_000 }],
       [switched],
       [{ ...switched, mode: 'auto' }],
       [{ ...switched, mode: 'auto', title: 'Build fixes' }],
-      [{ ...switched, mode: 'auto', title: 'Build fixes', activeAt: 7_000 }],
+      [ended],
+      [{ ...ended, context: { used: 25_000, size: 200_000 } }],
     ]);
   });
 
@@ -612,6 +615,17 @@ describe('SessionHost history', () => {
     });
     expect(host.list().sessions[0]).toMatchObject({ status: 'closed', activeAt: 1_000 });
     expect(claude.resumed).toEqual([]);
+    expect(saved).toEqual([]);
+  });
+
+  it('shows the context a session of an earlier run last took, which only its provider’s process counts, before and after its history is read', async () => {
+    const claude = fakeProvider('claude-code');
+    const context = { used: 25_000, size: 200_000 };
+    const { records, saved } = memoryRecords([kept({ context })]);
+    const host = new SessionHost([claude.provider], records);
+    expect(host.snapshot('kept')).toMatchObject({ state: { loadingHistory: true, context } });
+    await settle();
+    expect(host.snapshot('kept')).toMatchObject({ state: { loadingHistory: false, context } });
     expect(saved).toEqual([]);
   });
 

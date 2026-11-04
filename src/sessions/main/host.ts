@@ -620,12 +620,14 @@ export class SessionHost {
 
   // Keeps what a later run needs to list the session, show its history and resume it as it is now,
   // once the provider has started it: its title as the list shows it, its latest activity, whether it
-  // is archived, and the settings it has, saved when they change.
+  // is archived, how much of its context window it took when the provider last said, and the settings
+  // it has, saved when they change.
   private keep(hosted: Hosted): void {
     const { sessionId, state, chosen } = hosted;
     if (sessionId === undefined) return;
     const before = this.records.get(hosted.id);
     const title = titleOf(state) ?? before?.title;
+    const context = state.context ?? before?.context;
     const record: SessionRecord = {
       id: hosted.id,
       provider: hosted.provider,
@@ -634,6 +636,7 @@ export class SessionHost {
       ...(title === undefined ? {} : { title }),
       activeAt: hosted.activeAt,
       ...(hosted.archived ? { archived: true } : {}),
+      ...(context === undefined ? {} : { context }),
       mode: state.mode ?? chosen.mode,
       gateway: state.gateway === undefined ? chosen.gateway : state.gateway,
       model: state.model === undefined ? chosen.model : state.model,
@@ -703,10 +706,11 @@ function withinTime<Value>(promise: Promise<Value>, ms: number, message: string)
   });
 }
 
-// A session of an earlier run, not running, with the settings it last had. Its history is read from
-// its provider when it is first shown.
+// A session of an earlier run, not running, with the settings it last had and the context it last
+// took, which only the provider's process counts. Its history is read from its provider when it is
+// first shown.
 function pastSession(record: SessionRecord): Hosted {
-  const { mode, gateway, model, effort, sandbox } = record;
+  const { mode, gateway, model, effort, sandbox, context } = record;
   return {
     id: record.id,
     provider: record.provider,
@@ -715,7 +719,16 @@ function pastSession(record: SessionRecord): Hosted {
     activeAt: record.activeAt,
     archived: record.archived === true,
     chosen: { mode, gateway, model, effort, sandbox },
-    state: { ...initialSessionState(true), closed: true, mode, gateway, model, effort, sandbox },
+    state: {
+      ...initialSessionState(true),
+      closed: true,
+      mode,
+      gateway,
+      model,
+      effort,
+      sandbox,
+      ...(context === undefined ? {} : { context }),
+    },
     seq: 0,
     runs: 0,
     shown: false,

@@ -24,7 +24,16 @@ export interface SessionRecord extends SessionSettings {
   activeAt: number;
   // The session is in the archived list instead of the Sessions list.
   archived?: true;
+  // How much of the model's context window the conversation took when the provider last said, which a
+  // later run shows until the session runs again.
+  context?: { used: number; size: number | null };
 }
+
+// A context that is not of this shape is left out, rather than the session with it.
+const storedContext = z
+  .object({ used: z.number().nonnegative(), size: z.number().positive().nullable() })
+  .optional()
+  .catch(undefined);
 
 const storedRecord = z.object({
   id: z.string().min(1),
@@ -34,6 +43,7 @@ const storedRecord = z.object({
   title: z.string().optional(),
   activeAt: z.number(),
   archived: z.literal(true).optional(),
+  context: storedContext,
   mode: z.enum(['auto', 'yolo']),
   gateway: z.string().nullable(),
   model: z.string().nullable(),
@@ -63,12 +73,13 @@ export function recordStorage(folder: string): RecordStorage {
       return entries.flatMap((entry): SessionRecord[] => {
         const parsed = storedRecord.safeParse(entry);
         if (!parsed.success) return [];
-        const { title, archived, ...record } = parsed.data;
+        const { title, archived, context, ...record } = parsed.data;
         return [
           {
             ...record,
             ...(title === undefined ? {} : { title }),
             ...(archived === undefined ? {} : { archived }),
+            ...(context === undefined ? {} : { context }),
           },
         ];
       });
