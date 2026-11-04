@@ -43,6 +43,7 @@ function answers({ pick, trust = {} }: { pick?: string; trust?: Record<string, b
     },
     showMenu: (_workspace, actions) => {
       menu = actions;
+      return Promise.resolve(null);
     },
   };
   return { ui, asked, menu: () => menu };
@@ -175,13 +176,13 @@ describe('Workspaces', () => {
     await workspaces.addFolders([web, api], answers().ui);
     const [id] = workspaces.list().workspaces.map((workspace) => workspace.id);
     const user = answers();
-    workspaces.showMenu(id ?? '', user.ui);
+    await workspaces.showMenu(id ?? '', user.ui);
     user.menu()?.setTrusted(false);
     expect(workspaces.list().workspaces[0]?.trusted).toBe(false);
     user.menu()?.remove();
     expect(names(workspaces.list())).toEqual(['api']);
     const nobody = answers();
-    workspaces.showMenu('unknown', nobody.ui);
+    expect(await workspaces.showMenu('unknown', nobody.ui)).toBeNull();
     expect(nobody.menu()).toBeUndefined();
   });
 

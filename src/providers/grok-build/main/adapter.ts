@@ -35,6 +35,8 @@ import type {
   SandboxLevel,
   SessionEvent,
 } from '../../../sessions/shared/events';
+import type { AccountNews, AccountSource } from '../../../accounts/main/source';
+import { isSignInError, readGrokAccount } from './account';
 import { bundledGrokBinary } from './binary';
 import { spawnGrok, type GrokProcess, type StartGrok } from './process';
 import {
@@ -126,21 +128,39 @@ interface Agent {
 
 type Connect = (cwd: string, sandbox: SandboxLevel, handlers: Handlers) => Promise<Agent>;
 
-// Grok Build through its ACP agent mode (ADR-0003), on whatever sign-in Grok itself has. Grok asks its
-// questions through its own question tool, so its sessions do not use the app's toolset.
-export function createGrokBuildProvider(options: GrokBuildProviderOptions): Provider {
+// How the sessions take part in Grok's account (ADR-0017): those running lend their processes to the
+// account's calls, and pass on that a turn failed for want of a sign-in.
+interface AccountLink {
+  readonly sessions: Set<GrokSession>;
+  hear(news: AccountNews): void;
+}
+
+// Grok Build through its ACP agent mode (ADR-0003), on whatever sign-in Grok itself has, and that
+// sign-in's account with its plan's current period (ADR-0017). Grok asks its questions through its own
+// question tool, so its sessions do not use the app's toolset.
+export function createGrokBuildProvider(
+  options: GrokBuildProviderOptions,
+): Provider & AccountSource {
   const startGrok =
     'startGrok' in options ? options.startGrok : startBundledGrok(options.binaryFolder);
+  const binaryFolder = 'binaryFolder' in options ? options.binaryFolder : undefined;
   const clientVersion = options.clientVersion ?? '0.0.0';
   const connect: Connect = (cwd, sandbox, handlers) =>
     connectGrok(startGrok, cwd, sandbox, handlers, clientVersion);
+  const listeners = new Set<(news: AccountNews) => void>();
+  const link: AccountLink = {
+    sessions: new Set(),
+    hear(news) {
+      for (const listener of listeners) listener(news);
+    },
+  };
   return {
     id: 'grok-build',
     start(options, onEvent) {
-      return GrokSession.open(options, null, connect, onEvent);
+      return GrokSession.open(options, null, connect, link, onEvent);
     },
     resume(options, onEvent) {
-      return GrokSession.open(options, options.sessionId, connect, onEvent);
+      return GrokSession.open(options, options.sessionId, connect, link, onEvent);
     },
     // Grok replays a session to the process that loads it, so a short-lived process in the read-only
     // profile loads it and ends; nothing is sent to the session.
@@ -203,6 +223,33 @@ export function createGrokBuildProvider(options: GrokBuildProviderOptions): Prov
         probeFolders.delete(cwd);
         await rm(cwd, { recursive: true, force: true });
       }
+    },
+    // Through a running session's process, or else a short-lived one in a throwaway folder.
+    async readAccount(withUsage) {
+      for (const session of link.sessions) {
+        const connection = session.accountConnection();
+        if (connection !== null) return readGrokAccount(connection, withUsage);
+      }
+      const cwd = await mkdtemp(join(tmpdir(), 'grok-account-'));
+      probeFolders.add(cwd);
+      try {
+        return await withGrok(connect, cwd, ({ connection }) =>
+          readGrokAccount(connection, withUsage),
+        );
+      } finally {
+        probeFolders.delete(cwd);
+        await rm(cwd, { recursive: true, force: true });
+      }
+    },
+    async signInCommand() {
+      if (binaryFolder === undefined) throw new Error('This Grok Build has no binary of its own.');
+      return { file: await bundledGrokBinary(binaryFolder), args: ['login'] };
+    },
+    onAccountNews(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   };
 }
@@ -455,10 +502,11 @@ class GrokSession implements ProviderSession {
     options: StartOptions,
     resumeId: string | null,
     connect: Connect,
+    link: AccountLink,
     onEvent: SessionEventListener,
   ): Promise<GrokSession> {
     const settings = sessionSettings(options);
-    const session = new GrokSession(settings, connect, onEvent);
+    const session = new GrokSession(settings, connect, link, onEvent);
     const attached = await session.attach(resumeId === null ? null : { load: true, resumeId });
     session.use(attached);
     try {
@@ -479,15 +527,23 @@ class GrokSession implements ProviderSession {
       await stopAgent(attached.agent);
       throw error;
     }
+    link.sessions.add(session);
     return session;
   }
 
   private constructor(
     private readonly settings: SessionSettings,
     private readonly connect: Connect,
+    private readonly link: AccountLink,
     private readonly onEvent: SessionEventListener,
   ) {
     this.translator = new Translator(settings.cwd);
+  }
+
+  // The session's process, for the account's calls, while it runs; null while it is being replaced
+  // and once the session has ended.
+  accountConnection(): ClientConnection | null {
+    return this.closed || this.generation === 0 ? null : this.agent.connection;
   }
 
   async send(text: string, images: MessageImage[] = []): Promise<void> {
@@ -563,6 +619,7 @@ class GrokSession implements ProviderSession {
       },
       (error: unknown) => {
         if (connection.signal.aborted) return;
+        if (isSignInError(error)) this.link.hear({ type: 'signed-out' });
         this.endTurn({ type: 'turn-ended', outcome: 'failed', error: errorMessage(error) });
       },
     );
@@ -925,6 +982,7 @@ class GrokSession implements ProviderSession {
     if (this.closed) return;
     this.withdrawAll();
     this.closed = true;
+    this.link.sessions.delete(this);
     this.turnRunning = false;
     this.queued = [];
     this.onEvent(error === undefined ? { type: 'closed' } : { type: 'closed', error });

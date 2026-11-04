@@ -61,6 +61,8 @@ interface WorkspaceTreeProps {
   onPressItem?: (item: TreeItem, press: PointerEvent<HTMLElement>) => void;
   // Opens a row elsewhere, as dropping it would.
   onOpenItem?: (item: TreeItem) => void;
+  // Opens a terminal in a workspace's folder, as its menu asks.
+  onOpenInTerminal?: ((folder: string) => void) | undefined;
 }
 
 // The workspaces as a tree, each expanding into its folder tree, which is read folder by folder as
@@ -77,6 +79,7 @@ export function WorkspaceTree({
   labelledBy,
   onPressItem,
   onOpenItem,
+  onOpenInTerminal,
 }: WorkspaceTreeProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
@@ -333,7 +336,10 @@ export function WorkspaceTree({
           onContextMenu={(event) => {
             if (item.kind !== 'workspace' || !isOwnRow(event)) return;
             event.preventDefault();
-            bridge.showMenu(item.workspace.id).catch(report);
+            const folder = item.workspace.path;
+            bridge.showMenu(item.workspace.id).then((chosen) => {
+              if (chosen === 'open-in-terminal') onOpenInTerminal?.(folder);
+            }, report);
           }}
           className="focus-visible:outline-none [&:focus-visible>div]:outline-2 [&:focus-visible>div]:-outline-offset-2 [&:focus-visible>div]:outline-accent"
         >

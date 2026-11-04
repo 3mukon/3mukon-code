@@ -27,21 +27,22 @@ tags: []
 - Translation (`main/translate.ts`): assistant text and thinking stream in as message deltas, and the complete message that follows adds only its tool calls; the image blocks a tool result holds, such as an image file Read returns, show with its call, and those of a user message in a transcript with that message; tool calls become tool events in ACP's tool kinds; TodoWrite, TaskCreate and TaskUpdate become the task list; Edit and Write become file changes, with unified diffs from the edit tools' structured patches, or rebuilt from an edit's strings in a transcript; each turn's init message gives the mode, while the session's model stays the one it chose, which its list knows: the init message names the model as Claude Code resolved it, such as `claude-opus-5-5` for `opus`; results end turns. An error that Claude Code gives instead of an answer, such as a missing sign-in, is reported once, with the turn that fails.
 - Approvals and questions (`main/requests.ts`): every `canUseTool` call becomes an approval, or a question for AskUserQuestion; ExitPlanMode, which ends a plan mode that Claude entered by itself, becomes a plan approval, after which the session returns to its own mode. A denial can carry the user's message, which Claude Code gives the model as the reason (`denialMessage`). "Allow for the session" adds Claude Code's suggested rules for the session only, and is offered only when Claude Code suggests rules that may be kept. Answers to questions go back in the tool's input, keyed by question text. Questions reach the user in `yolo` too: Claude Code sends AskUserQuestion to `canUseTool` even in `bypassPermissions`, although the SDK warns that `canUseTool` is not invoked there; the live test checks it.
 - Paths in tool calls, approvals and file changes are relative to the session's folder when they lie inside it.
+- The account (`main/account.ts`, ADR-0017): the adapter also implements the accounts module's `AccountSource`. The sign-in comes from `claude auth status --json`, run from the SDK's own Claude Code binary for macOS on Apple silicon: another backend when its API provider is not Anthropic's own, a subscription when it names one, otherwise a key. A subscription's windows come from the SDK's experimental usage call with `skipBehaviors`, through a running session's query on Claude Code's own sign-in, or else a probe that initializes like the models' probe and is closed; it may answer without windows, as when the usage endpoint refuses the sign-in Claude Code holds, and the read then says that the sign-in could not fetch them, or, when Claude Code could not be asked, that it could not. A session on Claude Code's own sign-in passes on each `rate_limit_event`, its use a fraction and its reset in seconds, and an assistant message whose error is `authentication_failed`. `claude auth login` is the sign-in command.
 
 ## Not responsible for
 
-- Signing in: Claude Code signs in through its own `/login` and keeps its credentials itself; this module never reads or passes them (ADR-0008). Without a sign-in, a turn fails with Claude Code's own message.
+- Signing in: Claude Code signs in through its own `claude auth login`, which the app runs in a terminal, or `/login`, and keeps its credentials itself; this module never reads or passes them (ADR-0008, ADR-0016). Without a sign-in, a turn fails with Claude Code's own message.
 - The app's toolset (ADR-0012): Claude Code asks the user through its own AskUserQuestion in every mode, and its sessions do not open the toolset.
 - Subagents' activity and Claude Code's background tasks: not shown in this version.
 - Hosting: the main process runs the adapter. A packaged app opened from the Finder does not inherit the shell's PATH, which Claude Code's commands may need; packaging has to provide it.
 
 ## Interface
 
-- `createClaudeCodeProvider(options)` from `main/adapter.ts`, which returns a `Provider` (DOC-mod-sessions); `options.gatewaysDir` replaces the gateways folder, for tests.
+- `createClaudeCodeProvider(options)` from `main/adapter.ts`, which returns a `Provider` (DOC-mod-sessions) that is also an `AccountSource` (DOC-mod-accounts); `options.gatewaysDir` replaces the gateways folder, for tests.
 
 ## Dependencies
 
-- Uses only the sessions module's interface and model (`src/sessions/main/provider.ts` and `src/sessions/shared/`), the Claude Agent SDK, `diff` and Node.js built-ins. The rules `providers-only-to-sessions-contract` and `providers-not-to-each-other` in `.dependency-cruiser.js` enforce this.
+- Uses only the sessions module's interface and model (`src/sessions/main/provider.ts` and `src/sessions/shared/`), the accounts module's interface and model (`src/accounts/main/source.ts` and `src/accounts/shared/`), the Claude Agent SDK, `zod`, `diff` and Node.js built-ins. The rules `providers-only-to-sessions-and-accounts-contracts` and `providers-not-to-each-other` in `.dependency-cruiser.js` enforce this.
 - Only the app module, which hosts providers, may import it.
 
 ## Invariants

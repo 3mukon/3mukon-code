@@ -24,6 +24,8 @@ import type {
   SessionEvent,
 } from '../../../sessions/shared/events';
 import { imageUrl } from '../../../sessions/shared/images';
+import type { AccountNews, AccountSource } from '../../../accounts/main/source';
+import { isSignInError, readCodexAccount, resetCodexLimits, updatedWindows } from './account';
 import { bundledCodexBinary } from './binary';
 import { defaultGatewaysDir, listGateways, readGateway, redact } from './gateways';
 import type { InitializeParams } from './protocol/InitializeParams';
@@ -153,27 +155,58 @@ export interface CodexProviderOptions {
 // Opens a connection to a new app-server and starts the protocol on it.
 type Connect = (cwd: string, handlers: RpcHandlers, launch?: Launch) => Promise<Rpc>;
 
+// How the sessions take part in Codex's account (ADR-0017): those running on Codex's own sign-in lend
+// their app-servers to the account's calls, and pass on what Codex reports of the account.
+interface AccountLink {
+  readonly sessions: Set<CodexSession>;
+  hear(news: AccountNews): void;
+}
+
 const startBundledCodex: StartRpc = (cwd, handlers, launch) =>
   CodexRpc.start(bundledCodexBinary(), cwd, handlers, launch);
 
-// Codex through its app-server (ADR-0003), on whatever sign-in Codex itself has.
+// Codex through its app-server (ADR-0003), on whatever sign-in Codex itself has, and that sign-in's
+// account, with its usage limits and their resets (ADR-0017).
 export function createCodexProvider({
   toolset,
   gatewaysDir = defaultGatewaysDir(),
   startRpc = startBundledCodex,
   clientVersion = '0.0.0',
-}: CodexProviderOptions): Provider {
+}: CodexProviderOptions): Provider & AccountSource {
   const connect: Connect = (cwd, handlers, launch) =>
     initialize(startRpc(cwd, handlers, launch), clientVersion);
+  const listeners = new Set<(news: AccountNews) => void>();
+  const link: AccountLink = {
+    sessions: new Set(),
+    hear(news) {
+      for (const listener of listeners) listener(news);
+    },
+  };
+  // An account call through a running session's app-server on Codex's own sign-in, or else through a
+  // short-lived one in a throwaway folder.
+  const withAccount = async <Result>(use: (rpc: Rpc) => Promise<Result>): Promise<Result> => {
+    for (const session of link.sessions) {
+      const rpc = session.accountRpc();
+      if (rpc !== null) return use(rpc);
+    }
+    const cwd = await mkdtemp(join(tmpdir(), 'codex-account-'));
+    probeFolders.add(cwd);
+    try {
+      return await withCodex(connect, cwd, use);
+    } finally {
+      probeFolders.delete(cwd);
+      await rm(cwd, { recursive: true, force: true });
+    }
+  };
   return {
     id: 'codex',
     start(options, onEvent) {
       const settings = sessionSettings(options, gatewaysDir);
-      return CodexSession.open(settings, null, connect, toolset, onEvent);
+      return CodexSession.open(settings, null, connect, toolset, link, onEvent);
     },
     resume(options, onEvent) {
       const settings = sessionSettings(options, gatewaysDir);
-      return CodexSession.open(settings, options.sessionId, connect, toolset, onEvent);
+      return CodexSession.open(settings, options.sessionId, connect, toolset, link, onEvent);
     },
     // Read through a short-lived app-server, which lists the thread's turns without loading it.
     history(sessionId, cwd) {
@@ -211,6 +244,21 @@ export function createCodexProvider({
         probeFolders.delete(cwd);
         await rm(cwd, { recursive: true, force: true });
       }
+    },
+    readAccount(withUsage) {
+      return withAccount((rpc) => readCodexAccount(rpc, withUsage));
+    },
+    signInCommand() {
+      return Promise.resolve({ file: bundledCodexBinary(), args: ['login'] });
+    },
+    resetLimits() {
+      return withAccount(resetCodexLimits);
+    },
+    onAccountNews(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   };
 }
@@ -397,9 +445,10 @@ class CodexSession implements ProviderSession {
     resumeId: string | null,
     connect: Connect,
     toolset: Toolset,
+    link: AccountLink,
     onEvent: SessionEventListener,
   ): Promise<CodexSession> {
-    const session = new CodexSession(settings, connect, toolset, onEvent);
+    const session = new CodexSession(settings, connect, toolset, link, onEvent);
     let attached: Attached;
     try {
       attached = await session.attach(resumeId);
@@ -424,6 +473,7 @@ class CodexSession implements ProviderSession {
       session.access.close();
       throw error;
     }
+    link.sessions.add(session);
     return session;
   }
 
@@ -431,6 +481,7 @@ class CodexSession implements ProviderSession {
     private readonly settings: SessionSettings,
     private readonly connect: Connect,
     toolset: Toolset,
+    private readonly link: AccountLink,
     private readonly onEvent: SessionEventListener,
   ) {
     this.translator = new Translator(settings.cwd);
@@ -712,7 +763,25 @@ class CodexSession implements ProviderSession {
     await this.refreshModels(attached.gatewayModel);
   }
 
+  // The session's app-server, for the account's calls, while it runs on Codex's own sign-in; null
+  // through a gateway, whose account is the gateway's, during a gateway switch and once it has ended.
+  accountRpc(): Rpc | null {
+    return this.closed || this.generation === 0 || this.settings.gateway !== null ? null : this.rpc;
+  }
+
   private notification(method: string, params: unknown): void {
+    // The account's rate limits as they change during turns, on Codex's own sign-in; a gateway's
+    // limits are not the account's.
+    if (method === 'account/rateLimits/updated') {
+      const windows = updatedWindows(params);
+      if (this.settings.gateway === null && windows.length > 0) {
+        this.link.hear({ type: 'usage', windows });
+      }
+      return;
+    }
+    if (method === 'error' && this.settings.gateway === null && isSignInError(params)) {
+      this.link.hear({ type: 'signed-out' });
+    }
     if (method === 'serverRequest/resolved') {
       this.withdraw(String((params as ServerRequestResolvedNotification).requestId));
       return;
@@ -892,6 +961,7 @@ class CodexSession implements ProviderSession {
   private finish(error: string | undefined): void {
     if (this.closed) return;
     this.closed = true;
+    this.link.sessions.delete(this);
     this.turnRunning = false;
     this.resolveAsyncQuestions('cancelled');
     this.queued = [];

@@ -9,6 +9,7 @@ import {
   Copy as LucideCopy,
   FileText as LucideFileText,
   FolderInput as LucideFolderInput,
+  Gauge as LucideGauge,
   Globe as LucideGlobe,
   Pencil as LucidePencil,
   Plus as LucidePlus,
@@ -56,3 +57,4 @@ export const CircleQuestionMark = decorative(LucideCircleQuestionMark);
 export const Archive = decorative(LucideArchive);
 export const ArchiveRestore = decorative(LucideArchiveRestore);
 export const Gear = decorative(LucideSettings);
+export const Gauge = decorative(LucideGauge);

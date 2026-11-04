@@ -1,4 +1,4 @@
-import { startTransition, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SelectOption } from '../../ui/renderer/select';
 import type {
@@ -57,6 +57,16 @@ function startingEffort(model: ModelOption | undefined): ReasoningEffort | null 
   return model?.defaultEffort ?? null;
 }
 
+// What the page shows of the providers' accounts, which whoever composes the page gives it.
+export interface AccountViews {
+  // Whether the provider is known not to be signed in, which its choice says.
+  signedOut(provider: ProviderId): boolean;
+  // Says that the provider is not signed in and offers its sign-in, at the top of the activity.
+  signIn(provider: ProviderId): ReactNode;
+  // The provider's notice of its usage limits, beside the context in use, or null.
+  notice(provider: ProviderId): ReactNode;
+}
+
 interface SessionPageProps {
   bridge: SessionsBridge;
   // The folder the session works in, or will work in.
@@ -69,6 +79,8 @@ interface SessionPageProps {
   onStarted: (id: string) => void;
   // Shows the session's approvals and questions in its activity, with what answers them.
   renderRequest?: RenderRequest;
+  // The providers' sign-ins and usage limits.
+  accounts?: AccountViews;
 }
 
 // A session page. Before its first message it chooses the provider, gateway, model, reasoning effort,
@@ -94,6 +106,7 @@ export function SessionPage({
   summary,
   onStarted,
   renderRequest,
+  accounts,
 }: SessionPageProps) {
   const { t } = useTranslation();
   const state = useSession(bridge, sessionId);
@@ -372,7 +385,10 @@ export function SessionPage({
           // The chosen provider alone until the app's providers come.
           options: (offers.providers ?? [provider]).map((id) => ({
             value: id,
-            label: t(`providers.${id}`),
+            label:
+              accounts?.signedOut(id) === true
+                ? t('sessions.page.notSignedIn', { provider: t(`providers.${id}`) })
+                : t(`providers.${id}`),
           })),
           onChange: switchTo.provider,
         }
@@ -450,6 +466,8 @@ export function SessionPage({
     },
   ];
 
+  const notice = accounts?.notice(provider) ?? null;
+
   return (
     <TimelineActionsContext value={actions}>
       <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[1fr_auto]">
@@ -465,6 +483,7 @@ export function SessionPage({
           className="relative min-h-0 overflow-y-auto px-5 pt-2 pb-5 font-mono text-[12.5px]/[1.75] text-muted"
         >
           <div ref={activity}>
+            {accounts?.signedOut(provider) === true && accounts.signIn(provider)}
             {/* Said only once the history has taken a while, so that one read quickly, or ahead,
                 shows at once in its place. */}
             {closed && state.loadingHistory && (
@@ -489,14 +508,14 @@ export function SessionPage({
           {...attachments.dropZone}
           className={`mx-5 mb-3 rounded-md ${attachments.dropping ? 'outline-2 outline-offset-2 outline-accent outline-dashed' : ''}`}
         >
-          {/* The divider above the composer, with the context in use near its end. */}
+          {/* The divider above the composer, with the provider's notice of its usage limits and the
+              context in use near its end. */}
           <div className="flex h-4 items-center gap-2">
             <div className="h-px min-w-0 flex-1 bg-line" />
-            {state?.context !== undefined && (
-              <>
-                <ContextUsage {...state.context} />
-                <div className="h-px w-3 shrink-0 bg-line" />
-              </>
+            {notice}
+            {state?.context !== undefined && <ContextUsage {...state.context} />}
+            {(state?.context !== undefined || notice !== null) && (
+              <div className="h-px w-3 shrink-0 bg-line" />
             )}
           </div>
           {attachments.attached.length > 0 && (

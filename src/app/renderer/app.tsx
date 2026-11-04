@@ -1,22 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { AccountsButton, AccountsPanel } from '../../accounts/renderer/accounts-panel';
+import { SignInPrompt, UsageNotice } from '../../accounts/renderer/session-notes';
+import { useAccounts } from '../../accounts/renderer/use-accounts';
+import { mostUsed } from '../../accounts/shared/accounts';
 import { Request } from '../../approvals/renderer/requests';
 import { WaitingButton } from '../../approvals/renderer/waiting-button';
 import { nextWaiting } from '../../approvals/shared/waiting';
 import { useFileEditors } from '../../files/renderer/use-file-editors';
-import { contentOf, panelsOf, sameContent, type Panel } from '../../panels/renderer/layout';
+import {
+  contentOf,
+  folderOf,
+  panelsOf,
+  sameContent,
+  type Panel,
+} from '../../panels/renderer/layout';
 import { PanelArea, type PanelAreaHandle, type PanelView } from '../../panels/renderer/panel-area';
 import { usePanels } from '../../panels/renderer/use-panels';
 import type { PanelContent } from '../../panels/shared/panels';
+import type { ProviderId } from '../../sessions/shared/events';
 import type { SessionAction, SessionSummary } from '../../sessions/shared/sessions';
 import { ArchivedButton, ArchivedPanel } from '../../sessions/renderer/archived-panel';
-import { SessionPage } from '../../sessions/renderer/session-page';
+import { SessionPage, type AccountViews } from '../../sessions/renderer/session-page';
 import { SessionsSection } from '../../sessions/renderer/sessions-section';
 import { statusDots } from '../../sessions/renderer/timeline';
 import { preloadOffers } from '../../sessions/renderer/use-offers';
 import { useSessions } from '../../sessions/renderer/use-sessions';
 import { SettingsPanel } from '../../settings/renderer/settings-panel';
 import { useSettings } from '../../settings/renderer/use-settings';
+import { TerminalPanel } from '../../terminal/renderer/terminal-panel';
+import { TerminalViews } from '../../terminal/renderer/terminal-views';
 import { Gear } from '../../ui/renderer/icons';
 import { useWorkspaces } from '../../workspaces/renderer/use-workspaces';
 import type { TreeItem } from '../../workspaces/renderer/workspace-tree';
@@ -43,11 +56,17 @@ import { PromptHost } from './prompt-host';
 // starts it, and files open in editors, which mark unsaved changes and ask about them before their
 // panels close. The archived sessions' button opens their panel, and ⌘, or the gear just after the
 // app's name opens the settings' panel; each shows in one panel, which opening it again focuses. The
-// window's language follows the settings. As the window opens, it asks for what session pages offer,
-// each provider's models among them, so that a page has them when it opens. The menus and questions
-// the main process asks the user show over it, in the app's own look.
+// gauge between them opens the Accounts panel, the same way, with each provider's sign-in and usage
+// limits; a session page marks a provider that is not signed in and offers its sign-in, which runs
+// the provider's own command in a terminal, and says beside the context in use when its provider has
+// nearly used up a limit. ⌃` opens a terminal beside the focused panel, in that panel's folder, or
+// else the selected workspace's, or else the home folder, and a workspace's menu opens one in its
+// folder; a terminal's panel closing ends it. The window's language follows the settings. As the
+// window opens, it asks for what session pages offer, each provider's models among them, so that a
+// page has them when it opens. The menus and questions the main process asks the user show over it, in
+// the app's own look.
 export function App({ bridge }: { bridge: Bridge }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const workspaces = useWorkspaces(bridge.workspaces);
   const sessions = useSessions(bridge.sessions);
@@ -55,6 +74,10 @@ export function App({ bridge }: { bridge: Bridge }) {
   // process gives it among the sessions the window has shown.
   const [opening, setOpening] = useState<SessionSummary | null>(null);
   const settings = useSettings(bridge.settings);
+  const accounts = useAccounts(bridge.accounts);
+  const [terminalViews] = useState(
+    () => new TerminalViews(bridge.terminal, (code) => i18n.t('terminal.exited', { code })),
+  );
   const panels = usePanels();
   const area = useRef<PanelAreaHandle>(null);
   const fileEditors = useFileEditors(bridge.files);
@@ -93,6 +116,36 @@ export function App({ bridge }: { bridge: Bridge }) {
     else panels.open([content]);
   };
 
+  // A terminal beside the focused panel, in the folder given, or in the home folder for null.
+  const openTerminal = (cwd: string | null) => {
+    bridge.terminal.open(cwd).then((terminal) => {
+      panels.open([{ kind: 'terminal', id: terminal.id, cwd: terminal.cwd }]);
+    }, reportTerminal);
+  };
+
+  // The provider's own sign-in command, in a terminal beside the focused panel.
+  const signIn = (provider: ProviderId) => {
+    bridge.accounts.signIn(provider).then((terminal) => {
+      panels.open([{ kind: 'terminal', id: terminal.id, cwd: terminal.cwd }]);
+    }, reportTerminal);
+  };
+
+  const openAccounts = () => {
+    openOwnPanel({ kind: 'accounts' });
+  };
+
+  // What session pages show of the providers' accounts.
+  const accountViews: AccountViews = {
+    signedOut: (provider) => accounts.of(provider)?.signIn.state === 'signed-out',
+    signIn: (provider) => <SignInPrompt provider={provider} onSignIn={signIn} />,
+    notice: (provider) => {
+      const account = accounts.of(provider);
+      return mostUsed(account?.usage) === undefined ? null : (
+        <UsageNotice account={account} onOpen={openAccounts} />
+      );
+    },
+  };
+
   // The panels of a session removed from the lists close.
   const afterAction = (session: SessionSummary) => (done: SessionAction | null) => {
     if (done !== 'remove') return;
@@ -125,8 +178,9 @@ export function App({ bridge }: { bridge: Bridge }) {
     setRequestFocus((previous) => ({ sessionId: session.id, key: (previous?.key ?? 0) + 1 }));
   };
 
-  // Beside the window buttons: the archived sessions' button, the settings' gear, whose panel ⌘, opens
-  // too, then the count of sessions waiting on the user, which shows the one that has waited longest.
+  // Beside the window buttons: the archived sessions' button, the accounts' gauge, the settings' gear,
+  // whose panel ⌘, opens too, then the count of sessions waiting on the user, which shows the one that
+  // has waited longest.
   const besideWindowButtons = (
     <div className="flex shrink-0 items-center gap-1">
       <ArchivedButton
@@ -135,6 +189,7 @@ export function App({ bridge }: { bridge: Bridge }) {
           openOwnPanel({ kind: 'archived' });
         }}
       />
+      <AccountsButton onOpen={openAccounts} />
       <button
         type="button"
         onClick={() => {
@@ -177,6 +232,21 @@ export function App({ bridge }: { bridge: Bridge }) {
         body: <SettingsPanel settings={settings.settings} onChange={settings.change} />,
       };
     }
+    if (content.kind === 'terminal') {
+      return {
+        title: t('terminal.title'),
+        body: <TerminalPanel views={terminalViews} id={content.id} />,
+        confirmClose: () => bridge.terminal.confirmClose(content.id),
+      };
+    }
+    if (content.kind === 'accounts') {
+      return {
+        title: t('accounts.title'),
+        body: (
+          <AccountsPanel bridge={bridge.accounts} accounts={accounts.accounts} onSignIn={signIn} />
+        ),
+      };
+    }
     if (content.kind === 'archived') {
       return {
         title: t('sessions.archived'),
@@ -209,6 +279,7 @@ export function App({ bridge }: { bridge: Bridge }) {
           folder={content.folder}
           sessionId={sessionId}
           {...(summary === undefined ? {} : { summary })}
+          accounts={accountViews}
           {...(sessionId === null
             ? {}
             : {
@@ -240,6 +311,43 @@ export function App({ bridge }: { bridge: Bridge }) {
   useEffect(() => {
     preloadOffers(bridge.sessions);
   }, [bridge]);
+
+  // A terminal whose panel has closed ends, with whatever runs in it.
+  const shownTerminals = useRef(new Set<string>());
+  useEffect(() => {
+    const shown = new Set(
+      panelsOf(panels.layout).flatMap((panel) =>
+        panel.content.kind === 'terminal' ? [panel.content.id] : [],
+      ),
+    );
+    for (const id of shownTerminals.current) {
+      if (shown.has(id)) continue;
+      terminalViews.dispose(id);
+      bridge.terminal.close(id).catch(reportTerminal);
+    }
+    shownTerminals.current = shown;
+  }, [panels.layout, terminalViews, bridge]);
+
+  // ⌃` opens a terminal beside the focused panel, in its folder, or else the selected workspace's,
+  // or else the home folder.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const onlyControl = event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+      if (!onlyControl || event.code !== 'Backquote') return;
+      event.preventDefault();
+      const focused = panelsOf(panels.layout).find((panel) => panel.id === panels.focusedId);
+      const selected = workspaces.workspaces.find(
+        (workspace) => workspace.id === workspaces.selectedId,
+      );
+      openTerminal(
+        (focused === undefined ? null : folderOf(focused.content)) ?? selected?.path ?? null,
+      );
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  });
 
   // ⇧⌘A shows the request that has waited longest, and the next waiting session's at each press.
   useEffect(() => {
@@ -312,6 +420,7 @@ export function App({ bridge }: { bridge: Bridge }) {
                 area.current?.dragItem(item, nameOf(item.path), press);
               }}
               onOpenItem={openItem}
+              onOpenInTerminal={openTerminal}
             />
             {/* A thin line between the two sections, as wide as their rows, halfway between them. */}
             <div aria-hidden="true" className="-my-1 shrink-0 border-t border-line" />
@@ -366,4 +475,8 @@ function reportMenu(error: unknown): void {
 
 function reportReadAhead(error: unknown): void {
   console.error('The session’s history could not be read ahead:', error);
+}
+
+function reportTerminal(error: unknown): void {
+  console.error('The terminal could not open:', error);
 }

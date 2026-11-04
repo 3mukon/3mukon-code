@@ -45,7 +45,7 @@ function fakeBridge() {
     add: vi.fn(() => Promise.resolve()),
     addDropped: vi.fn<WorkspacesBridge['addDropped']>(() => Promise.resolve()),
     select: vi.fn<WorkspacesBridge['select']>(() => Promise.resolve()),
-    showMenu: vi.fn<WorkspacesBridge['showMenu']>(() => Promise.resolve()),
+    showMenu: vi.fn<WorkspacesBridge['showMenu']>(() => Promise.resolve(null)),
     listFolder: vi.fn((id: string, path: string) =>
       Promise.resolve(folders[`${id}:${path}`] ?? { entries: [] }),
     ),
@@ -282,6 +282,20 @@ describe('WorkspacesSection', () => {
     await waitForSecondClick();
     fireEvent.contextMenu(line('README.md'));
     expect(bridge.showMenu).toHaveBeenCalledOnce();
+  });
+
+  it('opens a terminal in the workspace’s folder when its menu asks for one', async () => {
+    const bridge = fakeBridge();
+    bridge.showMenu.mockResolvedValue('open-in-terminal');
+    const onOpenInTerminal = vi.fn();
+    render(<WorkspacesSection bridge={bridge} list={list} onOpenInTerminal={onOpenInTerminal} />);
+    fireEvent.contextMenu(line('web'));
+    await settle();
+    expect(onOpenInTerminal.mock.calls).toEqual([[list.workspaces[0]?.path]]);
+    bridge.showMenu.mockResolvedValue(null);
+    fireEvent.contextMenu(line('web'));
+    await settle();
+    expect(onOpenInTerminal).toHaveBeenCalledOnce();
   });
 
   it('hands a press on a row to whoever drags it elsewhere, as a folder or a file by its absolute path, and never drags as the system does', async () => {

@@ -1,6 +1,8 @@
+import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import { BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { z } from 'zod';
+import type { Accounts, AccountsUi } from '../../accounts/main/accounts';
 import type { FileService } from '../../files/main/files';
 import type { FilesUi } from '../../files/main/native';
 import { MAX_EDITABLE_BYTES } from '../../files/shared/files';
@@ -12,9 +14,12 @@ import { copyImage, copyText, type SessionsUi } from '../../sessions/main/native
 import { MAX_IMAGE_BASE64, MAX_IMAGES, SENDABLE_IMAGE_TYPES } from '../../sessions/shared/images';
 import type { Settings } from '../../settings/main/settings';
 import type { AppSettings } from '../../settings/shared/settings';
+import type { TerminalUi } from '../../terminal/main/native';
+import type { TerminalViewer, Terminals } from '../../terminal/main/terminals';
+import { MAX_COLUMNS, MAX_ROWS } from '../../terminal/shared/terminal';
 import type { Workspaces, WorkspacesUi } from '../../workspaces/main/workspaces';
 import { channels } from '../shared/bridge';
-import { isAppPage } from './links';
+import { isAppPage, isWebUrl } from './links';
 import { answerPrompt } from './prompts';
 
 interface BridgeServices {
@@ -32,6 +37,12 @@ interface BridgeServices {
   filesUi: (window: BrowserWindow) => FilesUi;
   // The app's settings, which the settings panel changes.
   settings: Settings;
+  // The terminals the windows open, and the question they ask, in the window that asked.
+  terminals: Terminals;
+  terminalUi: (window: BrowserWindow) => TerminalUi;
+  // The providers' sign-ins and usage limits, and the question they ask, in the window that asked.
+  accounts: Accounts;
+  accountsUi: (window: BrowserWindow) => AccountsUi;
   // The page the app's windows show.
   page: string;
 }
@@ -130,6 +141,11 @@ const choice = z
     sandbox,
   })
   .strict();
+// What the user types or pastes into a terminal, and a terminal's size in characters.
+const typed = z.string().max(4_000_000);
+const columns = z.number().int().min(1).max(MAX_COLUMNS);
+const rows = z.number().int().min(1).max(MAX_ROWS);
+const url = z.string().max(8_192);
 
 // Answers the preload bridge's calls and sends it what changes. Every call must come from the main
 // frame of an app window showing the app's own page, and its values must have the shapes the call
@@ -143,6 +159,10 @@ export function serveBridge({
   files,
   filesUi,
   settings,
+  terminals,
+  terminalUi,
+  accounts,
+  accountsUi,
   page,
 }: BridgeServices): void {
   function handle<Values extends unknown[]>(
@@ -163,9 +183,9 @@ export function serveBridge({
   handle(channels.workspaces.select, z.tuple([id]), (_window, workspace) => {
     workspaces.select(workspace);
   });
-  handle(channels.workspaces.showMenu, z.tuple([id]), (window, workspace) => {
-    workspaces.showMenu(workspace, workspacesUi(window));
-  });
+  handle(channels.workspaces.showMenu, z.tuple([id]), (window, workspace) =>
+    workspaces.showMenu(workspace, workspacesUi(window)),
+  );
   handle(channels.workspaces.listFolder, z.tuple([id, path]), (_window, workspace, folder) =>
     workspaces.listFolder(workspace, folder),
   );
@@ -314,6 +334,72 @@ export function serveBridge({
     settings.set(change);
   });
   // The page's answer to a menu or question it was asked to draw.
+  // Each window's terminals print to it alone, and end as it goes or loads its page anew; nothing of
+  // what passes through is kept or logged (ADR-0016).
+  const viewers = new Map<number, TerminalViewer>();
+  const viewerOf = (window: BrowserWindow): TerminalViewer => {
+    const contents = window.webContents;
+    let viewer = viewers.get(contents.id);
+    if (viewer === undefined) {
+      viewer = windowViewer(contents);
+      viewers.set(contents.id, viewer);
+      const id = contents.id;
+      const end = () => {
+        terminals.closeViewer(id);
+        accounts.setShown(id, false);
+      };
+      contents.once('destroyed', () => {
+        viewers.delete(id);
+        end();
+      });
+      contents.on('did-navigate', end);
+    }
+    return viewer;
+  };
+  handle(channels.terminal.open, z.tuple([path.startsWith('/').nullable()]), async (window, cwd) =>
+    terminals.open(viewerOf(window), cwd !== null && (await isFolder(cwd)) ? cwd : null),
+  );
+  handle(channels.terminal.write, z.tuple([id, typed]), (window, terminal, data) => {
+    terminals.write(viewerOf(window), terminal, data);
+  });
+  handle(channels.terminal.resize, z.tuple([id, columns, rows]), (window, terminal, wide, high) => {
+    terminals.resize(viewerOf(window), terminal, wide, high);
+  });
+  // A terminal already gone closes at once.
+  handle(channels.terminal.confirmClose, z.tuple([id]), (window, terminal) => {
+    let program: string | null;
+    try {
+      program = terminals.busy(viewerOf(window), terminal);
+    } catch {
+      return true;
+    }
+    return program === null ? true : terminalUi(window).confirmEnd(program);
+  });
+  handle(channels.terminal.close, z.tuple([id]), (window, terminal) => {
+    terminals.close(viewerOf(window), terminal);
+  });
+  handle(channels.terminal.openLink, z.tuple([url]), async (_window, link) => {
+    if (isWebUrl(link)) await shell.openExternal(link);
+  });
+  handle(channels.accounts.list, z.tuple([]), () => accounts.list());
+  handle(channels.accounts.setShown, z.tuple([z.boolean()]), (window, shown) => {
+    viewerOf(window);
+    accounts.setShown(window.webContents.id, shown);
+  });
+  // The provider's own sign-in command in a terminal of its own, after which the app reads the
+  // sign-in again.
+  handle(channels.accounts.signIn, z.tuple([provider]), async (window, chosen) => {
+    const program = await accounts.signInCommand(chosen);
+    const terminal = terminals.open(viewerOf(window), null, program);
+    terminals.ended(terminal.id).then(
+      () => accounts.readAgain(chosen),
+      () => undefined,
+    );
+    return { id: terminal.id, cwd: terminal.cwd };
+  });
+  handle(channels.accounts.reset, z.tuple([provider]), (window, chosen) =>
+    accounts.reset(chosen, accountsUi(window)),
+  );
   handle(
     channels.prompts.answer,
     z.tuple([z.number().int().positive(), id.nullable()]),
@@ -337,6 +423,30 @@ export function serveBridge({
   settings.onChange((current) => {
     broadcast(channels.settings.changed, current);
   });
+  accounts.onChange((list) => {
+    broadcast(channels.accounts.changed, list);
+  });
+}
+
+// The window a terminal prints to, while it is there.
+function windowViewer(contents: WebContents): TerminalViewer {
+  return {
+    id: contents.id,
+    output(terminal, data) {
+      if (!contents.isDestroyed()) contents.send(channels.terminal.output, { id: terminal, data });
+    },
+    exit(terminal, code) {
+      if (!contents.isDestroyed()) contents.send(channels.terminal.exit, { id: terminal, code });
+    },
+  };
+}
+
+async function isFolder(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 // The window a call came from, provided the call came from its main frame showing the app's page.

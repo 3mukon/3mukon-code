@@ -1,0 +1,17 @@
+/* A terminal's panel in the e-ink look, where xterm.js's own stylesheet reaches past the emulator's
+   theme (ADR-0015): it paints the viewport behind the emulator's clear background black, the box in
+   which an input method composes white on black, and a shadow along the top of a scrolled terminal.
+   Here the viewport is clear, so that the window's paper and its grain show through, the composing
+   box is the darker paper of the user's messages in ink, and nothing casts a shadow. */
+.terminal-paper {
+  --vscode-scrollbar-shadow: transparent;
+}
+
+.terminal-paper .xterm .xterm-viewport {
+  background-color: transparent;
+}
+
+.terminal-paper .xterm .composition-view {
+  background: var(--bubble);
+  color: var(--ink);
+}

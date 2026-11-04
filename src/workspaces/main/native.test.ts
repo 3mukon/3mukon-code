@@ -27,22 +27,28 @@ describe('windowWorkspacesUi', () => {
     expect(await ui.askTrust('web', '/Users/me/web')).toBe(false);
   });
 
-  it('offers Trusted, checked while it is, and Remove Workspace in a workspace’s menu, and does what is chosen', async () => {
+  it('offers Open in Terminal, Trusted, checked while it is, and Remove Workspace in a workspace’s menu, and does what is chosen', async () => {
     for (const [chosen, called] of [
+      ['open-in-terminal', null],
       ['trusted', 'setTrusted'],
       ['remove', 'remove'],
       [null, null],
     ] as const) {
       const menu = vi.fn<Prompts['menu']>(() => Promise.resolve(chosen));
       const actions = { setTrusted: vi.fn(), remove: vi.fn() };
-      windowWorkspacesUi(window, { menu, ask: vi.fn() }, t).showMenu(workspace, actions);
-      await Promise.resolve();
-      await Promise.resolve();
+      const answer = await windowWorkspacesUi(window, { menu, ask: vi.fn() }, t).showMenu(
+        workspace,
+        actions,
+      );
       expect(menu.mock.calls[0]?.[0]).toEqual([
+        { id: 'open-in-terminal', label: 'Open in Terminal' },
+        { separator: true },
         { id: 'trusted', label: 'Trusted', checked: true },
         { separator: true },
         { id: 'remove', label: 'Remove Workspace' },
       ]);
+      // Opening a terminal is the window's to do.
+      expect(answer).toBe(chosen === 'open-in-terminal' ? 'open-in-terminal' : null);
       expect(actions.setTrusted.mock.calls).toEqual(called === 'setTrusted' ? [[false]] : []);
       expect(actions.remove).toHaveBeenCalledTimes(called === 'remove' ? 1 : 0);
     }

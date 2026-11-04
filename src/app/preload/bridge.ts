@@ -1,3 +1,4 @@
+import type { AccountsList, ResetOutcome } from '../../accounts/shared/accounts';
 import type { CloseAnswer, OpenedFile, SaveResult } from '../../files/shared/files';
 import type { DroppedItem } from '../../panels/shared/panels';
 import type { ModelOption, ProviderId, SessionEvent } from '../../sessions/shared/events';
@@ -11,8 +12,13 @@ import type {
   SessionSummary,
 } from '../../sessions/shared/sessions';
 import type { AppSettings } from '../../settings/shared/settings';
+import type { TerminalInfo } from '../../terminal/shared/terminal';
 import type { Prompt } from '../../ui/shared/prompts';
-import type { FolderListing, WorkspaceList } from '../../workspaces/shared/workspaces';
+import type {
+  FolderListing,
+  WorkspaceList,
+  WorkspaceMenuChoice,
+} from '../../workspaces/shared/workspaces';
 import { channels, type Bridge } from '../shared/bridge';
 
 type Listener = (event: unknown, ...values: unknown[]) => void;
@@ -58,7 +64,8 @@ export function createBridge(
           items.map((item) => pathForFile(item)),
         ) as Promise<void>,
       select: (id) => invoke(channels.workspaces.select, id) as Promise<void>,
-      showMenu: (id) => invoke(channels.workspaces.showMenu, id) as Promise<void>,
+      showMenu: (id) =>
+        invoke(channels.workspaces.showMenu, id) as Promise<WorkspaceMenuChoice | null>,
       listFolder: (id, path) =>
         invoke(channels.workspaces.listFolder, id, path) as Promise<FolderListing>,
     },
@@ -137,6 +144,37 @@ export function createBridge(
         subscribe(channels.settings.changed, (value) => {
           listener(value as AppSettings);
         }),
+    },
+    terminal: {
+      open: (cwd) => invoke(channels.terminal.open, cwd) as Promise<TerminalInfo>,
+      write: (id, data) => invoke(channels.terminal.write, id, data) as Promise<void>,
+      resize: (id, columns, rows) =>
+        invoke(channels.terminal.resize, id, columns, rows) as Promise<void>,
+      onOutput: (listener) =>
+        subscribe(channels.terminal.output, (value) => {
+          const { id, data } = value as { id: string; data: string };
+          listener(id, data);
+        }),
+      onExit: (listener) =>
+        subscribe(channels.terminal.exit, (value) => {
+          const { id, code } = value as { id: string; code: number };
+          listener(id, code);
+        }),
+      confirmClose: (id) => invoke(channels.terminal.confirmClose, id) as Promise<boolean>,
+      close: (id) => invoke(channels.terminal.close, id) as Promise<void>,
+      openLink: (url) => invoke(channels.terminal.openLink, url) as Promise<void>,
+    },
+    accounts: {
+      list: () => invoke(channels.accounts.list) as Promise<AccountsList>,
+      onChange: (listener) =>
+        subscribe(channels.accounts.changed, (value) => {
+          listener(value as AccountsList);
+        }),
+      setShown: (shown) => invoke(channels.accounts.setShown, shown) as Promise<void>,
+      signIn: (provider) =>
+        invoke(channels.accounts.signIn, provider) as Promise<{ id: string; cwd: string }>,
+      reset: (provider) =>
+        invoke(channels.accounts.reset, provider) as Promise<ResetOutcome | null>,
     },
     prompts: {
       onPrompt: (listener) =>

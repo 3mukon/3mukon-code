@@ -4,6 +4,9 @@
 verifyDepsBeforeRun: error
 
 # pnpm runs a dependency's build script only when it is allowed here. electron-winstaller comes with
-# electron-builder and its script prepares Windows installers, which this app never builds.
+# electron-builder and its script prepares Windows installers, which this app never builds. node-pty's
+# script checks for its prebuilt binary, which its package carries, or else compiles it; the app uses
+# the prebuilt one (ADR-0015).
 allowBuilds:
   electron-winstaller: false
+  node-pty: false

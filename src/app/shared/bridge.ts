@@ -1,8 +1,10 @@
+import type { AccountsBridge } from '../../accounts/shared/accounts';
 import type { ApprovalsBridge } from '../../approvals/shared/approvals';
 import type { FilesBridge } from '../../files/shared/files';
 import type { PanelsBridge } from '../../panels/shared/panels';
 import type { SessionsBridge } from '../../sessions/shared/sessions';
 import type { SettingsBridge } from '../../settings/shared/settings';
+import type { TerminalBridge } from '../../terminal/shared/terminal';
 import type { Prompt } from '../../ui/shared/prompts';
 import type { WorkspacesBridge } from '../../workspaces/shared/workspaces';
 
@@ -15,6 +17,8 @@ export interface Bridge {
   files: FilesBridge;
   approvals: ApprovalsBridge;
   settings: SettingsBridge;
+  terminal: TerminalBridge;
+  accounts: AccountsBridge;
   prompts: PromptsBridge;
 }
 
@@ -91,6 +95,23 @@ export const channels = {
     get: 'settings:get',
     set: 'settings:set',
     changed: 'settings:changed',
+  },
+  terminal: {
+    open: 'terminal:open',
+    write: 'terminal:write',
+    resize: 'terminal:resize',
+    output: 'terminal:output',
+    exit: 'terminal:exit',
+    confirmClose: 'terminal:confirm-close',
+    close: 'terminal:close',
+    openLink: 'terminal:open-link',
+  },
+  accounts: {
+    list: 'accounts:list',
+    changed: 'accounts:changed',
+    setShown: 'accounts:set-shown',
+    signIn: 'accounts:sign-in',
+    reset: 'accounts:reset',
   },
   prompts: {
     show: 'prompts:show',

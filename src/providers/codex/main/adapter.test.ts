@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { AccountNews } from '../../../accounts/main/source';
 import type { Toolset, ToolsetAccess } from '../../../sessions/main/provider';
 import type { SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
 import { createCodexProvider } from './adapter';
@@ -147,6 +148,21 @@ function reply(method: string, params: Params): unknown {
         ],
         nextCursor: null,
       };
+    case 'account/read':
+      return {
+        account: { type: 'chatgpt', email: null, planType: 'plus' },
+        requiresOpenaiAuth: true,
+      };
+    case 'account/rateLimits/read':
+      return {
+        rateLimits: {
+          primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: 20 },
+          secondary: null,
+        },
+        rateLimitResetCredits: { availableCount: 1, credits: null },
+      };
+    case 'account/rateLimitResetCredit/consume':
+      return { outcome: 'reset' };
     default:
       return {};
   }
@@ -857,5 +873,50 @@ describe('a Codex session', () => {
       { type: 'request-resolved', requestId: '11', outcome: 'cancelled' },
       { type: 'closed', error: 'Codex stopped unexpectedly (exit code 1).' },
     ]);
+  });
+});
+
+describe('Codex’s account through the adapter', () => {
+  it('asks a running session’s app-server, or else a short-lived one, and passes on what turns report of the account', async () => {
+    const codex = provider();
+    const news: AccountNews[] = [];
+    codex.onAccountNews((heard) => {
+      news.push(heard);
+    });
+    expect(await codex.readAccount(true)).toEqual({
+      signIn: { state: 'signed-in', method: 'subscription' },
+      usage: { windows: [{ span: 'five-hour', used: 40, resetsAt: 20_000 }], resets: 1 },
+    });
+    const probe = current();
+    expect(probe.closed).toBe(true);
+    expect(probe.cwd).toContain('codex-account-');
+    const session = await codex.start({ cwd: '/work' }, () => undefined);
+    const running = current();
+    await codex.readAccount(false);
+    expect(await codex.resetLimits?.()).toBe('reset');
+    expect(current()).toBe(running);
+    expect(running.calls.map((call) => call.method)).toEqual(
+      expect.arrayContaining(['account/read', 'account/rateLimitResetCredit/consume']),
+    );
+    running.emit('account/rateLimits/updated', {
+      rateLimits: {
+        primary: { usedPercent: 91, windowDurationMins: 300, resetsAt: 30 },
+        secondary: null,
+      },
+    });
+    running.emit('error', {
+      error: { message: 'Unauthorized', codexErrorInfo: 'unauthorized', additionalDetails: null },
+      willRetry: false,
+      threadId: 'th1',
+      turnId: 'turn-1',
+    });
+    expect(news).toEqual([
+      { type: 'usage', windows: [{ span: 'five-hour', used: 91, resetsAt: 30_000 }] },
+      { type: 'signed-out' },
+    ]);
+    await session.close();
+    await codex.readAccount(false);
+    expect(current()).not.toBe(running);
+    expect((await codex.signInCommand()).args).toEqual(['login']);
   });
 });

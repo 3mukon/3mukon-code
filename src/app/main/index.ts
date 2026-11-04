@@ -1,6 +1,9 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { app, BrowserWindow, nativeTheme } from 'electron';
+import { Accounts, usageStorage } from '../../accounts/main/accounts';
+import { windowAccountsUi } from '../../accounts/main/native';
+import type { AccountSource } from '../../accounts/main/source';
 import { dockAttention } from '../../approvals/main/dock';
 import { FileService } from '../../files/main/files';
 import { keepUnsavedChanges, windowFilesUi } from '../../files/main/native';
@@ -17,6 +20,13 @@ import { recordStorage, SessionRecords } from '../../sessions/main/records';
 import { textStorage } from '../../sessions/main/texts';
 import { Settings, settingsStorage } from '../../settings/main/settings';
 import { preferredLanguages } from '../../settings/shared/settings';
+import {
+  loginShell,
+  spawnPty,
+  terminalEnvironment,
+  windowTerminalUi,
+} from '../../terminal/main/native';
+import { Terminals } from '../../terminal/main/terminals';
 import { startToolset, type RunningToolset } from '../../toolset/main/server';
 import { windowWorkspacesUi } from '../../workspaces/main/native';
 import { fileStorage } from '../../workspaces/main/storage';
@@ -31,6 +41,9 @@ const CLOSE_TIMEOUT_MS = 5_000;
 // How long after the app opens its search starts catching up on the sessions it has no text for,
 // so that it leaves the providers alone while the window opens (ADR-0014).
 const CATCH_UP_AFTER_MS = 10_000;
+// How long after the app opens it reads the providers' sign-ins and usage limits, once the window's
+// own requests, such as the models' lists, are under way (ADR-0017).
+const ACCOUNTS_AFTER_MS = 5_000;
 
 void app
   .whenReady()
@@ -52,13 +65,22 @@ void app
       nativeTheme.themeSource = current.appearance;
     });
     const toolset = await startToolsetIfPossible(version);
+    const adapters = providers(data, version, toolset);
     // The sessions the app starts, kept in its data, which later runs list and resume, with the text
     // of each one's messages, which the lists search.
     const sessions = new SessionHost(
-      providers(data, version, toolset),
+      adapters,
       new SessionRecords(recordStorage(data)),
       textStorage(join(data, 'session-texts')),
     );
+    // The providers' sign-ins and usage limits, the usage kept in the app's data (ADR-0017).
+    const accounts = new Accounts(adapters, usageStorage(data));
+    // The terminals the windows open, each running the user's login shell or a sign-in command.
+    const terminals = new Terminals(spawnPty, {
+      shell: loginShell(),
+      home: homedir(),
+      env: terminalEnvironment(process.env, app.getLocale()),
+    });
     const workspaces = new Workspaces(fileStorage(data));
     // The editors' files: those in the workspaces, and those dropped on a window.
     const files = new FileService(() =>
@@ -74,9 +96,16 @@ void app
       files,
       filesUi: (window) => windowFilesUi(windowPrompts(window), t),
       settings,
+      terminals,
+      terminalUi: (window) => windowTerminalUi(windowPrompts(window), t),
+      accounts,
+      accountsUi: (window) => windowAccountsUi(windowPrompts(window), t),
       page: pageUrl(),
     });
-    closeBeforeQuitting(sessions, toolset);
+    closeBeforeQuitting(sessions, toolset, () => {
+      terminals.closeAll();
+      accounts.close();
+    });
     // The sessions waiting on the user show on the Dock icon too.
     const dock = app.dock;
     if (dock !== undefined) {
@@ -96,6 +125,9 @@ void app
     setTimeout(() => {
       void sessions.catchUp();
     }, CATCH_UP_AFTER_MS);
+    setTimeout(() => {
+      void accounts.readAll();
+    }, ACCOUNTS_AFTER_MS);
     // Clicking the Dock icon of a running app without windows opens a new one.
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createMainWindow(settings.get());
@@ -121,9 +153,13 @@ async function startToolsetIfPossible(version: string): Promise<RunningToolset |
   }
 }
 
-// The providers, each through its adapter. Grok Build unpacks its binary into a folder of the app's
-// data the first time a session needs it.
-function providers(data: string, version: string, toolset: RunningToolset | undefined): Provider[] {
+// The providers, each through its adapter, which also reads its account. Grok Build unpacks its binary
+// into a folder of the app's data the first time a session needs it.
+function providers(
+  data: string,
+  version: string,
+  toolset: RunningToolset | undefined,
+): (Provider & AccountSource)[] {
   return [
     createClaudeCodeProvider(),
     ...(toolset === undefined ? [] : [createCodexProvider({ toolset, clientVersion: version })]),
@@ -132,13 +168,19 @@ function providers(data: string, version: string, toolset: RunningToolset | unde
 }
 
 // Closes the sessions, with their provider processes, and the toolset before the app quits, waiting
-// a few seconds at most.
-function closeBeforeQuitting(sessions: SessionHost, toolset: RunningToolset | undefined): void {
+// a few seconds at most, after ending the rest at once: the terminals' programs and the accounts'
+// reading.
+function closeBeforeQuitting(
+  sessions: SessionHost,
+  toolset: RunningToolset | undefined,
+  endTheRest: () => void,
+): void {
   let closing = false;
   app.on('will-quit', (event) => {
     if (closing) return;
     closing = true;
     event.preventDefault();
+    endTheRest();
     const timeout = new Promise((resolve) => setTimeout(resolve, CLOSE_TIMEOUT_MS));
     void Promise.race([
       Promise.allSettled([sessions.closeAll(), toolset?.close()]),

@@ -12,6 +12,8 @@ interface WorkspacesSectionProps {
   onPressItem?: (item: TreeItem, press: PointerEvent<HTMLElement>) => void;
   // Opens a row of the tree elsewhere, as dropping it would.
   onOpenItem?: (item: TreeItem) => void;
+  // Opens a terminal in a workspace's folder, as its menu asks.
+  onOpenInTerminal?: (folder: string) => void;
 }
 
 // The sidebar's Workspaces section: its heading with Add workspace just after it, and the workspaces'
@@ -22,6 +24,7 @@ export function WorkspacesSection({
   list,
   onPressItem,
   onOpenItem,
+  onOpenInTerminal,
 }: WorkspacesSectionProps) {
   const { t } = useTranslation();
   const heading = useId();
@@ -76,6 +79,7 @@ export function WorkspacesSection({
           labelledBy={heading}
           onPressItem={onPressItem}
           onOpenItem={onOpenItem}
+          onOpenInTerminal={onOpenInTerminal}
         />
       )}
     </section>

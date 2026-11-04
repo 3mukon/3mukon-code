@@ -19,7 +19,8 @@
     },
     "menu": {
       "trusted": "Trusted",
-      "remove": "Remove Workspace"
+      "remove": "Remove Workspace",
+      "openInTerminal": "Open in Terminal"
     }
   },
   "sessions": {
@@ -114,7 +115,8 @@
       "showPlain": "Show as plain text",
       "showMarkdown": "Show as Markdown",
       "copy": "Copy message",
-      "copied": "Copied"
+      "copied": "Copied",
+      "notSignedIn": "{{provider}} (not signed in)"
     },
     "tool": {
       "named": "{{kind}}:",
@@ -279,5 +281,67 @@
     "claude-code": "Claude Code",
     "codex": "Codex CLI",
     "grok-build": "Grok Build"
+  },
+  "terminal": {
+    "title": "Terminal",
+    "exited": "The program ended with exit code {{code}}.",
+    "close": {
+      "message": "End {{program}} and close the terminal?",
+      "detail": "It is still running in this terminal, and closing the terminal ends it.",
+      "close": "Close",
+      "cancel": "Cancel"
+    }
+  },
+  "accounts": {
+    "title": "Accounts",
+    "signIn": "Sign In",
+    "signInPrompt": "{{provider}} is not signed in.",
+    "state": {
+      "subscription": "Signed in with a subscription",
+      "key": "Signed in with an API key",
+      "backend": "Signed in through another backend",
+      "signedOut": "Not signed in",
+      "unknown": "Sign-in not known yet"
+    },
+    "checking": "Checking…",
+    "window": {
+      "five-hour": "5-hour limit",
+      "day": "Daily limit",
+      "week": "Weekly limit",
+      "month": "Monthly limit",
+      "hours": "{{count}}-hour limit",
+      "other": "Usage limit",
+      "model": "{{window}} · {{model}}"
+    },
+    "used": "{{share}} used",
+    "unreported": "Use not reported",
+    "resets": "Resets {{time}}",
+    "readAt": "Read {{when}}",
+    "readNow": "Read just now",
+    "problem": {
+      "refused": "Couldn’t fetch the usage for this sign-in. Signing in again may help.",
+      "unreachable": "Couldn’t ask {{provider}} for its usage.",
+      "unreadable": "{{provider}} answered in a form this version can’t read."
+    },
+    "resetsLeft_one": "{{count}} reset left",
+    "resetsLeft_other": "{{count}} resets left",
+    "reset": "Reset Limits",
+    "resetOutcome": {
+      "reset": "The limits were reset.",
+      "nothing-to-reset": "Nothing to reset yet.",
+      "no-credit": "No reset is left.",
+      "already-redeemed": "That reset was already spent."
+    },
+    "confirmReset": {
+      "message": "Reset {{provider}}’s usage limits?",
+      "detail": "This spends one of the account’s resets.",
+      "reset": "Reset",
+      "cancel": "Cancel"
+    },
+    "notice": {
+      "used": "{{window}} {{share}} used",
+      "reached": "{{window}} reached",
+      "open": "Show the accounts"
+    }
   }
 }

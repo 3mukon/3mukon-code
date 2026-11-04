@@ -31,7 +31,7 @@ function fakeBridge(
       add: () => Promise.resolve(),
       addDropped: () => Promise.resolve(),
       select: () => Promise.resolve(),
-      showMenu: () => Promise.resolve(),
+      showMenu: () => Promise.resolve(null),
       listFolder: () => Promise.resolve({ entries: [] }),
     },
     sessions: {
@@ -83,6 +83,23 @@ function fakeBridge(
       set: () => Promise.resolve(),
       onChange: () => () => undefined,
     },
+    terminal: {
+      open: () => Promise.resolve({ id: 't1', cwd: '/Users/me', program: 'zsh' }),
+      write: () => Promise.resolve(),
+      resize: () => Promise.resolve(),
+      onOutput: () => () => undefined,
+      onExit: () => () => undefined,
+      confirmClose: () => Promise.resolve(true),
+      close: () => Promise.resolve(),
+      openLink: () => Promise.resolve(),
+    },
+    accounts: {
+      list: () => Promise.resolve({ accounts: [] }),
+      onChange: () => () => undefined,
+      setShown: () => Promise.resolve(),
+      signIn: () => Promise.resolve({ id: 't2', cwd: '/Users/me' }),
+      reset: () => Promise.resolve(null),
+    },
     prompts: { onPrompt: () => () => undefined, answer: () => Promise.resolve() },
   };
 }
@@ -96,6 +113,59 @@ async function renderApp(bridge = fakeBridge()) {
 }
 
 describe('App', () => {
+  it('opens a terminal with ⌃` in the selected workspace’s folder, beside the focused panel in its folder, and ends one as its panel closes', async () => {
+    const bridge = fakeBridge({
+      workspaces: [{ id: 'w1', name: 'web', path: '/Users/me/web', trusted: true }],
+      selectedId: 'w1',
+    });
+    let next = 0;
+    const open = vi.spyOn(bridge.terminal, 'open').mockImplementation((cwd) => {
+      next += 1;
+      return Promise.resolve({ id: `t${String(next)}`, cwd: cwd ?? '/Users/me', program: 'zsh' });
+    });
+    const close = vi.spyOn(bridge.terminal, 'close');
+    await renderApp(bridge);
+    const main = screen.getByRole('main');
+    const press = async () => {
+      await act(async () => {
+        fireEvent.keyDown(window, { key: '`', code: 'Backquote', ctrlKey: true });
+        await Promise.resolve();
+      });
+    };
+    await press();
+    expect(open.mock.calls).toEqual([['/Users/me/web']]);
+    await press();
+    expect(open.mock.calls).toEqual([['/Users/me/web'], ['/Users/me/web']]);
+    const terminals = within(main).getAllByRole('region', { name: 'Terminal' });
+    expect(terminals).toHaveLength(2);
+    await act(async () => {
+      fireEvent.click(within(terminals[1] ?? main).getByRole('button', { name: 'Close panel' }));
+      await Promise.resolve();
+    });
+    expect(within(main).getAllByRole('region', { name: 'Terminal' })).toHaveLength(1);
+    expect(close.mock.calls).toEqual([['t2']]);
+  });
+
+  it('opens the accounts from the gauge, whose Sign In runs the provider’s sign-in in a terminal', async () => {
+    const bridge = fakeBridge();
+    vi.spyOn(bridge.accounts, 'list').mockResolvedValue({
+      accounts: [
+        { provider: 'codex', signIn: { state: 'signed-out' }, resettable: true, reading: false },
+      ],
+    });
+    const signIn = vi.spyOn(bridge.accounts, 'signIn');
+    await renderApp(bridge);
+    fireEvent.click(screen.getByRole('button', { name: 'Accounts' }));
+    const main = screen.getByRole('main');
+    const accounts = within(main).getByRole('region', { name: 'Accounts' });
+    await act(async () => {
+      fireEvent.click(within(accounts).getByRole('button', { name: 'Sign In' }));
+      await Promise.resolve();
+    });
+    expect(signIn.mock.calls).toEqual([['codex']]);
+    expect(within(main).getByRole('region', { name: 'Terminal' })).toBeTruthy();
+  });
+
   it('shows the sidebar beside a blank main area, with no title text', async () => {
     await renderApp();
     const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
@@ -223,6 +293,7 @@ describe('App', () => {
       );
     expect(named(within(sidebar).getByRole('button', { name: label }).parentElement)).toEqual([
       'Archived sessions',
+      'Accounts',
       'Settings',
       label,
     ]);
@@ -230,7 +301,12 @@ describe('App', () => {
     const header = within(screen.getByRole('main'))
       .getByRole('region', { name: 'Update the docs' })
       .querySelector('header');
-    expect(named(header?.firstElementChild)).toEqual(['Archived sessions', 'Settings', label]);
+    expect(named(header?.firstElementChild)).toEqual([
+      'Archived sessions',
+      'Accounts',
+      'Settings',
+      label,
+    ]);
   });
 
   it('lists archived sessions apart, in a panel the button beside the window buttons opens, which shows one and acts on it', async () => {
@@ -298,8 +374,13 @@ describe('App', () => {
     await renderApp(bridge);
     const main = screen.getByRole('main');
     const gear = screen.getByRole('button', { name: 'Settings' });
-    // The gear lies just after the archived sessions' button, beside the window buttons.
-    expect(screen.getByRole('button', { name: 'Archived sessions' }).nextElementSibling).toBe(gear);
+    // The gear lies just after the archived sessions' button and the accounts' gauge, beside the
+    // window buttons.
+    const gauge = screen.getByRole('button', { name: 'Accounts' });
+    expect(screen.getByRole('button', { name: 'Archived sessions' }).nextElementSibling).toBe(
+      gauge,
+    );
+    expect(gauge.nextElementSibling).toBe(gear);
     fireEvent.click(gear);
     const settings = within(main).getByRole('region', { name: 'Settings' });
     expect(fireEvent.keyDown(window, { key: ',', metaKey: true })).toBe(false);

@@ -115,6 +115,45 @@ const MODELS: ModelOption[] = [
 ];
 
 describe('SessionPage', () => {
+  it('marks a provider not signed in among the choices, offers its sign-in and shows its usage notice beside the context', async () => {
+    const { bridge, emit } = fakeBridge({ ...initialSessionState(), mode: 'auto' });
+    const accounts = {
+      signedOut: (provider: string) => provider === 'codex',
+      signIn: (provider: string) => <p>Sign in to {provider}</p>,
+      notice: (provider: string) =>
+        provider === 'claude-code' ? <span>Nearly used up</span> : null,
+    };
+    const shown = (sessionId: string | null) => (
+      <SessionPage
+        bridge={bridge}
+        folder="/Users/me/web"
+        sessionId={sessionId}
+        onStarted={vi.fn()}
+        accounts={accounts}
+      />
+    );
+    const { rerender } = render(shown(null));
+    await settle();
+    expect(options('Provider')).toEqual([
+      ['claude-code', 'Claude Code'],
+      ['codex', 'Codex CLI (not signed in)'],
+    ]);
+    expect(screen.queryByText(/Sign in to/)).toBeNull();
+    expect(screen.getByText('Nearly used up')).toBeTruthy();
+    choose('Provider', 'codex');
+    await settle();
+    expect(screen.getByText('Sign in to codex')).toBeTruthy();
+    expect(screen.queryByText('Nearly used up')).toBeNull();
+    choose('Provider', 'claude-code');
+    await settle();
+    rerender(shown('s1'));
+    await settle();
+    emit(2, { type: 'context', used: 30_000, size: 200_000 });
+    // The notice comes just before the context in use, near the divider's end.
+    const context = screen.getByText('30,000 / 200,000 (15.0%)');
+    expect(screen.getByText('Nearly used up').nextElementSibling).toBe(context);
+  });
+
   it('names the provider first in the one button that holds the settings in a narrow panel, then a chosen gateway', async () => {
     // The row of settings is wider than the panel; the test environment lays out nothing.
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(600);

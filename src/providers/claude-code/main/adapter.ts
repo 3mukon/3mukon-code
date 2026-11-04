@@ -15,6 +15,8 @@ import {
   type PermissionResult,
   type Query,
   type SDKControlGetContextUsageResponse,
+  type SDKControlGetUsageResponse,
+  type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import type {
@@ -34,6 +36,13 @@ import type {
   SessionEvent,
 } from '../../../sessions/shared/events';
 import type { SendableImageType } from '../../../sessions/shared/images';
+import type { AccountNews, AccountSource } from '../../../accounts/main/source';
+import {
+  bundledClaudeBinary,
+  eventWindows,
+  experimentalWindows,
+  readClaudeSignIn,
+} from './account';
 import { defaultGatewaysDir, existingGatewayPath, gatewayPath, listGateways } from './gateways';
 import { approvalResult, questionResult, toRequest, type ClaudeRequest } from './requests';
 import { sandboxFolders, sandboxSettings, type SandboxFolders } from './sandbox';
@@ -77,15 +86,31 @@ export interface ClaudeCodeProviderOptions {
   gatewaysDir?: string;
 }
 
-// Claude Code through the Claude Agent SDK, on whatever sign-in Claude Code itself has.
+// How the sessions take part in Claude Code's account (ADR-0017): those running on Claude Code's own
+// sign-in lend their queries to the account's usage call, and pass on what Claude Code reports of the
+// account.
+interface AccountLink {
+  readonly sessions: Set<ClaudeCodeSession>;
+  hear(news: AccountNews): void;
+}
+
+// Claude Code through the Claude Agent SDK, on whatever sign-in Claude Code itself has, and that
+// sign-in's account with its plan's usage limits (ADR-0017).
 export function createClaudeCodeProvider({
   gatewaysDir = defaultGatewaysDir(),
-}: ClaudeCodeProviderOptions = {}): Provider {
+}: ClaudeCodeProviderOptions = {}): Provider & AccountSource {
+  const listeners = new Set<(news: AccountNews) => void>();
+  const link: AccountLink = {
+    sessions: new Set(),
+    hear(news) {
+      for (const listener of listeners) listener(news);
+    },
+  };
   return {
     id: 'claude-code',
     async start(options, onEvent) {
       const settings = await sessionSettings(options, gatewaysDir, randomUUID(), false);
-      return ClaudeCodeSession.open(settings, onEvent, new Translator(options.cwd));
+      return ClaudeCodeSession.open(settings, onEvent, new Translator(options.cwd), link);
     },
     async resume(options, onEvent) {
       const settings = await sessionSettings(options, gatewaysDir, options.sessionId, true);
@@ -94,7 +119,7 @@ export function createClaudeCodeProvider({
         for (const event of translator.history(message)) onEvent(event);
       }
       onEvent({ type: 'replay-finished' });
-      return ClaudeCodeSession.open(settings, onEvent, translator);
+      return ClaudeCodeSession.open(settings, onEvent, translator, link);
     },
     // Read from Claude Code's own transcript, without starting Claude Code.
     async history(sessionId, cwd) {
@@ -117,7 +142,76 @@ export function createClaudeCodeProvider({
     async listModels(gateway) {
       return probeModels(gateway === null ? null : await existingGatewayPath(gatewaysDir, gateway));
     },
+    // The sign-in from Claude Code's own status; the usage through a running session's query on
+    // Claude Code's own sign-in, or else through a probe.
+    async readAccount(withUsage) {
+      const signIn = await readClaudeSignIn(bundledClaudeBinary());
+      if (!withUsage || signIn.state !== 'signed-in' || signIn.method !== 'subscription') {
+        return { signIn };
+      }
+      let query: Query | null = null;
+      for (const session of link.sessions) query ??= session.accountQuery();
+      let answer: SDKControlGetUsageResponse;
+      try {
+        answer = query === null ? await probeUsage() : await usageOf(query);
+      } catch (error) {
+        console.error('Claude Code could not be asked for its usage:', error);
+        return { signIn, usageProblem: 'unreachable' };
+      }
+      // Without windows, Claude Code could not fetch them for the sign-in it holds, as when its
+      // usage endpoint refuses that sign-in.
+      const windows = experimentalWindows(answer);
+      return windows === undefined
+        ? { signIn, usageProblem: 'refused' }
+        : { signIn, usage: { windows } };
+    },
+    signInCommand() {
+      return Promise.resolve({ file: bundledClaudeBinary(), args: ['auth', 'login'] });
+    },
+    onAccountNews(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
   };
+}
+
+// The plan's usage limits through the SDK's experimental call (ADR-0017), without the scan of the
+// local transcripts that it otherwise makes.
+function usageOf(query: Query): Promise<SDKControlGetUsageResponse> {
+  return query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
+}
+
+// The plan's usage limits from a Claude Code that initializes and is closed before any message, as
+// the models' probe does, on the user's own settings with their hooks off.
+async function probeUsage(): Promise<SDKControlGetUsageResponse> {
+  const cwd = await mkdtemp(join(tmpdir(), 'claude-code-usage-'));
+  probeFolders.add(cwd);
+  const input = new InputQueue();
+  const probe = query({
+    prompt: input,
+    options: {
+      cwd,
+      persistSession: false,
+      env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+      settingSources: ['user'],
+      settings: { disableAllHooks: true },
+    },
+  });
+  try {
+    await withinTime(
+      probe.initializationResult(),
+      PROBE_TIMEOUT_MS,
+      'Claude Code did not start in time to read its usage.',
+    );
+    return await usageOf(probe);
+  } finally {
+    input.end();
+    probe.close();
+    probeFolders.delete(cwd);
+    await rm(cwd, { recursive: true, force: true });
+  }
 }
 
 async function sessionSettings(
@@ -276,14 +370,16 @@ class ClaudeCodeSession implements ProviderSession {
     settings: SessionSettings,
     onEvent: SessionEventListener,
     translator: Translator,
+    link: AccountLink,
   ): Promise<ClaudeCodeSession> {
-    const session = new ClaudeCodeSession(settings, onEvent, translator);
+    const session = new ClaudeCodeSession(settings, onEvent, translator, link);
     try {
       await session.initialize();
     } catch (error) {
       session.connection.query.close();
       throw error;
     }
+    link.sessions.add(session);
     return session;
   }
 
@@ -291,6 +387,7 @@ class ClaudeCodeSession implements ProviderSession {
     private readonly settings: SessionSettings,
     private readonly onEvent: SessionEventListener,
     private readonly translator: Translator,
+    private readonly link: AccountLink,
   ) {
     this.id = settings.sessionId;
     onEvent({ type: 'mode', mode: settings.mode });
@@ -551,11 +648,18 @@ class ClaudeCodeSession implements ProviderSession {
     });
   };
 
+  // The session's query, for the account's usage call, while it runs on Claude Code's own sign-in;
+  // null through a gateway, whose account is the gateway's, and once it has ended.
+  accountQuery(): Query | null {
+    return this.closed || this.settings.gateway !== null ? null : this.connection.query;
+  }
+
   private async pump(connection: Connection): Promise<void> {
     let error: string | undefined;
     try {
       for await (const message of connection.query) {
         if (message.type === 'result') this.followUp = (message.queued_turn_count ?? 0) > 0;
+        this.hearAccount(message);
         for (const event of this.translator.live(message)) this.emit(event);
       }
     } catch (caught) {
@@ -564,10 +668,23 @@ class ClaudeCodeSession implements ProviderSession {
     if (!this.retired.has(connection)) this.finish(error);
   }
 
+  // What a message says of the account on Claude Code's own sign-in: a window of the plan's limits as
+  // it changes, or that a turn failed for want of a sign-in. A gateway's account is the gateway's.
+  private hearAccount(message: SDKMessage): void {
+    if (this.settings.gateway !== null) return;
+    if (message.type === 'rate_limit_event') {
+      const windows = eventWindows(message.rate_limit_info);
+      if (windows.length > 0) this.link.hear({ type: 'usage', windows });
+    } else if (message.type === 'assistant' && message.error === 'authentication_failed') {
+      this.link.hear({ type: 'signed-out' });
+    }
+  }
+
   // The session has ended: what is still open is cancelled, and closed is reported once.
   private finish(error: string | undefined): void {
     if (this.closed) return;
     this.closed = true;
+    this.link.sessions.delete(this);
     for (const [requestId, pending] of this.pending) {
       pending.resolve({ behavior: 'deny', message: 'The session ended.' });
       this.onEvent({ type: 'request-resolved', requestId, outcome: 'cancelled' });

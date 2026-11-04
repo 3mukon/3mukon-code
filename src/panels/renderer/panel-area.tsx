@@ -568,8 +568,9 @@ function openingAt(target: DropTarget): Target {
 }
 
 // A panel's own title, and its folder's name with the full path: a session page or session goes by
-// the given title, a file by its name; the archived sessions and the settings have neither, and go by
-// the title whoever composes the area gives them.
+// the given title, a file by its name, and a terminal by the title whoever composes the area gives it,
+// with its folder; the archived sessions, the accounts and the settings have neither, and go by the
+// title whoever composes the area gives them.
 function describe(
   content: PanelContent,
   sessionPage: string,
@@ -584,7 +585,10 @@ function describe(
     case 'session-page':
     case 'session':
       return { title: sessionPage, detail: nameOf(content.folder), path: content.folder };
+    case 'terminal':
+      return { title: '', detail: nameOf(content.cwd), path: content.cwd };
     case 'archived':
+    case 'accounts':
     case 'settings':
       return { title: '' };
   }

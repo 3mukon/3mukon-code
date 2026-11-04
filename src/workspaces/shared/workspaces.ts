@@ -41,7 +41,12 @@ export interface WorkspacesBridge {
   // Adds the folders among the dropped items, asking for each whether the user trusts it.
   addDropped(items: readonly File[]): Promise<void>;
   select(id: string): Promise<void>;
-  // Shows the workspace's menu, from which the user changes their trust answer or removes it.
-  showMenu(id: string): Promise<void>;
+  // Shows the workspace's menu, from which the user opens its folder in a terminal, changes their
+  // trust answer or removes it; resolves with what the window is to do, opening the folder in a
+  // terminal, or null.
+  showMenu(id: string): Promise<WorkspaceMenuChoice | null>;
   listFolder(id: string, path: string): Promise<FolderListing>;
 }
+
+// What a workspace's menu leaves the window to do.
+export type WorkspaceMenuChoice = 'open-in-terminal';

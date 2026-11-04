@@ -119,14 +119,17 @@ export function sameContent(a: PanelContent, b: PanelContent): boolean {
       return b.kind === 'session' && b.id === a.id;
     case 'file':
       return b.kind === 'file' && b.path === a.path;
+    case 'terminal':
+      return b.kind === 'terminal' && b.id === a.id;
     case 'archived':
+    case 'accounts':
     case 'settings':
       return b.kind === a.kind;
   }
 }
 
-// The folder a panel's content is in, where a session page opened from it starts; none for the
-// archived sessions or the settings.
+// The folder a panel's content is in, where a session page or a terminal opened from it starts; none
+// for the archived sessions, the accounts or the settings.
 export function folderOf(content: PanelContent): string | null {
   switch (content.kind) {
     case 'session-page':
@@ -136,7 +139,10 @@ export function folderOf(content: PanelContent): string | null {
       const parent = content.path.slice(0, content.path.lastIndexOf('/'));
       return parent === '' ? '/' : parent;
     }
+    case 'terminal':
+      return content.cwd;
     case 'archived':
+    case 'accounts':
     case 'settings':
       return null;
   }

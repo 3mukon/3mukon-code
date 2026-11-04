@@ -73,7 +73,7 @@ test('a workspace’s menu is drawn in the window, stays as the press that opene
       await expect(menu).toBeVisible();
       const trusted = menu.getByRole('menuitemcheckbox', { name: 'Trusted' });
       await expect(trusted).toHaveAttribute('aria-checked', 'true');
-      await expect(menu.getByRole('menuitem')).toHaveText(['Remove Workspace']);
+      await expect(menu.getByRole('menuitem')).toHaveText(['Open in Terminal', 'Remove Workspace']);
       await trusted.click();
       await expect(menu).toHaveCount(0);
       await expect(

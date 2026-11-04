@@ -19,7 +19,8 @@
     },
     "menu": {
       "trusted": "已信任",
-      "remove": "移除工作区"
+      "remove": "移除工作区",
+      "openInTerminal": "在终端中打开"
     }
   },
   "sessions": {
@@ -112,7 +113,8 @@
       "showPlain": "以纯文本显示",
       "showMarkdown": "以 Markdown 显示",
       "copy": "拷贝消息",
-      "copied": "已拷贝"
+      "copied": "已拷贝",
+      "notSignedIn": "{{provider}}（未登录）"
     },
     "tool": {
       "named": "{{kind}}：",
@@ -277,5 +279,66 @@
     "claude-code": "Claude Code",
     "codex": "Codex CLI",
     "grok-build": "Grok Build"
+  },
+  "terminal": {
+    "title": "终端",
+    "exited": "程序已结束，退出码 {{code}}。",
+    "close": {
+      "message": "结束 {{program}} 并关闭终端？",
+      "detail": "它仍在这个终端中运行，关闭终端会结束它。",
+      "close": "关闭",
+      "cancel": "取消"
+    }
+  },
+  "accounts": {
+    "title": "账户",
+    "signIn": "登录",
+    "signInPrompt": "{{provider}} 尚未登录。",
+    "state": {
+      "subscription": "已通过订阅登录",
+      "key": "已通过 API 密钥登录",
+      "backend": "已通过其他后端登录",
+      "signedOut": "未登录",
+      "unknown": "尚不知道登录状态"
+    },
+    "checking": "正在检查…",
+    "window": {
+      "five-hour": "5 小时限额",
+      "day": "每日限额",
+      "week": "每周限额",
+      "month": "每月限额",
+      "hours": "{{count}} 小时限额",
+      "other": "用量限额",
+      "model": "{{window}} · {{model}}"
+    },
+    "used": "已用 {{share}}",
+    "unreported": "未提供用量",
+    "resets": "{{time}}重置",
+    "readAt": "读取于{{when}}",
+    "readNow": "刚刚读取",
+    "problem": {
+      "refused": "无法获取此登录的用量，重新登录或许有用。",
+      "unreachable": "无法向 {{provider}} 询问用量。",
+      "unreadable": "{{provider}} 的回答格式无法读取。"
+    },
+    "resetsLeft_other": "剩余 {{count}} 次重置",
+    "reset": "重置限额",
+    "resetOutcome": {
+      "reset": "限额已重置。",
+      "nothing-to-reset": "暂无可重置的用量。",
+      "no-credit": "没有剩余的重置次数。",
+      "already-redeemed": "这次重置已被使用。"
+    },
+    "confirmReset": {
+      "message": "重置 {{provider}} 的用量限额？",
+      "detail": "这会使用账户的一次重置次数。",
+      "reset": "重置",
+      "cancel": "取消"
+    },
+    "notice": {
+      "used": "{{window}}已用 {{share}}",
+      "reached": "{{window}}已用尽",
+      "open": "显示账户"
+    }
   }
 }

@@ -34,17 +34,18 @@ export function windowWorkspacesUi(
       });
       return answer === 'trust';
     },
-    showMenu(workspace, actions) {
-      void prompts
-        .menu([
-          { id: 'trusted', label: t('workspaces.menu.trusted'), checked: workspace.trusted },
-          { separator: true },
-          { id: 'remove', label: t('workspaces.menu.remove') },
-        ])
-        .then((chosen) => {
-          if (chosen === 'trusted') actions.setTrusted(!workspace.trusted);
-          else if (chosen === 'remove') actions.remove();
-        });
+    async showMenu(workspace, actions) {
+      const chosen = await prompts.menu([
+        { id: 'open-in-terminal', label: t('workspaces.menu.openInTerminal') },
+        { separator: true },
+        { id: 'trusted', label: t('workspaces.menu.trusted'), checked: workspace.trusted },
+        { separator: true },
+        { id: 'remove', label: t('workspaces.menu.remove') },
+      ]);
+      if (chosen === 'open-in-terminal') return 'open-in-terminal';
+      if (chosen === 'trusted') actions.setTrusted(!workspace.trusted);
+      else if (chosen === 'remove') actions.remove();
+      return null;
     },
   };
 }

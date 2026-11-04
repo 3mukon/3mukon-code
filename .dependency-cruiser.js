@@ -112,14 +112,38 @@ export default {
       to: { path: '^src/', pathNot: ['^src/panels/', '^src/ui/', '^src/i18n/'] },
     },
     {
-      name: 'providers-only-to-sessions-contract',
+      name: 'terminal-only-to-ui-and-i18n',
+      comment: 'The terminal module uses only the ui and i18n modules (src/terminal/README.md).',
+      severity: 'error',
+      from: { path: '^src/terminal/' },
+      to: { path: '^src/', pathNot: ['^src/terminal/', '^src/ui/', '^src/i18n/'] },
+    },
+    {
+      name: 'accounts-only-to-sessions-model-ui-and-i18n',
       comment:
-        'A provider adapter uses only the sessions interface and model, never other modules or UI code (src/providers/claude-code/README.md).',
+        "The accounts module names the providers by the sessions module's model and uses the ui and i18n modules; the app module hands it the adapters (src/accounts/README.md).",
+      severity: 'error',
+      from: { path: '^src/accounts/' },
+      to: {
+        path: '^src/',
+        pathNot: ['^src/accounts/', '^src/sessions/shared/', '^src/ui/', '^src/i18n/'],
+      },
+    },
+    {
+      name: 'providers-only-to-sessions-and-accounts-contracts',
+      comment:
+        'A provider adapter uses only the sessions interface and model and the accounts interface and model, never other modules or UI code (src/providers/claude-code/README.md).',
       severity: 'error',
       from: { path: '^src/providers/', pathNot: '\\.live\\.test\\.ts$' },
       to: {
         path: '^src/',
-        pathNot: ['^src/providers/', '^src/sessions/main/provider\\.ts$', '^src/sessions/shared/'],
+        pathNot: [
+          '^src/providers/',
+          '^src/sessions/main/provider\\.ts$',
+          '^src/sessions/shared/',
+          '^src/accounts/main/source\\.ts$',
+          '^src/accounts/shared/',
+        ],
       },
     },
     {
@@ -134,6 +158,8 @@ export default {
           '^src/providers/',
           '^src/sessions/main/provider\\.ts$',
           '^src/sessions/shared/',
+          '^src/accounts/main/source\\.ts$',
+          '^src/accounts/shared/',
           '^src/toolset/main/server\\.ts$',
         ],
       },

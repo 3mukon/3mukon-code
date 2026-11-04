@@ -12,6 +12,7 @@ import {
   type Stream,
 } from '@agentclientprotocol/sdk';
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { AccountNews } from '../../../accounts/main/source';
 import type { ProviderSession } from '../../../sessions/main/provider';
 import type { SessionEvent } from '../../../sessions/shared/events';
 import { createGrokBuildProvider } from './adapter';
@@ -189,6 +190,27 @@ class FakeGrok {
         });
       })
       .onRequest(
+        '_x.ai/auth/info',
+        (params) => params as Params,
+        ({ params }) => {
+          record('_x.ai/auth/info', params);
+          return { methodId: 'cached_token', email: 'someone@example.com' };
+        },
+      )
+      .onRequest(
+        '_x.ai/billing',
+        (params) => params as Params,
+        ({ params }) => {
+          record('_x.ai/billing', params);
+          return {
+            config: {
+              currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-11-09T00:00:00Z' },
+              creditUsagePercent: 12,
+            },
+          };
+        },
+      )
+      .onRequest(
         '_x.ai/interject',
         (params) => params as Params,
         ({ params }) => {
@@ -253,6 +275,12 @@ class FakeGrok {
 
   rejectPrompt(message: string): void {
     this.failPrompt?.(message);
+    this.prompt = null;
+  }
+
+  // Refuses the running prompt as Grok does without a sign-in.
+  refuseSignIn(): void {
+    this.failPrompt?.('Authentication required');
     this.prompt = null;
   }
 
@@ -911,5 +939,48 @@ describe('the session’s end', () => {
       error: 'Grok Build stopped unexpectedly (exit code 1).',
     });
     expect(events.some((event) => event.type === 'turn-ended')).toBe(false);
+  });
+});
+
+describe('Grok Build’s account through the adapter', () => {
+  it('asks a running session’s process, or else a short-lived one, and passes on a prompt refused for want of a sign-in', async () => {
+    // A provider of its own, which no other test's sessions run on.
+    const grok = createGrokBuildProvider({
+      startGrok: (cwd, args) => {
+        const started = new FakeGrok(cwd, args);
+        fakes.push(started);
+        return Promise.resolve(started.process);
+      },
+    });
+    const news: AccountNews[] = [];
+    const stop = grok.onAccountNews((heard) => {
+      news.push(heard);
+    });
+    expect(await grok.readAccount(true)).toEqual({
+      signIn: { state: 'signed-in', method: 'subscription' },
+      usage: {
+        windows: [{ span: 'week', used: 12, resetsAt: Date.parse('2026-11-09T00:00:00Z') }],
+      },
+    });
+    expect(fakes).toHaveLength(1);
+    expect(fake(0).cwd).toContain('grok-account-');
+    const { session, until } = await open((onEvent) => grok.start({ cwd: '/work' }, onEvent));
+    await grok.readAccount(false);
+    expect(fakes).toHaveLength(2);
+    expect(fake(1).paramsOf('_x.ai/auth/info')).toHaveLength(1);
+    await session.send('Hello');
+    // Grok refuses the prompt once it has it.
+    for (
+      let attempt = 0;
+      attempt < 200 && fake(1).paramsOf('session/prompt').length === 0;
+      attempt++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    fake(1).refuseSignIn();
+    await until((events) => events.some((event) => event.type === 'turn-ended'));
+    expect(news).toEqual([{ type: 'signed-out' }]);
+    stop();
+    await expect(grok.signInCommand()).rejects.toThrow('no binary of its own');
   });
 });

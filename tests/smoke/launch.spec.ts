@@ -40,7 +40,17 @@ test('the page reaches the main process only through the bridge’s functions', 
       };
     });
     expect(bridge).toEqual({
-      parts: ['approvals', 'files', 'panels', 'prompts', 'sessions', 'settings', 'workspaces'],
+      parts: [
+        'accounts',
+        'approvals',
+        'files',
+        'panels',
+        'prompts',
+        'sessions',
+        'settings',
+        'terminal',
+        'workspaces',
+      ],
       calls: [
         [
           'workspaces',
@@ -101,6 +111,29 @@ test('the page reaches the main process only through the bridge’s functions', 
         ],
         ['approvals', ['answerApproval:function', 'answerQuestion:function']],
         ['settings', ['get:function', 'initial:object', 'onChange:function', 'set:function']],
+        [
+          'terminal',
+          [
+            'close:function',
+            'confirmClose:function',
+            'onExit:function',
+            'onOutput:function',
+            'open:function',
+            'openLink:function',
+            'resize:function',
+            'write:function',
+          ],
+        ],
+        [
+          'accounts',
+          [
+            'list:function',
+            'onChange:function',
+            'reset:function',
+            'setShown:function',
+            'signIn:function',
+          ],
+        ],
         ['prompts', ['answer:function', 'onPrompt:function']],
       ],
       electron: [],
@@ -152,12 +185,17 @@ test('the traffic lights are centred in the 40px title bar, on one line with the
     const button = await window.getByRole('button', { name: 'Archived sessions' }).boundingBox();
     if (button === null) throw new Error('The archived sessions’ button is not shown.');
     expect(button.y + button.height / 2).toBe(13 + 14 / 2);
-    // It lies just after them, and the settings' gear just after it, on the same line.
+    // It lies just after them, the accounts' gauge just after it and the settings' gear after that,
+    // on the same line.
     expect(button.x).toBe(84);
+    const gauge = await window.getByRole('button', { name: 'Accounts' }).boundingBox();
+    if (gauge === null) throw new Error('The accounts’ gauge is not shown.');
+    expect(gauge.y + gauge.height / 2).toBe(13 + 14 / 2);
+    expect(gauge.x).toBe(button.x + button.width + 4);
     const gear = await window.getByRole('button', { name: 'Settings' }).boundingBox();
     if (gear === null) throw new Error('The settings’ gear is not shown.');
     expect(gear.y + gear.height / 2).toBe(13 + 14 / 2);
-    expect(gear.x).toBe(button.x + button.width + 4);
+    expect(gear.x).toBe(gauge.x + gauge.width + 4);
   });
 });
 

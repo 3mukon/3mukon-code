@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
-import type { FolderListing, Workspace, WorkspaceList } from '../shared/workspaces';
+import type {
+  FolderListing,
+  Workspace,
+  WorkspaceList,
+  WorkspaceMenuChoice,
+} from '../shared/workspaces';
 import { listFolder } from './folders';
 import type { StoredWorkspaces, WorkspaceStorage } from './storage';
 
@@ -12,8 +17,9 @@ export interface WorkspacesUi {
   pickFolder(): Promise<string | undefined>;
   // Whether the user trusts the files in the folder.
   askTrust(name: string, path: string): Promise<boolean>;
-  // Shows the workspace's menu; choosing one of its items calls the matching action.
-  showMenu(workspace: Workspace, actions: WorkspaceActions): void;
+  // Shows the workspace's menu; choosing one of its items calls the matching action, and resolves
+  // with what the window is to do, or null.
+  showMenu(workspace: Workspace, actions: WorkspaceActions): Promise<WorkspaceMenuChoice | null>;
 }
 
 export interface WorkspaceActions {
@@ -106,10 +112,10 @@ export class Workspaces {
     this.update({ workspaces, selectedId });
   }
 
-  showMenu(id: string, ui: WorkspacesUi): void {
+  showMenu(id: string, ui: WorkspacesUi): Promise<WorkspaceMenuChoice | null> {
     const workspace = this.list().workspaces.find((candidate) => candidate.id === id);
-    if (workspace === undefined) return;
-    ui.showMenu(workspace, {
+    if (workspace === undefined) return Promise.resolve(null);
+    return ui.showMenu(workspace, {
       setTrusted: (trusted) => {
         this.setTrusted(id, trusted);
       },
