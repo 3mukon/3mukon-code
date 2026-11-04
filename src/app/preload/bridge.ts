@@ -85,6 +85,7 @@ export function createBridge(ipc: Ipc, pathForFile: (file: File) => string): Bri
       setSandbox: (id, sandbox) =>
         invoke(channels.sessions.setSandbox, id, sandbox) as Promise<void>,
       snapshot: (id) => invoke(channels.sessions.snapshot, id) as Promise<SessionSnapshot | null>,
+      preload: (id) => invoke(channels.sessions.preload, id) as Promise<void>,
       onEvent: (listener) =>
         subscribe(channels.sessions.event, (value) => {
           const { id, seq, event } = value as { id: string; seq: number; event: SessionEvent };

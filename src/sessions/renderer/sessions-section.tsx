@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus } from '../../ui/renderer/icons';
 import { Select } from '../../ui/renderer/select';
@@ -14,6 +14,9 @@ const OVERSCAN = 8;
 // How many rows a list takes to be in view until its scroll area is measured, as while it is out of
 // sight.
 const UNMEASURED_ROWS = 40;
+// How long the pointer or the keyboard focus stays on a row, in milliseconds, before the session's
+// history is read ahead, so that a pointer passing over the list reads nothing.
+const READ_AHEAD_AFTER = 150;
 
 // A folder the list can be narrowed to, such as a workspace.
 export interface SessionFolder {
@@ -33,19 +36,26 @@ interface SessionsSectionProps {
   onOpenSession?: (session: SessionSummary) => void;
   // Offers a session's menu, as a secondary click on it or VoiceOver's menu command asks.
   onSessionMenu?: (session: SessionSummary) => void;
+  // A press on a session's row, which whoever composes the section may follow to drag the session
+  // elsewhere.
+  onPressSession?: (session: SessionSummary, press: PointerEvent<HTMLElement>) => void;
+  // Reads a session's history ahead of showing it.
+  onReadAhead?: (session: SessionSummary) => void;
 }
 
 // The sidebar's Sessions section: its heading with New session just after it and, while there are
 // folders to choose, the filter just after that; then the sessions, each labelled with its folder,
-// which a click or Return shows and whose menu a secondary click offers, of which only the rows in
-// view are rendered. The filter narrows the list to the sessions in one folder or below it. Without
-// sessions it shows the heading row alone.
+// which a click or Return shows, whose presses go to whoever drags them elsewhere and whose menu a
+// secondary click offers, of which only the rows in view are rendered. The filter narrows the list to the sessions in
+// one folder or below it. Without sessions it shows the heading row alone.
 export function SessionsSection({
   sessions,
   folders,
   onNewSession,
   onOpenSession,
   onSessionMenu,
+  onPressSession,
+  onReadAhead,
 }: SessionsSectionProps) {
   const { t } = useTranslation();
   const heading = useId();
@@ -94,6 +104,8 @@ export function SessionsSection({
           className="min-h-0"
           {...(onOpenSession === undefined ? {} : { onOpen: onOpenSession })}
           {...(onSessionMenu === undefined ? {} : { onMenu: onSessionMenu })}
+          {...(onPressSession === undefined ? {} : { onPress: onPressSession })}
+          {...(onReadAhead === undefined ? {} : { onReadAhead })}
         />
       )}
     </section>
@@ -111,6 +123,10 @@ interface SessionRowsProps {
   onOpen?: (session: SessionSummary) => void;
   // Offers a session's menu.
   onMenu?: (session: SessionSummary) => void;
+  // A press on a session's row, which may become a drag elsewhere.
+  onPress?: (session: SessionSummary, press: PointerEvent<HTMLElement>) => void;
+  // Reads a session's history ahead of showing it.
+  onReadAhead?: (session: SessionSummary) => void;
   // The id of a dropdown the rows lie in, which a row hides as it shows its session.
   closes?: string;
 }
@@ -125,6 +141,8 @@ export function SessionRows({
   className,
   onOpen,
   onMenu,
+  onPress,
+  onReadAhead,
   closes,
 }: SessionRowsProps) {
   const [area, setArea] = useState<HTMLDivElement | null>(null);
@@ -190,6 +208,8 @@ export function SessionRows({
                 session={session}
                 {...(onOpen === undefined ? {} : { onOpen })}
                 {...(onMenu === undefined ? {} : { onMenu })}
+                {...(onPress === undefined ? {} : { onPress })}
+                {...(onReadAhead === undefined ? {} : { onReadAhead })}
                 {...(closes === undefined ? {} : { closes })}
               />
             </li>
@@ -206,15 +226,38 @@ interface SessionRowProps {
   onOpen?: (session: SessionSummary) => void;
   // Offers the session's menu.
   onMenu?: (session: SessionSummary) => void;
+  // A press on the row, which may become a drag elsewhere.
+  onPress?: (session: SessionSummary, press: PointerEvent<HTMLElement>) => void;
+  // Reads the session's history ahead of showing it.
+  onReadAhead?: (session: SessionSummary) => void;
   // The id of a dropdown the row lies in, which the row hides as it shows its session.
   closes?: string;
 }
 
 // A session as the lists show it, filling its row: its status as a dot and in words for VoiceOver, its
 // title or else its provider's name, and its folder's name, with the path in the tooltip. A click or
-// Return shows it, and a secondary click or VoiceOver's menu command offers its menu.
-function SessionRow({ session, onOpen, onMenu, closes }: SessionRowProps) {
+// Return shows it, a press goes to whoever drags it elsewhere, and a secondary click or VoiceOver's
+// menu command offers its menu. The history of a session that is not running is read ahead once, as
+// a press on the row begins, or once the pointer or the keyboard focus has stayed on it, so that its
+// page has it as it opens.
+function SessionRow({ session, onOpen, onMenu, onPress, onReadAhead, closes }: SessionRowProps) {
   const { t } = useTranslation();
+  const readAhead = useRef<{ timer?: ReturnType<typeof setTimeout>; done: boolean }>({
+    done: false,
+  });
+  const readNow = () => {
+    clearTimeout(readAhead.current.timer);
+    if (readAhead.current.done || session.status !== 'closed' || onReadAhead === undefined) return;
+    readAhead.current.done = true;
+    onReadAhead(session);
+  };
+  const readSoon = () => {
+    clearTimeout(readAhead.current.timer);
+    readAhead.current.timer = setTimeout(readNow, READ_AHEAD_AFTER);
+  };
+  const readNothing = () => {
+    clearTimeout(readAhead.current.timer);
+  };
   const hiding =
     closes === undefined ? {} : ({ popoverTarget: closes, popoverTargetAction: 'hide' } as const);
   return (
@@ -222,6 +265,14 @@ function SessionRow({ session, onOpen, onMenu, closes }: SessionRowProps) {
       type="button"
       disabled={onOpen === undefined}
       {...hiding}
+      onPointerDown={(event) => {
+        readNow();
+        onPress?.(session, event);
+      }}
+      onPointerEnter={readSoon}
+      onPointerLeave={readNothing}
+      onFocus={readSoon}
+      onBlur={readNothing}
       onClick={() => {
         onOpen?.(session);
       }}

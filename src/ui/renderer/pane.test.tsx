@@ -95,31 +95,23 @@ describe('Pane', () => {
     }
   });
 
-  it('drags by its title and detail when its parent lets it', () => {
-    const onDragStart = vi.fn();
-    const onDragEnd = vi.fn();
-    const { rerender } = render(<Pane title="web" detail="me" focused onFocus={vi.fn()} />);
-    const handle = () => {
-      const element = screen.getByText('me').parentElement;
-      if (element === null) throw new Error('The handle is not shown.');
-      return element;
-    };
-    expect(handle().getAttribute('draggable')).toBe('false');
-    rerender(
+  it('gives its parent the presses of its title and detail, whose text does not select, and never drags as the system does', () => {
+    const onHandlePointerDown = vi.fn();
+    render(
       <Pane
         title="web"
         detail="me"
         focused
         onFocus={vi.fn()}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
+        onHandlePointerDown={onHandlePointerDown}
       />,
     );
-    expect(handle().getAttribute('draggable')).toBe('true');
-    fireEvent.dragStart(handle());
-    fireEvent.dragEnd(handle());
-    expect(onDragStart).toHaveBeenCalledOnce();
-    expect(onDragEnd).toHaveBeenCalledOnce();
+    const handle = screen.getByText('me').parentElement;
+    if (handle === null) throw new Error('The handle is not shown.');
+    expect(handle.hasAttribute('draggable')).toBe(false);
+    expect(handle.className).toContain('select-none');
+    fireEvent.pointerDown(screen.getByText('web'));
+    expect(onHandlePointerDown).toHaveBeenCalledOnce();
   });
 
   it('goes without a status, shows its detail with a tooltip, and closes from its header', () => {

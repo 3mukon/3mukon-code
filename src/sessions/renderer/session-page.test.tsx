@@ -3,7 +3,12 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { ModelOption, SessionEvent } from '../shared/events';
 import { initialSessionState, type SessionState } from '../shared/session-state';
-import type { SessionEventsListener, SessionsBridge, SessionSummary } from '../shared/sessions';
+import type {
+  SessionEventsListener,
+  SessionsBridge,
+  SessionSnapshot,
+  SessionSummary,
+} from '../shared/sessions';
 import { SessionPage } from './session-page';
 import { preloadOffers } from './use-offers';
 
@@ -60,6 +65,7 @@ function fakeBridge(state: SessionState | null = null) {
     snapshot: vi.fn<SessionsBridge['snapshot']>(() =>
       Promise.resolve(state === null ? null : { seq: 1, state }),
     ),
+    preload: vi.fn<SessionsBridge['preload']>(() => Promise.resolve()),
     onEvent: (listener: SessionEventsListener) => {
       listeners.add(listener);
       return () => {
@@ -152,7 +158,7 @@ describe('SessionPage', () => {
   it('chooses the session’s settings before its first message, and starts it with that message', async () => {
     const { bridge } = fakeBridge();
     const onStarted = vi.fn();
-    render(
+    const { rerender } = render(
       <SessionPage bridge={bridge} folder="/Users/me/web" sessionId={null} onStarted={onStarted} />,
     );
     await settle();
@@ -184,6 +190,127 @@ describe('SessionPage', () => {
     expect(screen.getByText('Fix the build')).toBeDefined();
     await settle();
     expect(onStarted.mock.calls).toEqual([['s1']]);
+
+    // As the page goes on as the session's own, it shows the settings the session started with
+    // until the session's state comes, and the message still.
+    bridge.snapshot.mockReturnValueOnce(new Promise(() => undefined));
+    rerender(
+      <SessionPage bridge={bridge} folder="/Users/me/web" sessionId="s1" onStarted={onStarted} />,
+    );
+    await settle();
+    expect(screen.getByText('Fix the build')).toBeDefined();
+    expect(chooser('Model').value).toBe('opus');
+    expect(chooser('Reasoning effort').value).toBe('max');
+    expect(chooser('Sandbox').value).toBe('read-only');
+    expect(chooser('Sandbox').closest('.invisible')).toBeNull();
+  });
+
+  it('shows nothing of the settings of a session it has not started until the session’s state comes', async () => {
+    const { bridge } = fakeBridge();
+    let found: (snapshot: SessionSnapshot | null) => void = () => undefined;
+    bridge.snapshot.mockReturnValueOnce(
+      new Promise((resolve) => {
+        found = resolve;
+      }),
+    );
+    render(
+      <SessionPage bridge={bridge} folder="/Users/me/web" sessionId="s1" onStarted={vi.fn()} />,
+    );
+    await settle();
+    expect(chooser('Sandbox').closest('.invisible')).not.toBeNull();
+    await act(async () => {
+      found({
+        seq: 1,
+        state: { ...initialSessionState(true), closed: true, sandbox: 'read-only' },
+      });
+      await Promise.resolve();
+    });
+    expect(chooser('Sandbox').closest('.invisible')).toBeNull();
+    expect(chooser('Sandbox').value).toBe('read-only');
+    // That the history is still being read is said only once that has taken a while, which the
+    // notice's animation waits for.
+    expect(screen.getByText('Reading the session’s history…').className).toContain(
+      'animate-appear',
+    );
+  });
+
+  it('renders a long history’s last items first, as many as fill the view, and the rest behind them', async () => {
+    // A view 1,000 pixels tall, and items 30 pixels tall; the test environment lays out nothing.
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1_000);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.childElementCount * 30;
+    });
+    const { bridge } = fakeBridge({
+      ...initialSessionState(),
+      closed: true,
+      timeline: Array.from({ length: 100 }, (_, index) => ({
+        type: 'message' as const,
+        id: `m${String(index)}`,
+        role: 'user' as const,
+        text: `Step ${String(index)}`,
+      })),
+    });
+    vi.useFakeTimers();
+    try {
+      render(
+        <SessionPage bridge={bridge} folder="/Users/me/web" sessionId="s1" onStarted={vi.fn()} />,
+      );
+      await settle();
+      // 24 items leave the view room, so 48 show at first, the last of them.
+      expect(screen.queryByText('Step 51')).toBeNull();
+      expect(screen.getByText('Step 52')).toBeDefined();
+      expect(screen.getByText('Step 99')).toBeDefined();
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      expect(screen.getByText('Step 0')).toBeDefined();
+      expect(screen.getByText('Step 99')).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the end of the activity in view as it changes size after it renders, until the user scrolls up', async () => {
+    const resized: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          resized.push(callback);
+        }
+        observe() {
+          return undefined;
+        }
+        disconnect() {
+          return undefined;
+        }
+      },
+    );
+    try {
+      const { bridge } = fakeBridge({ ...initialSessionState(), mode: 'auto' });
+      render(
+        <SessionPage bridge={bridge} folder="/Users/me/web" sessionId="s1" onStarted={vi.fn()} />,
+      );
+      await settle();
+      const activity = screen.getByRole('region', { name: 'Activity' });
+      const grow = (height: number) => {
+        Object.defineProperty(activity, 'scrollHeight', { configurable: true, value: height });
+        Object.defineProperty(activity, 'clientHeight', { configurable: true, value: 300 });
+        act(() => {
+          for (const callback of resized) callback();
+        });
+      };
+      grow(900);
+      expect(activity.scrollTop).toBe(900);
+      activity.scrollTop = 100;
+      fireEvent.scroll(activity);
+      grow(1_200);
+      expect(activity.scrollTop).toBe(100);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('starts on the provider’s default model, under its own name, at medium effort', async () => {

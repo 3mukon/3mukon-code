@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Request } from '../../approvals/renderer/requests';
 import { WaitingButton } from '../../approvals/renderer/waiting-button';
 import { nextWaiting } from '../../approvals/shared/waiting';
 import { useFileEditors } from '../../files/renderer/use-file-editors';
-import { writeItemDrag } from '../../panels/renderer/item-drag';
 import { contentOf, panelsOf, type Panel } from '../../panels/renderer/layout';
-import { PanelArea, type PanelView } from '../../panels/renderer/panel-area';
+import { PanelArea, type PanelAreaHandle, type PanelView } from '../../panels/renderer/panel-area';
 import { usePanels } from '../../panels/renderer/use-panels';
 import type { SessionSummary } from '../../sessions/shared/sessions';
 import { ArchivedSessions } from '../../sessions/renderer/archived-sessions';
@@ -29,14 +28,17 @@ import { PromptHost } from './prompt-host';
 // waiting on the user shows the one that has waited longest. The sidebar's divider runs through the
 // title bar, and while the sidebar is hidden, the window buttons lie over the main area. The sidebar
 // holds the Workspaces section above the Sessions section, with a thin line between them; the main
-// area holds the panel area, blank until something opens in it. The workspaces' tree rows drag into
-// the panel area, and open in it from the keyboard. New session opens a session page in the selected
-// workspace's folder, or while there is none in the day's folder in ~/3mukon-code; a session in the
-// lists shows in its panel, or opens in one, and so does a file opened from a tree. A session's menu
-// archives, unarchives or removes it, and a removed session's panels close. Session pages and
-// sessions fill their panels, titled by the session once it runs, and files open in editors, which
-// mark unsaved changes and ask about them before their panels close. As the window opens, it asks for
-// what session pages offer, each provider's models among them, so that a page has them when it opens.
+// area holds the panel area, blank until something opens in it. The workspaces' tree rows and the
+// Sessions list's rows drag into the panel area, which follows their presses, and tree rows open in
+// it from the keyboard. New session opens a session page in the selected workspace's folder, or while
+// there is none in the day's folder in ~/3mukon-code; a session in the lists shows in its first
+// panel, or opens in one, and so does a file opened from a tree. The lists have a session's history
+// read ahead as the user reaches for it. A session's menu archives, unarchives or removes it, and a
+// removed session's panels close. Session pages and sessions fill their panels, titled by the session
+// once it runs, a page going on as its session's page once it starts it, and files open in editors,
+// which mark unsaved changes and ask about them before their panels close. As the window opens, it
+// asks for what session pages offer, each provider's models among them, so that a page has them when
+// it opens.
 // The menus and questions the main process asks the user show over it, in the app's own look.
 export function App({ bridge }: { bridge: Bridge }) {
   const { t } = useTranslation();
@@ -47,6 +49,7 @@ export function App({ bridge }: { bridge: Bridge }) {
   // process gives it among the sessions the window has shown.
   const [opening, setOpening] = useState<SessionSummary | null>(null);
   const panels = usePanels();
+  const area = useRef<PanelAreaHandle>(null);
   const fileEditors = useFileEditors(bridge.files);
   // The session whose oldest waiting request takes the keyboard focus, each time the key changes.
   const [requestFocus, setRequestFocus] = useState<{ sessionId: string; key: number } | null>(null);
@@ -62,11 +65,16 @@ export function App({ bridge }: { bridge: Bridge }) {
     else bridge.sessions.dayFolder().then(open, report);
   };
 
+  // The first panel, in reading order, that shows the session, where a session in the lists shows and
+  // its oldest waiting request takes the keyboard focus.
+  const sessionPanel = (id: string) =>
+    panelsOf(panels.layout).find(
+      (panel) => panel.content.kind === 'session' && panel.content.id === id,
+    );
+
   const openSession = (session: SessionSummary) => {
     if (session.archived === true) setOpening(session);
-    const shown = panelsOf(panels.layout).find(
-      (panel) => panel.content.kind === 'session' && panel.content.id === session.id,
-    );
+    const shown = sessionPanel(session.id);
     if (shown !== undefined) panels.focus(shown.id);
     else panels.open([{ kind: 'session', id: session.id, folder: session.cwd }]);
   };
@@ -81,6 +89,11 @@ export function App({ bridge }: { bridge: Bridge }) {
         }
       }
     }, reportMenu);
+  };
+
+  // Reads a session's history ahead of showing it, from either list.
+  const readAhead = (session: SessionSummary) => {
+    bridge.sessions.preload(session.id).catch(reportReadAhead);
   };
 
   // Shows a waiting session in its panel, with the focus on its oldest waiting request.
@@ -98,6 +111,7 @@ export function App({ bridge }: { bridge: Bridge }) {
         count={sessions.archived}
         onOpenSession={openSession}
         onSessionMenu={showSessionMenu}
+        onReadAhead={readAhead}
       />
       <WaitingButton sessions={sessions.sessions} onShow={showWaiting} />
     </div>
@@ -146,7 +160,9 @@ export function App({ bridge }: { bridge: Bridge }) {
                 renderRequest: (item, place) => (
                   <Request
                     item={item}
-                    {...(requestFocus?.sessionId === sessionId && place.oldestWaiting
+                    {...(requestFocus?.sessionId === sessionId &&
+                    place.oldestWaiting &&
+                    sessionPanel(sessionId)?.id === panel.id
                       ? { focusKey: requestFocus.key }
                       : {})}
                     answering={{
@@ -159,10 +175,7 @@ export function App({ bridge }: { bridge: Bridge }) {
                 ),
               })}
           onStarted={(started) => {
-            panels.open([{ kind: 'session', id: started, folder: content.folder }], {
-              kind: 'replace',
-              panelId: panel.id,
-            });
+            panels.show(panel.id, { kind: 'session', id: started, folder: content.folder });
           }}
         />
       ),
@@ -226,8 +239,8 @@ export function App({ bridge }: { bridge: Bridge }) {
             <WorkspacesSection
               bridge={bridge.workspaces}
               list={workspaces}
-              onDragItem={(item, dataTransfer) => {
-                writeItemDrag(dataTransfer, item);
+              onPressItem={(item, press) => {
+                area.current?.dragItem(item, nameOf(item.path), press);
               }}
               onOpenItem={openItem}
             />
@@ -239,12 +252,22 @@ export function App({ bridge }: { bridge: Bridge }) {
               onNewSession={openNewSession}
               onOpenSession={openSession}
               onSessionMenu={showSessionMenu}
+              onPressSession={(session, press) => {
+                const item = { kind: 'session', id: session.id, folder: session.cwd } as const;
+                const title =
+                  session.title === undefined || session.title === ''
+                    ? t(`providers.${session.provider}`)
+                    : session.title;
+                area.current?.dragItem(item, title, press);
+              }}
+              onReadAhead={readAhead}
             />
           </div>
         </div>
       </aside>
       <main className="min-h-0 min-w-0 flex-1">
         <PanelArea
+          ref={area}
           panels={panels}
           bridge={bridge.panels}
           view={view}
@@ -257,10 +280,20 @@ export function App({ bridge }: { bridge: Bridge }) {
   );
 }
 
+// The last name in a path, as the tree shows a row, or the path itself for the startup disk's root.
+function nameOf(path: string): string {
+  const name = path.replace(/\/+$/, '').split('/').at(-1);
+  return name === undefined || name === '' ? path : name;
+}
+
 function report(error: unknown): void {
   console.error('The session page could not open:', error);
 }
 
 function reportMenu(error: unknown): void {
   console.error('The session’s menu could not do that:', error);
+}
+
+function reportReadAhead(error: unknown): void {
+  console.error('The session’s history could not be read ahead:', error);
 }

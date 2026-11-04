@@ -10,6 +10,8 @@ export interface Panels {
   // Opens each item in a panel of its own at the target. Without a target, the items fill the empty
   // area, or else open to the right of the focused panel.
   open(contents: readonly PanelContent[], at?: Target): void;
+  // The panel goes on showing something else, as a session page does its session once it starts it.
+  show(panelId: string, content: PanelContent): void;
   close(panelId: string): void;
   focus(panelId: string): void;
   resize(splitId: string, ratio: number): void;
@@ -25,6 +27,9 @@ export function usePanels(): Panels {
       focusedId: state.focusedId,
       open: (contents, at) => {
         dispatch({ type: 'open', contents, at });
+      },
+      show: (panelId, content) => {
+        dispatch({ type: 'show', panelId, content });
       },
       close: (panelId) => {
         dispatch({ type: 'close', panelId });

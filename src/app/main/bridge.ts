@@ -254,6 +254,9 @@ export function serveBridge({
   handle(channels.sessions.snapshot, z.tuple([id]), (_window, session) =>
     sessions.snapshot(session),
   );
+  handle(channels.sessions.preload, z.tuple([id]), (_window, session) => {
+    sessions.preload(session);
+  });
   handle(channels.panels.itemsAt, z.tuple([z.array(path).max(100)]), async (_window, paths) => {
     const items = await droppedItems(paths);
     files.grant(items.filter((item) => item.kind === 'file').map((item) => item.path));

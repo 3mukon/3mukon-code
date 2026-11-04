@@ -16,6 +16,8 @@ interface ArchivedSessionsProps {
   onOpenSession: (session: SessionSummary) => void;
   // Offers a session's menu, which unarchives or removes it.
   onSessionMenu: (session: SessionSummary) => void;
+  // Reads a session's history ahead of showing it.
+  onReadAhead?: (session: SessionSummary) => void;
 }
 
 // The archived sessions, for the title bar: a button whose dropdown, a sheet of the window's paper as
@@ -28,6 +30,7 @@ export function ArchivedSessions({
   count,
   onOpenSession,
   onSessionMenu,
+  onReadAhead,
 }: ArchivedSessionsProps) {
   const { t } = useTranslation();
   const dropdown = useId();
@@ -53,6 +56,7 @@ export function ArchivedSessions({
           count={count}
           onOpenSession={onOpenSession}
           onSessionMenu={onSessionMenu}
+          {...(onReadAhead === undefined ? {} : { onReadAhead })}
         />
       )}
     </>
@@ -74,6 +78,7 @@ function ArchivedDropdown({
   count,
   onOpenSession,
   onSessionMenu,
+  onReadAhead,
 }: ArchivedDropdownProps) {
   const [open, setOpen] = useState(false);
   // The archived sessions, the most recently active first, once loaded.
@@ -118,6 +123,7 @@ function ArchivedDropdown({
           className={LIST_HEIGHT}
           onOpen={onOpenSession}
           onMenu={onSessionMenu}
+          {...(onReadAhead === undefined ? {} : { onReadAhead })}
           closes={id}
         />
       )}

@@ -23,6 +23,23 @@ export default defineConfig(
   {
     files: ['src/**/renderer/**/*.{ts,tsx}'],
     extends: [reactHooks.configs.flat.recommended],
+    rules: {
+      // What is dragged within the window drags with the pointer's own events, since a drag of the
+      // system's shows Chromium's copy badge on macOS as it enters the page (docs/lessons/L-0003).
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "JSXAttribute[name.name='onDragStart']",
+          message:
+            'Drag within the window with the pointer’s own events, not a drag of the system’s (L-0003).',
+        },
+        {
+          selector: "JSXAttribute[name.name='draggable']:not([value.expression.value=false])",
+          message:
+            'Drag within the window with the pointer’s own events, not a drag of the system’s (L-0003).',
+        },
+      ],
+    },
   },
   {
     // Plain JavaScript files, such as this one, belong to no TypeScript project.

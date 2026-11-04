@@ -271,6 +271,13 @@ export class SessionHost {
     return { seq: hosted.seq, state: hosted.state };
   }
 
+  // Begins reading the history of a session of an earlier run, where it has not been read, ahead of
+  // its first snapshot, so that its page shows it at once. The session is not shown by this.
+  preload(id: string): void {
+    const hosted = this.sessions.get(id);
+    if (hosted !== undefined) void this.read(hosted);
+  }
+
   // What the lists show: the sessions started in the app, in this run and earlier ones, that are not
   // archived, those the records keep and any that is open, the most recently active first; how many
   // are archived; and the others whose pages the window has shown in this run.

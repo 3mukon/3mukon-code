@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import { initialSessionState } from '../../sessions/shared/session-state';
 import type { SessionList, SessionSummary } from '../../sessions/shared/sessions';
@@ -59,6 +59,7 @@ function fakeBridge(
       saveImage: () => Promise.resolve(false),
       imageMenu: () => Promise.resolve(null),
       snapshot: () => Promise.resolve(null),
+      preload: () => Promise.resolve(),
       onEvent: () => () => undefined,
     },
     panels: { itemsAt: () => Promise.resolve([]) },
@@ -401,6 +402,80 @@ describe('App', () => {
     expect(document.activeElement?.textContent).toContain('run s1');
   });
 
+  it('gives the focus to the waiting request in the first of the panels that show its session', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/web',
+        title: 'Fix the build',
+        status: 'waiting',
+        activeAt: 1,
+        waitingSince: 100,
+      },
+    ]);
+    bridge.sessions.snapshot = () =>
+      Promise.resolve({
+        seq: 0,
+        state: {
+          ...initialSessionState(),
+          turnRunning: true,
+          timeline: [
+            {
+              type: 'approval',
+              request: {
+                id: 'r1',
+                action: 'command',
+                command: 'run s1',
+                canAllowForSession: false,
+                denyByDefault: false,
+                requestedAt: 100,
+              },
+            },
+          ],
+        },
+      });
+    await renderApp(bridge);
+    // happy-dom lays nothing out, so the main area and each panel in it measure 1000 by 600 pixels.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 600,
+      width: 1000,
+      height: 600,
+      toJSON: () => ({}),
+    });
+    const row = () =>
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Fix the build/,
+      });
+    for (const clientX of [500, 990]) {
+      fireEvent.pointerDown(row(), { pointerId: 1, button: 0, clientX: -100, clientY: 20 });
+      fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX, clientY: 300 });
+      fireEvent.pointerUp(window, { pointerId: 1, clientX, clientY: 300 });
+      fireEvent.click(row());
+    }
+    const [first, second] = within(screen.getByRole('main')).getAllByRole('region', {
+      name: 'Fix the build',
+    });
+    await waitFor(() => {
+      expect(second?.textContent).toContain('run s1');
+    });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'A', metaKey: true, shiftKey: true });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('Run this command?');
+    });
+    expect(first?.contains(document.activeElement)).toBe(true);
+    expect(first?.getAttribute('aria-current')).toBe('true');
+  });
+
   it('shows a session clicked in the list in a panel of its own, titled by the session', async () => {
     await renderApp(
       fakeBridge({ workspaces: [], selectedId: null }, [
@@ -427,6 +502,71 @@ describe('App', () => {
     expect(
       within(screen.getByRole('main')).getAllByRole('region', { name: 'Fix the build' }),
     ).toHaveLength(1);
+  });
+
+  it('drags sessions from the list into the panel area, one into several panels as files go, and has the history of one that is not running read ahead', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/web',
+        title: 'Fix the build',
+        status: 'closed',
+        activeAt: 2,
+      },
+      {
+        id: 's2',
+        provider: 'claude-code',
+        sessionId: 'p2',
+        cwd: '/Users/me/web',
+        title: 'Write the docs',
+        status: 'running',
+        activeAt: 1,
+      },
+    ]);
+    const preload = vi.fn<Bridge['sessions']['preload']>(() => Promise.resolve());
+    bridge.sessions.preload = preload;
+    await renderApp(bridge);
+    // happy-dom lays nothing out, so the main area and each panel in it measure 1000 by 600 pixels.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 600,
+      width: 1000,
+      height: 600,
+      toJSON: () => ({}),
+    });
+    const row = (name: RegExp) =>
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', { name });
+    // A press on a row in the sidebar, dragged to a point in the main area and let go there, with the
+    // click the browser gives the release.
+    const dragIn = (name: RegExp, clientX: number, clientY: number) => {
+      fireEvent.pointerDown(row(name), { pointerId: 1, button: 0, clientX: -100, clientY: 20 });
+      fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX, clientY });
+      fireEvent.pointerUp(window, { pointerId: 1, clientX, clientY });
+      fireEvent.click(row(name));
+    };
+
+    // A press reads the history at once; a running session has none to read.
+    for (const name of [/Write the docs/, /Fix the build/]) {
+      fireEvent.pointerDown(row(name), { pointerId: 1, button: 0 });
+      fireEvent.pointerUp(window, { pointerId: 1 });
+    }
+    expect(preload.mock.calls).toEqual([['s1']]);
+
+    // Dragged to the empty area, a session fills it; near its panel's edge, it opens again beside it,
+    // and the release's click does not show the first.
+    expect(row(/Fix the build/).hasAttribute('draggable')).toBe(false);
+    dragIn(/Fix the build/, 500, 300);
+    const main = screen.getByRole('main');
+    within(main).getByRole('region', { name: 'Fix the build' });
+    dragIn(/Fix the build/, 990, 300);
+    const panels = within(main).getAllByRole('region', { name: 'Fix the build' });
+    expect(panels.map((panel) => panel.getAttribute('aria-current'))).toEqual([null, 'true']);
   });
 
   it('hides the sidebar with Command-B and shows it again', async () => {

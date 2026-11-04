@@ -69,6 +69,7 @@ describe('createBridge', () => {
     await bridge.approvals.answerQuestion('s1', 'q1', { decision: 'decline' });
     await bridge.sessions.setSandbox('s1', 'read-only');
     await bridge.sessions.snapshot('s1');
+    await bridge.sessions.preload('s2');
     await bridge.sessions.copyText('Hi');
     await bridge.sessions.copyImage(image);
     await bridge.sessions.saveImage(image);
@@ -119,6 +120,7 @@ describe('createBridge', () => {
       ['approvals:answer-question', 's1', 'q1', { decision: 'decline' }],
       ['sessions:set-sandbox', 's1', 'read-only'],
       ['sessions:snapshot', 's1'],
+      ['sessions:preload', 's2'],
       ['sessions:copy-text', 'Hi'],
       ['sessions:copy-image', image],
       ['sessions:save-image', image],

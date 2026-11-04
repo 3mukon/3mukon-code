@@ -614,6 +614,35 @@ describe('SessionHost history', () => {
     expect(saved).toEqual([]);
   });
 
+  it('reads a session’s history ahead of its first snapshot, once, without showing the session', async () => {
+    const claude = fakeProvider('claude-code');
+    const { records } = memoryRecords([
+      kept(),
+      kept({ id: 'older', sessionId: 'claude-8', activeAt: 500, archived: true }),
+    ]);
+    const host = new SessionHost([claude.provider], records);
+    const changes: SessionList[] = [];
+    host.onChange((list) => changes.push(list));
+    host.preload('kept');
+    host.preload('older');
+    host.preload('kept');
+    host.preload('gone');
+    await settle();
+    expect(claude.history.mock.calls).toEqual([
+      ['claude-9', folder('web')],
+      ['claude-8', folder('web')],
+    ]);
+    // The first snapshot has the history already, and reads nothing more.
+    expect(host.snapshot('kept')?.state).toMatchObject({
+      loadingHistory: false,
+      timeline: [{ type: 'message', role: 'user', text: 'Fix the build' }],
+    });
+    expect(claude.history).toHaveBeenCalledTimes(2);
+    // The archived session, read ahead but not shown, stays out of the shown sessions.
+    expect(changes.every((list) => list.shown.length === 0)).toBe(true);
+    expect(host.list().shown).toEqual([]);
+  });
+
   it('says when a session’s history could not be read', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const claude = fakeProvider('claude-code');

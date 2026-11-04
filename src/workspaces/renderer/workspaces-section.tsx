@@ -1,4 +1,4 @@
-import { useId, useState, type DragEvent } from 'react';
+import { useId, useState, type DragEvent, type PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus } from '../../ui/renderer/icons';
 import type { WorkspaceList, WorkspacesBridge } from '../shared/workspaces';
@@ -7,8 +7,9 @@ import { WorkspaceTree, type TreeItem } from './workspace-tree';
 interface WorkspacesSectionProps {
   bridge: WorkspacesBridge;
   list: WorkspaceList;
-  // Puts a row of the tree being dragged on the drag, for whatever it is dropped on.
-  onDragItem?: (item: TreeItem, dataTransfer: DataTransfer) => void;
+  // A press on a row of the tree, which whoever composes the section may follow to drag the row
+  // elsewhere.
+  onPressItem?: (item: TreeItem, press: PointerEvent<HTMLElement>) => void;
   // Opens a row of the tree elsewhere, as dropping it would.
   onOpenItem?: (item: TreeItem) => void;
 }
@@ -19,7 +20,7 @@ interface WorkspacesSectionProps {
 export function WorkspacesSection({
   bridge,
   list,
-  onDragItem,
+  onPressItem,
   onOpenItem,
 }: WorkspacesSectionProps) {
   const { t } = useTranslation();
@@ -73,7 +74,7 @@ export function WorkspacesSection({
           bridge={bridge}
           list={list}
           labelledBy={heading}
-          onDragItem={onDragItem}
+          onPressItem={onPressItem}
           onOpenItem={onOpenItem}
         />
       )}

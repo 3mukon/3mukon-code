@@ -106,6 +106,71 @@ describe('SessionsSection', () => {
     expect(onOpenSession.mock.calls).toEqual([[sessions[0]]]);
   });
 
+  it('hands a press on a session’s row to whoever drags it elsewhere, and never drags as the system does', () => {
+    const onPressSession = vi.fn();
+    render(
+      <SessionsSection
+        sessions={sessions}
+        folders={folders}
+        onOpenSession={vi.fn()}
+        onPressSession={onPressSession}
+      />,
+    );
+    const row = within(region()).getByRole('button', { name: /Landing page/ });
+    expect(row.hasAttribute('draggable')).toBe(false);
+    fireEvent.pointerDown(row, { pointerId: 1, button: 0, clientX: 40, clientY: 200 });
+    expect(onPressSession).toHaveBeenCalledOnce();
+    expect(onPressSession.mock.calls[0]?.[0]).toBe(sessions[2]);
+    expect(onPressSession.mock.calls[0]?.[1]).toMatchObject({ pointerId: 1, clientX: 40 });
+  });
+
+  it('reads ahead the history of a session that is not running, once, as a press begins or once the pointer or the focus has stayed on its row', () => {
+    vi.useFakeTimers();
+    try {
+      const onReadAhead = vi.fn();
+      render(
+        <SessionsSection
+          sessions={sessions}
+          folders={folders}
+          onOpenSession={vi.fn()}
+          onReadAhead={onReadAhead}
+        />,
+      );
+      const row = (name: RegExp) => within(region()).getByRole('button', { name });
+      // A pointer passing over the row reads nothing.
+      fireEvent.pointerEnter(row(/Landing page/));
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+      fireEvent.pointerLeave(row(/Landing page/));
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(onReadAhead).not.toHaveBeenCalled();
+      // One that stays reads it, and only once.
+      fireEvent.pointerEnter(row(/Landing page/));
+      act(() => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(onReadAhead.mock.calls).toEqual([[sessions[2]]]);
+      fireEvent.pointerDown(row(/Landing page/));
+      fireEvent.focus(row(/Landing page/));
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(onReadAhead).toHaveBeenCalledOnce();
+      // A running session has no history to read.
+      fireEvent.pointerDown(row(/Fix the build/));
+      fireEvent.focus(row(/Fix the build/));
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(onReadAhead).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('offers a session’s menu at a secondary click, in place of the page’s own', () => {
     const onSessionMenu = vi.fn();
     render(

@@ -7,6 +7,7 @@ import {
   inOpeningOrder,
   panelsOf,
   reducePanels,
+  sameContent,
   type Layout,
   type PanelsAction,
   type PanelsState,
@@ -63,13 +64,31 @@ describe('reducePanels', () => {
     expect(shape(state.layout)).toBe('row(row(page /web, /web/b.ts), /web/a.ts)');
   });
 
-  it('puts an item in a panel’s place, keeping the panel', () => {
+  it('puts an item in a panel’s place as a panel of its own, and focuses it', () => {
     const state = run(
       { type: 'open', contents: [page('/web')] },
       { type: 'open', contents: [file('/web/a.ts')], at: { kind: 'replace', panelId: 'panel-1' } },
     );
     expect(shape(state.layout)).toBe('/web/a.ts');
-    expect(panelsOf(state.layout).map((panel) => panel.id)).toEqual(['panel-1']);
+    expect(panelsOf(state.layout).map((panel) => panel.id)).toEqual(['panel-2']);
+    expect(state.focusedId).toBe('panel-2');
+  });
+
+  it('shows something else in the same panel, as a session page goes on as its session, and focuses it', () => {
+    const opened = run(
+      { type: 'open', contents: [page('/web')] },
+      { type: 'open', contents: [file('/web/a.ts')] },
+    );
+    const session: PanelContent = { kind: 'session', id: 's1', folder: '/web' };
+    const shown = reducePanels(opened, { type: 'show', panelId: 'panel-1', content: session });
+    expect(panelsOf(shown.layout)).toEqual([
+      { type: 'panel', id: 'panel-1', content: session },
+      { type: 'panel', id: 'panel-2', content: file('/web/a.ts') },
+    ]);
+    expect(shown.focusedId).toBe('panel-1');
+    expect(reducePanels(opened, { type: 'show', panelId: 'panel-9', content: session })).toBe(
+      opened,
+    );
   });
 
   it('opens several items one beside the other, and focuses the last', () => {
@@ -183,9 +202,24 @@ describe('moving panels', () => {
 });
 
 describe('helpers', () => {
-  it('opens a folder as a session page and a file as itself', () => {
+  it('opens a folder as a session page, a file as itself and a session as itself', () => {
     expect(contentOf({ kind: 'folder', path: '/web' })).toEqual(page('/web'));
     expect(contentOf({ kind: 'file', path: '/web/a.ts' })).toEqual(file('/web/a.ts'));
+    expect(contentOf({ kind: 'session', id: 's1', folder: '/web' })).toEqual({
+      kind: 'session',
+      id: 's1',
+      folder: '/web',
+    });
+  });
+
+  it('tells contents that show the same', () => {
+    const session = (id: string): PanelContent => ({ kind: 'session', id, folder: '/web' });
+    expect(sameContent(page('/web'), page('/web'))).toBe(true);
+    expect(sameContent(file('/web/a.ts'), file('/web/a.ts'))).toBe(true);
+    expect(sameContent(session('s1'), session('s1'))).toBe(true);
+    expect(sameContent(page('/web'), page('/api'))).toBe(false);
+    expect(sameContent(session('s1'), session('s2'))).toBe(false);
+    expect(sameContent(file('/web'), page('/web'))).toBe(false);
   });
 
   it('finds the folder a panel’s content is in', () => {

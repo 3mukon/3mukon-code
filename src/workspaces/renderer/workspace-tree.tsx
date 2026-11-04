@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type PointerEvent,
   type ReactNode,
   type SyntheticEvent,
 } from 'react';
@@ -56,8 +57,8 @@ interface WorkspaceTreeProps {
   list: WorkspaceList;
   // The id of the heading that names the tree.
   labelledBy: string;
-  // Puts a row being dragged on the drag, for whatever it is dropped on.
-  onDragItem?: (item: TreeItem, dataTransfer: DataTransfer) => void;
+  // A press on a row, which whoever composes the tree may follow to drag the row elsewhere.
+  onPressItem?: (item: TreeItem, press: PointerEvent<HTMLElement>) => void;
   // Opens a row elsewhere, as dropping it would.
   onOpenItem?: (item: TreeItem) => void;
 }
@@ -68,13 +69,13 @@ interface WorkspaceTreeProps {
 // (click-wait.ts); a double click selects a workspace without opening or closing it, and Return or
 // Space selects it too; a workspace's menu opens with a secondary click or VoiceOver's menu command.
 // The keyboard moves as in macOS lists: up and down, right to open or go in, left to close or go out,
-// Home and End. Every row can be dragged elsewhere, and opened elsewhere with ⌘↓, as in the Finder,
-// or with Return or Space on a file.
+// Home and End. A press on any row goes to whoever drags rows elsewhere, and every row opens
+// elsewhere with ⌘↓, as in the Finder, or with Return or Space on a file.
 export function WorkspaceTree({
   bridge,
   list,
   labelledBy,
-  onDragItem,
+  onPressItem,
   onOpenItem,
 }: WorkspaceTreeProps) {
   const { t } = useTranslation();
@@ -338,9 +339,8 @@ export function WorkspaceTree({
         >
           <div
             title={item.kind === 'workspace' ? item.workspace.path : undefined}
-            draggable={onDragItem !== undefined}
-            onDragStart={(event) => {
-              onDragItem?.(itemOf(item), event.dataTransfer);
+            onPointerDown={(event) => {
+              onPressItem?.(itemOf(item), event);
             }}
             onMouseDown={(event) => {
               // A press that macOS counts as the second of a double click.

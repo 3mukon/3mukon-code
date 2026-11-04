@@ -28,7 +28,8 @@ export type Side = 'left' | 'right' | 'top' | 'bottom';
 export type Move =
   { kind: 'beside'; panelId: string; side: Side } | { kind: 'swap'; panelId: string };
 
-// Where items open: filling the empty area, beside a panel, or in a panel's place.
+// Where items open: filling the empty area, beside a panel, or in a panel's place, as a panel of
+// their own.
 export type Target =
   | { kind: 'area' }
   | { kind: 'beside'; panelId: string; side: Side }
@@ -44,6 +45,8 @@ export interface PanelsState {
 export type PanelsAction =
   // Without a target, items fill the empty area, or else open to the right of the focused panel.
   | { type: 'open'; contents: readonly PanelContent[]; at?: Target }
+  // The panel goes on showing something else, as a session page does its session once it starts it.
+  | { type: 'show'; panelId: string; content: PanelContent }
   | { type: 'close'; panelId: string }
   | { type: 'focus'; panelId: string }
   | { type: 'resize'; splitId: string; ratio: number }
@@ -55,6 +58,17 @@ export function reducePanels(state: PanelsState, action: PanelsAction): PanelsSt
   switch (action.type) {
     case 'open':
       return open(state, action.contents, action.at);
+    case 'show':
+      return state.layout === null || findPanel(state.layout, action.panelId) === undefined
+        ? state
+        : {
+            ...state,
+            layout: mapPanel(state.layout, action.panelId, (panel) => ({
+              ...panel,
+              content: action.content,
+            })),
+            focusedId: action.panelId,
+          };
     case 'close':
       return close(state, action.panelId);
     case 'focus':
@@ -78,11 +92,34 @@ export function reducePanels(state: PanelsState, action: PanelsAction): PanelsSt
   }
 }
 
-// What a dropped or opened folder or file shows: a session page for a folder, the file itself.
-export function contentOf(item: DroppedItem): PanelContent {
-  return item.kind === 'folder'
-    ? { kind: 'session-page', folder: item.path }
-    : { kind: 'file', path: item.path };
+// What the app's lists drag into the panel area: a folder or file from a tree, by its absolute path, or
+// a session from the Sessions list, by the app's id for it, with its folder.
+export type DraggedItem = DroppedItem | { kind: 'session'; id: string; folder: string };
+
+// What an item dropped or opened from the app's lists or the Finder shows: a session page for a
+// folder, the file itself, or the session.
+export function contentOf(item: DraggedItem): PanelContent {
+  switch (item.kind) {
+    case 'folder':
+      return { kind: 'session-page', folder: item.path };
+    case 'file':
+      return { kind: 'file', path: item.path };
+    case 'session':
+      return { kind: 'session', id: item.id, folder: item.folder };
+  }
+}
+
+// Whether two contents show the same: a session page for the same folder, the same session, or the
+// same file.
+export function sameContent(a: PanelContent, b: PanelContent): boolean {
+  switch (a.kind) {
+    case 'session-page':
+      return b.kind === 'session-page' && b.folder === a.folder;
+    case 'session':
+      return b.kind === 'session' && b.id === a.id;
+    case 'file':
+      return b.kind === 'file' && b.path === a.path;
+  }
 }
 
 // The folder a panel's content is in, where a session page opened from it starts.
@@ -111,7 +148,8 @@ export function inOpeningOrder(panels: readonly Panel[]): Panel[] {
 
 // Opens each item in a panel of its own: the first at the target, and each next one beside the
 // panel opened before it, on the same side, or to its right when the target was not beside a panel.
-// The last one opened is focused.
+// An item in a panel's place takes it as a new panel, so that nothing the old one showed goes on in
+// it. The last one opened is focused.
 function open(
   state: PanelsState,
   contents: readonly PanelContent[],
@@ -126,8 +164,9 @@ function open(
       layout = panel;
       focusedId = panel.id;
     } else if (target.kind === 'replace' && findPanel(layout, target.panelId) !== undefined) {
-      layout = mapPanel(layout, target.panelId, (panel) => ({ ...panel, content }));
-      focusedId = target.panelId;
+      const panel: Panel = { type: 'panel', id: `panel-${String(next++)}`, content };
+      layout = mapPanel(layout, target.panelId, () => panel);
+      focusedId = panel.id;
     } else {
       const beside =
         target.kind !== 'area' && findPanel(layout, target.panelId) !== undefined

@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PointerEvent } from 'react';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { FolderListing, WorkspaceList, WorkspacesBridge } from '../shared/workspaces';
 import type { TreeItem } from './workspace-tree';
@@ -283,24 +284,21 @@ describe('WorkspacesSection', () => {
     expect(bridge.showMenu).toHaveBeenCalledOnce();
   });
 
-  it('puts a row being dragged on the drag, as a folder or a file by its absolute path', async () => {
-    // What is dragged goes on the drag's own data transfer.
-    const setData = vi.fn<(format: string, data: string) => void>();
-    const onDragItem = vi.fn<(item: TreeItem, dataTransfer: DataTransfer) => void>((item, drag) => {
-      drag.setData(item.kind, item.path);
-    });
-    render(<WorkspacesSection bridge={fakeBridge()} list={list} onDragItem={onDragItem} />);
-    expect(line('web').getAttribute('draggable')).toBe('true');
+  it('hands a press on a row to whoever drags it elsewhere, as a folder or a file by its absolute path, and never drags as the system does', async () => {
+    const onPressItem = vi.fn<(item: TreeItem, press: PointerEvent<HTMLElement>) => void>();
+    render(<WorkspacesSection bridge={fakeBridge()} list={list} onPressItem={onPressItem} />);
+    expect(line('web').hasAttribute('draggable')).toBe(false);
     fireEvent.keyDown(row('web'), { key: 'ArrowRight' });
     await settle();
     for (const name of ['web', 'src', 'README.md']) {
-      fireEvent.dragStart(line(name), { dataTransfer: { setData } });
+      fireEvent.pointerDown(line(name), { pointerId: 1, button: 0 });
     }
-    expect(setData.mock.calls).toEqual([
-      ['folder', '/Users/me/web'],
-      ['folder', '/Users/me/web/src'],
-      ['file', '/Users/me/web/README.md'],
+    expect(onPressItem.mock.calls.map(([item]) => item)).toEqual([
+      { kind: 'folder', path: '/Users/me/web' },
+      { kind: 'folder', path: '/Users/me/web/src' },
+      { kind: 'file', path: '/Users/me/web/README.md' },
     ]);
+    expect(onPressItem.mock.calls[0]?.[1]).toMatchObject({ pointerId: 1, button: 0 });
   });
 
   it('opens a row elsewhere with ⌘↓, and a file with Return or Space too', async () => {

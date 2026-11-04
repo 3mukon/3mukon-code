@@ -34,6 +34,9 @@ const taskDots: Record<Task['status'], Status> = {
 interface TimelineProps {
   // The session's state, or null before it has one.
   state: SessionState | null;
+  // The first of the activity's items to render, the page rendering a long activity's last items
+  // first; all of them without it.
+  from?: number;
   // A message on its way, with its images, shown as the user's after the activity while the session
   // starts or resumes.
   pending?: { text: string; images: MessageImage[] };
@@ -47,15 +50,15 @@ interface TimelineProps {
 // thinking quieter; each tool call as one entry, with the files it changed and their diffs; the
 // approvals and questions, as the page's composer renders them; errors, then the agent's task list
 // with finished rows struck through and the current one bright, and Working while a turn runs.
-export function Timeline({ state, pending, agent, renderRequest }: TimelineProps) {
+export function Timeline({ state, from = 0, pending, agent, renderRequest }: TimelineProps) {
   const { t } = useTranslation();
   const working = pending !== undefined || state?.turnRunning === true;
   const oldestWaiting = state === null ? undefined : openRequests(state)[0]?.id;
   return (
     <>
-      {state?.timeline.map((item, index) => (
+      {state?.timeline.slice(from).map((item, index) => (
         <Item
-          key={keyOf(item, index)}
+          key={keyOf(item, from + index)}
           item={item}
           agent={agent}
           oldestWaiting={oldestWaiting}

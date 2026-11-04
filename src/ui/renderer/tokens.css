@@ -130,6 +130,14 @@
       opacity: 0;
     }
   }
+  /* What a wait says only once it has lasted long enough to mention, so that a short one shows
+     nothing: hidden for its first 300ms. */
+  --animate-appear: appear 0s 300ms both;
+  @keyframes appear {
+    from {
+      visibility: hidden;
+    }
+  }
   /* SF Pro and SF Mono on macOS. */
   --font-sans: system-ui, sans-serif;
   --font-mono: ui-monospace, monospace;

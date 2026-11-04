@@ -226,6 +226,95 @@ test('a session the app started in an earlier run is listed, shows the settings 
   }
 });
 
+test('a session has its history read ahead as the pointer rests on its row, and drags from the Sessions list into the panel area, into several panels too', async () => {
+  const data = dataFolder();
+  const record = (id: string, title: string, activeAt: number) => ({
+    id,
+    provider: 'claude-code',
+    sessionId: `p-${id}`,
+    cwd: '/Users/me/web',
+    title,
+    activeAt,
+    mode: 'auto',
+    gateway: null,
+    model: null,
+    effort: null,
+    sandbox: 'workspace-write',
+  });
+  writeFileSync(
+    join(data.path, 'sessions.json'),
+    JSON.stringify({
+      sessions: [record('first', 'Fix the build', 2), record('second', 'Write the docs', 1)],
+    }),
+  );
+  const app = await launch(data.path);
+  try {
+    const window = await app.firstWindow();
+    const list = window.getByRole('list', { name: 'Sessions' });
+    const row = (name: RegExp) => list.getByRole('button', { name });
+    await expect(row(/Fix the build/)).toBeVisible();
+    // The main process's read ahead, which the test records instead, so that no provider runs.
+    await app.evaluate(({ ipcMain }, channel) => {
+      const read: unknown[] = [];
+      (globalThis as unknown as { read: unknown[] }).read = read;
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel, (_event, id: unknown) => {
+        read.push(id);
+      });
+    }, channels.sessions.preload);
+    await row(/Fix the build/).hover();
+    await expect
+      .poll(() => app.evaluate(() => (globalThis as unknown as { read: unknown[] }).read))
+      .toEqual(['first']);
+
+    // Dropped on the empty main area, a session fills it; near its panel's right edge, another
+    // splits it. No drag of the system's starts, so that no copy badge shows (L-0003).
+    const drags = () => window.evaluate(() => (globalThis as unknown as { drags: number }).drags);
+    await window.evaluate(() => {
+      const page = globalThis as unknown as {
+        drags: number;
+        document: {
+          addEventListener: (type: string, listener: () => void, capture: boolean) => void;
+        };
+      };
+      page.drags = 0;
+      page.document.addEventListener('dragstart', () => (page.drags += 1), true);
+    });
+    const main = window.getByRole('main');
+    await row(/Fix the build/).dragTo(main);
+    const first = main.getByRole('region', { name: 'Fix the build' });
+    await expect(first).toBeVisible();
+    const firstBox = await first.boundingBox();
+    if (firstBox === null) throw new Error('The panel is not shown.');
+    await row(/Write the docs/).dragTo(first, {
+      targetPosition: { x: firstBox.width - 10, y: firstBox.height / 2 },
+    });
+    const second = main.getByRole('region', { name: 'Write the docs' });
+    await expect(second).toHaveAttribute('aria-current', 'true');
+    await expect
+      .poll(async () => {
+        const [left, right] = [await first.boundingBox(), await second.boundingBox()];
+        return left !== null && right !== null && left.x < right.x;
+      })
+      .toBe(true);
+    // A session that shows already opens in another panel too, as a file does.
+    const secondBox = await second.boundingBox();
+    if (secondBox === null) throw new Error('The panel is not shown.');
+    await row(/Fix the build/).dragTo(second, {
+      targetPosition: { x: secondBox.width - 10, y: secondBox.height / 2 },
+    });
+    await expect(main.getByRole('region', { name: 'Fix the build' })).toHaveCount(2);
+    await expect(main.getByRole('region', { name: 'Fix the build' }).last()).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+    expect(await drags()).toBe(0);
+  } finally {
+    await app.close();
+    data.remove();
+  }
+});
+
 test('the Sessions list renders only the rows in view, and the archived sessions load only as their list opens', async () => {
   const data = dataFolder();
   // The app's records of an earlier run: the 1,000 sessions the Sessions list keeps, the first the

@@ -156,6 +156,9 @@ export interface SessionsBridge {
   // earlier run, the first asks the main process to read its history, which follows as an event. A
   // session asked for joins the list's shown sessions while the Sessions list does not hold it.
   snapshot(id: string): Promise<SessionSnapshot | null>;
+  // Begins reading the history of a session of an earlier run ahead of its first snapshot, so that its
+  // page shows it at once; the session does not join the shown sessions by this.
+  preload(id: string): Promise<void>;
   // Calls the listener with every event of every session, and returns a function that stops it.
   onEvent(listener: SessionEventsListener): () => void;
   // Puts a message's text, or a PNG image, on the clipboard.

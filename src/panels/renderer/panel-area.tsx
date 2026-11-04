@@ -1,10 +1,13 @@
 import {
   useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
   type DragEvent,
   type ReactNode,
+  type Ref,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Divider } from '../../ui/renderer/divider';
@@ -12,12 +15,13 @@ import { Pane } from '../../ui/renderer/pane';
 import type { Status } from '../../ui/renderer/status-dot';
 import type { PanelContent, PanelsBridge } from '../shared/panels';
 import { arrange, neighbour, zoneAt, type Box, type Direction, type Rect } from './geometry';
-import { itemDragType, readItemDrag } from './item-drag';
 import {
   contentOf,
   folderOf,
   inOpeningOrder,
   panelsOf,
+  sameContent,
+  type DraggedItem,
   type Move,
   type Panel,
   type Side,
@@ -50,10 +54,38 @@ interface PanelAreaProps {
   // Shown just after the window buttons while they lie over the area: in the header of the panel at
   // the top left, or in the empty strip while no panel is open.
   besideWindowButtons?: ReactNode;
+  ref?: Ref<PanelAreaHandle>;
 }
 
+// A press that may begin a drag: its button, whether Control made it macOS's secondary click, its
+// pointer, and where it was in the window.
+export interface Press {
+  button: number;
+  ctrlKey: boolean;
+  pointerId: number;
+  clientX: number;
+  clientY: number;
+}
+
+// What whoever composes the area may ask of it: to follow a press on an item of the app's lists,
+// which drags the item into the area once the pointer has gone far enough, the ghost that follows the
+// pointer saying the label.
+export interface PanelAreaHandle {
+  dragItem(item: DraggedItem, label: string, press: Press): void;
+}
+
+// What a drag with the pointer carries: a panel moved by its title, or an item from the app's lists,
+// with its ghost's label.
+type Carried =
+  { kind: 'panel'; panelId: string } | { kind: 'item'; item: DraggedItem; label: string };
+
 // Where a drag would drop: on the empty area, or on a panel, in the zone under the pointer.
-type DropTarget = { kind: 'area' } | { kind: 'panel'; panelId: string; zone: Side | 'middle' };
+interface PanelTarget {
+  kind: 'panel';
+  panelId: string;
+  zone: Side | 'middle';
+}
+type DropTarget = { kind: 'area' } | PanelTarget;
 
 // What a key press does in the panel area.
 type Command =
@@ -63,8 +95,9 @@ type Command =
   | { type: 'focus-towards'; direction: Direction }
   | { type: 'swap-towards'; direction: Direction };
 
-// The type under which a panel being moved travels, as its id.
-const panelDragType = 'application/x-3mukon-code-panel';
+// How far the pointer goes from where it pressed, in pixels, before the press drags what it pressed,
+// so that a click stays a click.
+const DRAG_AFTER = 4;
 
 // The main area's panels, laid out as the panel layout says, from the window's top edge. Each panel
 // takes its box in the area, and the panels stay in the order they were opened, so that a split or a
@@ -73,12 +106,16 @@ const panelDragType = 'application/x-3mukon-code-panel';
 // the one under the window buttons leaving room for them; while no panel is open, an empty strip
 // there moves the window instead.
 //
-// A folder or file dropped from a tree or the Finder fills the empty area; near a panel's edge it
-// splits that panel and opens on that side, and in a panel's middle it takes the panel's place. A
-// panel dragged by its title onto another panel moves beside it near its edge, and in its middle the
-// two swap places; dropped anywhere else in the window, on itself too, it stays where it was, without
-// the slide back that macOS gives a drag that nothing took. A panel that asks before it closes is
-// asked first, also before a drop takes its place.
+// A folder or file dragged from a tree or the Finder, or a session from the Sessions list, fills the
+// empty area; near a panel's edge it splits that panel and opens on that side, and in a panel's middle
+// it takes the panel's place, as a panel of its own; a file or session may show in several panels,
+// and an item dropped in the middle of the panel that shows it focuses that panel. A panel pressed by
+// its title and dragged onto another panel goes beside it near its edge, and in its middle the two
+// swap places. The app's own items and panels drag with the pointer's own events rather than a drag
+// of the system's, whose copy badge Chromium shows on macOS as such a drag enters the page (L-0003): a
+// ghost of what is dragged follows the pointer over a layer that holds it, and let go anywhere else,
+// a panel on itself too, or given Escape, nothing moves; Finder items come as the system's drag. A
+// panel that asks before it closes is asked first, also before a drop takes its place.
 //
 // The keyboard, from anywhere in the window: ⌘D splits the focused panel to the right and ⇧⌘D
 // downwards, opening a session page in its folder; ⌘W closes the focused panel; ⌘1 to ⌘9 focus the
@@ -90,19 +127,26 @@ export function PanelArea({
   view,
   clearsWindowButtons,
   besideWindowButtons,
+  ref,
 }: PanelAreaProps) {
   const { t } = useTranslation();
   const root = useRef<HTMLDivElement>(null);
   const elements = useRef(new Map<string, HTMLElement>());
-  // Set by a key press that changes the focused panel, so that the keyboard focus follows it.
+  // Set by what changes the focused panel from the keyboard, or takes the place of the panel with the
+  // keyboard focus, so that the keyboard focus follows it.
   const followFocus = useRef(false);
-  // The panel being dragged by its title, if any.
-  const moving = useRef<string | null>(null);
   const [drop, setDrop] = useState<DropTarget | null>(null);
+  // What is being dragged with the pointer, once the pointer has gone far enough, and by which
+  // pointer; and the ghost that follows the pointer, from where the pointer last was.
+  const [dragging, setDragging] = useState<{ carried: Carried; pointerId: number } | null>(null);
+  const ghost = useRef<HTMLDivElement | null>(null);
+  const pointer = useRef({ x: 0, y: 0 });
 
   const ordered = panelsOf(panels.layout);
   const arrangement = arrange(panels.layout);
   const focused = ordered.find((panel) => panel.id === panels.focusedId);
+  const holdsFocus = (id: string) =>
+    elements.current.get(id)?.contains(document.activeElement) === true;
 
   // Runs what closes a panel, or puts something else in its place, once the panel lets it.
   const whenClosable = (panel: Panel | undefined, then: () => void) => {
@@ -166,89 +210,145 @@ export function PanelArea({
     if (panels.focusedId !== null) elements.current.get(panels.focusedId)?.focus();
   });
 
-  // The window takes a panel being moved wherever it is let go, so that a panel that goes nowhere
-  // stays without macOS sliding its title back to where the drag began; the area's own handlers,
-  // which the events reach first, move a panel that has somewhere to go.
-  useEffect(() => {
-    const takeMove = (event: globalThis.DragEvent) => {
-      const transfer = event.dataTransfer;
-      if (moving.current === null || transfer?.types.includes(panelDragType) !== true) return;
-      event.preventDefault();
-      if (event.type === 'dragover') transfer.dropEffect = 'move';
-    };
-    window.addEventListener('dragover', takeMove);
-    window.addEventListener('drop', takeMove);
-    return () => {
-      window.removeEventListener('dragover', takeMove);
-      window.removeEventListener('drop', takeMove);
-    };
-  }, []);
+  // Opens items where a drag drops them. An item dropped in the middle of the panel that shows it
+  // already focuses that panel, and one that takes the place of the panel with the keyboard focus
+  // takes the focus.
+  const openAt = (target: DropTarget, contents: PanelContent[]) => {
+    const at = openingAt(target);
+    const replaced =
+      at.kind === 'replace' ? ordered.find((panel) => panel.id === at.panelId) : undefined;
+    const [only, ...others] = contents;
+    const shownThere =
+      replaced !== undefined &&
+      only !== undefined &&
+      others.length === 0 &&
+      sameContent(replaced.content, only);
+    if (shownThere) {
+      panels.focus(replaced.id);
+      return;
+    }
+    whenClosable(replaced, () => {
+      if (replaced !== undefined && holdsFocus(replaced.id)) followFocus.current = true;
+      panels.open(contents, at);
+    });
+  };
+  // As the latest render has it, for a drag that began in an earlier one.
+  const latestOpenAt = useRef(openAt);
+  useLayoutEffect(() => {
+    latestOpenAt.current = openAt;
+  });
 
-  const targetAt = (event: DragEvent<HTMLElement>): DropTarget | null => {
-    if (panels.layout === null) return { kind: 'area' };
-    const element = (event.target as Element).closest('[data-panel]');
-    const panelId = element?.getAttribute('data-panel');
-    if (element === null || panelId === null || panelId === undefined) return null;
-    return {
-      kind: 'panel',
-      panelId,
-      zone: zoneAt(event.clientX, event.clientY, element.getBoundingClientRect()),
-    };
+  // Where a drag would drop at a point in the window: on the empty area, or on the panel under the
+  // point, in the zone there. A panel being moved goes nowhere over itself or on the empty area.
+  const dropTargetAt = (x: number, y: number, movingPanel?: string): DropTarget | null => {
+    if (elements.current.size === 0) {
+      const area = root.current?.getBoundingClientRect();
+      const inArea = area !== undefined && contains(area, x, y);
+      return movingPanel === undefined && inArea ? { kind: 'area' } : null;
+    }
+    for (const [panelId, rect] of rectsOf(elements.current)) {
+      if (!contains(rect, x, y)) continue;
+      return panelId === movingPanel ? null : { kind: 'panel', panelId, zone: zoneAt(x, y, rect) };
+    }
+    return null;
   };
 
-  // A panel being moved drops anywhere but on itself.
-  const dropTargetAt = (event: DragEvent<HTMLElement>): DropTarget | null => {
-    const target = targetAt(event);
-    const movingHere =
-      event.dataTransfer.types.includes(panelDragType) &&
-      target?.kind === 'panel' &&
-      target.panelId === moving.current;
-    return movingHere ? null : target;
+  // Follows a press with the primary button, which drags what it carries once the pointer has gone
+  // far enough from it, and drops it as the button goes up; Escape, the window losing the focus or
+  // the button going up where the window did not hear it drop nothing. The click that follows a drag
+  // is not the pressed element's.
+  const follow = (carried: Carried, press: Press) => {
+    if (press.button !== 0 || press.ctrlKey) return;
+    const { pointerId } = press;
+    const from = { x: press.clientX, y: press.clientY };
+    const movingPanel = carried.kind === 'panel' ? carried.panelId : undefined;
+    let started = false;
+    const move = (next: globalThis.PointerEvent) => {
+      if (next.pointerId !== pointerId) return;
+      if (next.buttons === 0) {
+        end(null);
+        return;
+      }
+      pointer.current = { x: next.clientX, y: next.clientY };
+      if (!started) {
+        if (Math.hypot(next.clientX - from.x, next.clientY - from.y) < DRAG_AFTER) return;
+        started = true;
+        setDragging({ carried, pointerId });
+      }
+      placeGhost(ghost.current, pointer.current);
+      const target = dropTargetAt(next.clientX, next.clientY, movingPanel);
+      setDrop((shown) => (target !== null && sameTarget(shown, target) ? shown : target));
+    };
+    const end = (target: DropTarget | null) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', escape, true);
+      window.removeEventListener('blur', cancel);
+      if (!started) return;
+      setDragging(null);
+      setDrop(null);
+      swallowClick();
+      if (target === null) return;
+      if (carried.kind === 'item') latestOpenAt.current(target, [contentOf(carried.item)]);
+      else if (target.kind === 'panel') panels.move(carried.panelId, movingTo(target));
+    };
+    const release = (released: globalThis.PointerEvent) => {
+      if (released.pointerId !== pointerId) return;
+      end(started ? dropTargetAt(released.clientX, released.clientY, movingPanel) : null);
+    };
+    const cancel = () => {
+      end(null);
+    };
+    const escape = (key: KeyboardEvent) => {
+      if (key.key !== 'Escape' || !started) return;
+      key.preventDefault();
+      key.stopPropagation();
+      cancel();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', escape, true);
+    window.addEventListener('blur', cancel);
   };
 
+  // What the ghost of a drag says: a panel's title, or the label of an item from the lists.
+  const ghostLabel = (carried: Carried) => {
+    if (carried.kind === 'item') return carried.label;
+    const panel = ordered.find((each) => each.id === carried.panelId);
+    if (panel === undefined) return '';
+    return view?.(panel).title ?? describe(panel.content, t('panels.sessionPage')).title;
+  };
+
+  useImperativeHandle(ref, () => ({
+    dragItem: (item, label, press) => {
+      follow({ kind: 'item', item, label }, press);
+    },
+  }));
+
+  // Finder items, which come as a drag of the system's.
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!accepts(event.dataTransfer.types)) return;
-    const target = dropTargetAt(event);
+    if (!event.dataTransfer.types.includes('Files')) return;
+    const target = dropTargetAt(event.clientX, event.clientY);
     if (target === null) {
       setDrop(null);
       return;
     }
     event.preventDefault();
-    event.dataTransfer.dropEffect = event.dataTransfer.types.includes(panelDragType)
-      ? 'move'
-      : 'copy';
+    event.dataTransfer.dropEffect = 'copy';
     if (!sameTarget(drop, target)) setDrop(target);
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
-    if (!accepts(event.dataTransfer.types)) return;
+    if (!event.dataTransfer.types.includes('Files')) return;
     event.preventDefault();
-    const target = dropTargetAt(event);
+    const target = dropTargetAt(event.clientX, event.clientY);
     setDrop(null);
-    if (target === null) return;
-    const movedId = event.dataTransfer.getData(panelDragType);
-    if (movedId !== '') {
-      moving.current = null;
-      if (target.kind === 'panel') panels.move(movedId, movingTo(target));
-      return;
-    }
-    const at = openingAt(target);
-    const replaced =
-      at.kind === 'replace' ? ordered.find((panel) => panel.id === at.panelId) : undefined;
-    const openThere = (contents: PanelContent[]) => {
-      whenClosable(replaced, () => {
-        panels.open(contents, at);
-      });
-    };
-    const dragged = readItemDrag(event.dataTransfer);
-    if (dragged !== null) {
-      openThere([contentOf(dragged)]);
-      return;
-    }
     const files = [...event.dataTransfer.files];
-    if (files.length === 0) return;
+    if (target === null || files.length === 0) return;
     bridge.itemsAt(files).then((items) => {
-      if (items.length > 0) openThere(items.map(contentOf));
+      if (items.length > 0) openAt(target, items.map(contentOf));
     }, report);
   };
 
@@ -313,14 +413,8 @@ export function PanelArea({
                   panels.close(panel.id);
                 });
               }}
-              onDragStart={(event) => {
-                moving.current = panel.id;
-                event.dataTransfer.setData(panelDragType, panel.id);
-                event.dataTransfer.effectAllowed = 'move';
-              }}
-              onDragEnd={() => {
-                moving.current = null;
-                setDrop(null);
+              onHandlePointerDown={(event) => {
+                follow({ kind: 'panel', panelId: panel.id }, event);
               }}
               closeLabel={t('panels.close')}
             >
@@ -351,8 +445,63 @@ export function PanelArea({
         </div>
       )}
       {drop?.kind === 'area' && <DropZone zone="middle" />}
+      {dragging !== null && (
+        <>
+          {/* Over the whole window while a drag goes on, holding the pointer, so that its events come
+              here wherever it goes and it keeps the grabbing cursor. */}
+          <div
+            ref={(element) => {
+              holdPointer(element, dragging.pointerId);
+            }}
+            aria-hidden="true"
+            className="fixed inset-0 z-40 cursor-grabbing"
+          />
+          <div
+            ref={(element) => {
+              ghost.current = element;
+              placeGhost(element, pointer.current);
+            }}
+            aria-hidden="true"
+            className="pointer-events-none fixed top-0 left-0 z-50 max-w-60 truncate rounded-md border border-dashed border-menu-line paper px-2 text-[13px] leading-6 font-medium text-ink"
+          >
+            {ghostLabel(dragging.carried)}
+          </div>
+        </>
+      )}
     </div>
   );
+}
+
+// Puts the ghost of what is dragged just below and to the right of the pointer.
+function placeGhost(element: HTMLElement | null, at: { x: number; y: number }): void {
+  if (element === null) return;
+  element.style.transform = `translate(${String(at.x + 12)}px, ${String(at.y + 8)}px)`;
+}
+
+// Holds the pointer to the element, unless it has gone up already.
+function holdPointer(element: HTMLElement | null, pointerId: number): void {
+  try {
+    element?.setPointerCapture(pointerId);
+  } catch {
+    // The pointer is no longer down; its release has been heard or will end the drag.
+  }
+}
+
+// Keeps the click that follows a drag's release from the element that was pressed, which would
+// otherwise take it as its own, such as a row that opens its item.
+function swallowClick(): void {
+  const swallow = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  window.addEventListener('click', swallow, { capture: true, once: true });
+  setTimeout(() => {
+    window.removeEventListener('click', swallow, { capture: true });
+  });
+}
+
+function contains(rect: Rect, x: number, y: number): boolean {
+  return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
 }
 
 // Shows where a drop opens its item: the half of the panel on that side, or the whole panel.
@@ -393,11 +542,6 @@ function commandFor(event: KeyboardEvent): Command | null {
   if (key === 'w') return { type: 'close' };
   if (/^[1-9]$/.test(key)) return { type: 'focus-index', index: Number(key) - 1 };
   return null;
-}
-
-// Whether a drag carries something the area opens: a folder or file from a tree, or Finder items.
-function accepts(types: readonly string[]): boolean {
-  return types.includes(panelDragType) || types.includes(itemDragType) || types.includes('Files');
 }
 
 function sameTarget(a: DropTarget | null, b: DropTarget): boolean {

@@ -1,4 +1,4 @@
-import type { DragEvent, ReactNode, Ref } from 'react';
+import type { PointerEvent, ReactNode, Ref } from 'react';
 import { X } from './icons';
 import { StatusDot, type Status } from './status-dot';
 
@@ -30,9 +30,8 @@ interface PaneProps {
   // Shown at the start of the header, before the status and title, such as what lies beside the
   // window buttons while the header clears them.
   start?: ReactNode;
-  // Dragging the pane by its title and detail, to move it.
-  onDragStart?: (event: DragEvent<HTMLElement>) => void;
-  onDragEnd?: () => void;
+  // A press on the pane's title and detail, by which its parent moves it with the pointer.
+  onHandlePointerDown?: (event: PointerEvent<HTMLElement>) => void;
   // The pane's own element, for a parent that moves focus to it.
   ref?: Ref<HTMLElement>;
   children?: ReactNode;
@@ -40,8 +39,9 @@ interface PaneProps {
 
 // One pane of the main area: a header with the status, title, detail and close button, as tall as the
 // title bar, above a body that its content lays out and scrolls itself. The pane takes focus from the keyboard as a whole, and marks
-// itself as the current one while it has focus. Its title and detail are its handle, by which it
-// drags when its parent lets it; in the title bar, they and the button still take clicks.
+// itself as the current one while it has focus. Its title and detail are its handle, which its parent
+// may move it by, and whose text does not select; in the title bar, they and the button still take
+// clicks.
 export function Pane({
   title,
   detail,
@@ -57,8 +57,7 @@ export function Pane({
   inTitleBar = false,
   clearsWindowButtons = false,
   start,
-  onDragStart,
-  onDragEnd,
+  onHandlePointerDown,
   ref,
   children,
 }: PaneProps) {
@@ -79,10 +78,8 @@ export function Pane({
         {status !== undefined && <StatusDot status={status} />}
         {statusLabel !== undefined && <span className="sr-only">{statusLabel}</span>}
         <span
-          draggable={onDragStart !== undefined}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          className="flex min-w-0 items-center gap-2.5 [-webkit-app-region:no-drag]"
+          onPointerDown={onHandlePointerDown}
+          className="flex min-w-0 touch-none items-center gap-2.5 select-none [-webkit-app-region:no-drag]"
         >
           <span className="truncate">{title}</span>
           {unsaved && unsavedLabel !== undefined && <span className="sr-only">{unsavedLabel}</span>}

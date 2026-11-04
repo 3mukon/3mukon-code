@@ -62,6 +62,7 @@ export const channels = {
     setEffort: 'sessions:set-effort',
     setSandbox: 'sessions:set-sandbox',
     snapshot: 'sessions:snapshot',
+    preload: 'sessions:preload',
     event: 'sessions:event',
   },
   panels: {

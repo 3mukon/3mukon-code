@@ -22,6 +22,19 @@ test('tree rows dragged into the main area open as panels, which split, resize, 
       const row = (name: string) => workspace.getByRole('treeitem', { name, exact: true });
       await expect(row('README.md')).toBeVisible();
       const main = window.getByRole('main');
+      // No drag of the system's starts as tree rows and panels are dragged, so that no copy badge
+      // shows (L-0003).
+      const drags = () => window.evaluate(() => (globalThis as unknown as { drags: number }).drags);
+      await window.evaluate(() => {
+        const page = globalThis as unknown as {
+          drags: number;
+          document: {
+            addEventListener: (type: string, listener: () => void, capture: boolean) => void;
+          };
+        };
+        page.drags = 0;
+        page.document.addEventListener('dragstart', () => (page.drags += 1), true);
+      });
 
       // A folder dropped on the empty main area opens a session page that fills it.
       await row('src').locator('> div').dragTo(main);
@@ -69,11 +82,18 @@ test('tree rows dragged into the main area open as panels, which split, resize, 
       );
       expect((await box(page)).y).toBeGreaterThan((await box(readme)).y);
 
-      // A panel dragged by its title near another panel's edge moves beside it.
+      // A panel pressed by its title and moved near another panel's edge moves beside it.
       const readmeBox = await box(readme);
-      await page
-        .getByText('New session', { exact: true })
-        .dragTo(readme, { targetPosition: { x: readmeBox.width - 10, y: readmeBox.height / 2 } });
+      const title = await box(page.getByText('New session', { exact: true }));
+      await window.mouse.move(title.x + title.width / 2, title.y + title.height / 2);
+      await window.mouse.down();
+      const [x, y] = [readmeBox.x + readmeBox.width - 10, readmeBox.y + readmeBox.height / 2];
+      await window.mouse.move(x, y, { steps: 8 });
+      // A ghost of the title follows the pointer while the panel moves.
+      await expect(window.getByText('New session', { exact: true })).toHaveCount(2);
+      await window.mouse.up();
+      expect(await drags()).toBe(0);
+      await expect(window.getByText('New session', { exact: true })).toHaveCount(1);
       await expect(main.getByRole('separator')).toHaveAttribute('aria-orientation', 'vertical');
       await expect.poll(async () => (await box(page)).x - (await box(readme)).x).toBeGreaterThan(0);
 

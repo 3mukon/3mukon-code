@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SelectOption } from '../../ui/renderer/select';
 import type {
@@ -47,6 +47,11 @@ const sandboxes: SandboxLevel[] = ['read-only', 'workspace-write', 'full-access'
 // otherwise the model's own default where the provider names it, or else the provider's default.
 const STARTING_EFFORT: ReasoningEffort = 'medium';
 
+// How many more of the activity's last items the page renders at a time when many come at once, as a
+// history does, until they fill its view; those before them follow in a render that leaves the
+// window free meanwhile, so that the end shows at once.
+const FIRST_ITEMS = 24;
+
 function startingEffort(model: ModelOption | undefined): ReasoningEffort | null {
   if (model?.efforts.includes(STARTING_EFFORT) === true) return STARTING_EFFORT;
   return model?.defaultEffort ?? null;
@@ -77,7 +82,8 @@ interface SessionPageProps {
 // and resumes, are remembered for its folder. A session that is not running, from an earlier run or
 // whose provider stopped, shows its history and starts nothing: its settings, but for the provider,
 // are those it last had, its permission mode included, until the user changes them, and the next
-// message resumes it with them. Choosing yolo asks the user to confirm; a running session's sandbox
+// message resumes it with them. When many items come at once, as a history does, the page renders the
+// last of them first, as many as fill its view, and the rest after, so that the end shows at once. Choosing yolo asks the user to confirm; a running session's sandbox
 // level switches at once. The composer sends with Return and starts a new line with Shift-Return, with
 // the images pasted into it or dropped on it, during a turn too, when the message goes to the running
 // turn as the provider takes it; Stop ends the running turn.
@@ -98,13 +104,18 @@ export function SessionPage({
   const [draft, setDraft] = useState('');
   const attachments = useAttachments();
   const actions = useMemo(() => timelineActions(bridge), [bridge]);
-  // The first message, with its images, while the session starts, and a message to a session that is
-  // not running while it resumes.
-  const [starting, setStarting] = useState<{ text: string; images: MessageImage[] } | null>(null);
+  // The first message, with its images and the settings the session starts with, while the session
+  // starts, and a message to a session that is not running while it resumes.
+  const [starting, setStarting] = useState<{
+    text: string;
+    images: MessageImage[];
+    settings: Choice;
+  } | null>(null);
   const [resuming, setResuming] = useState<{ text: string; images: MessageImage[] } | null>(null);
   const [startFailed, setStartFailed] = useState(false);
   const [resumeFailed, setResumeFailed] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  const activity = useRef<HTMLDivElement>(null);
   // Whether the activity keeps its end in view as it grows; scrolling up stops that.
   const following = useRef(true);
 
@@ -130,7 +141,12 @@ export function SessionPage({
       : remembered === undefined
         ? firstChoice
         : { ...remembered, mode: 'auto' as const };
-  const settings = choosing ? (chosen ?? unchanged) : own;
+  // Until a session the page has started gives its state, the settings it started with.
+  const settings = choosing
+    ? (chosen ?? unchanged)
+    : state === null && starting !== null
+      ? starting.settings
+      : own;
   const offers = useOffers(bridge, provider, settings.gateway);
   // A running session's own list once it reports one, else the provider's; missing while it loads.
   const models = (choosing ? undefined : state?.models) ?? offers.models;
@@ -160,10 +176,59 @@ export function SessionPage({
   // The message on its way while the session starts or resumes.
   const pending = (state === null ? starting : null) ?? (closed ? resuming : null);
 
+  // The first of the activity's items rendered, and how many there were when that was chosen: when
+  // many come at once, the last of them first.
+  const count = state?.timeline.length ?? 0;
+  const [rendered, setRendered] = useState({ from: 0, count: 0 });
+  if (count !== rendered.count) {
+    setRendered({
+      from:
+        count - rendered.count > FIRST_ITEMS ? count - FIRST_ITEMS : Math.min(rendered.from, count),
+      count,
+    });
+  }
+
+  // Before the window paints, more of the last items while those rendered leave the view room;
+  // then the rest, in a render the window stays free during.
+  useLayoutEffect(() => {
+    if (rendered.from === 0) return;
+    const [area, content] = [scroller.current, activity.current];
+    const renderFrom = (from: (current: number) => number) => {
+      setRendered((current) => ({ ...current, from: from(current.from) }));
+    };
+    if (area !== null && content !== null && content.offsetHeight < area.clientHeight) {
+      renderFrom((current) => Math.max(0, current - FIRST_ITEMS));
+      return;
+    }
+    const rest = setTimeout(() => {
+      startTransition(() => {
+        renderFrom(() => 0);
+      });
+    });
+    return () => {
+      clearTimeout(rest);
+    };
+  }, [rendered.from]);
+
   useLayoutEffect(() => {
     const element = scroller.current;
     if (element !== null && following.current) element.scrollTop = element.scrollHeight;
   });
+
+  // The end stays in view too as the activity or its area changes size after a render, as the
+  // history's images load or the composer grows.
+  useLayoutEffect(() => {
+    const [area, content] = [scroller.current, activity.current];
+    if (area === null || content === null) return;
+    const observer = new ResizeObserver(() => {
+      if (following.current) area.scrollTop = area.scrollHeight;
+    });
+    observer.observe(area);
+    observer.observe(content);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   const send = () => {
     const text = draft.trim();
@@ -179,8 +244,8 @@ export function SessionPage({
       attachments.restore(images);
     };
     if (sessionId === null) {
-      setStarting({ text, images });
       const started = { ...settings, model: chosenModel, effort };
+      setStarting({ text, images, settings: started });
       bridge.start({ ...started, cwd: folder, message: text, images }).then(
         (id) => {
           const { provider: chosenProvider, gateway, model: startModel, sandbox } = started;
@@ -399,20 +464,25 @@ export function SessionPage({
           }}
           className="relative min-h-0 overflow-y-auto px-5 pt-2 pb-5 font-mono text-[12.5px]/[1.75] text-muted"
         >
-          {closed && state.loadingHistory && (
-            <p className="my-3 text-faint">{t('sessions.page.loadingHistory')}</p>
-          )}
-          {closed && state.historyFailed && (
-            <p className="my-3 text-del">{t('sessions.page.historyFailed')}</p>
-          )}
-          <Timeline
-            state={state}
-            agent={providerName}
-            {...(pending === null ? {} : { pending })}
-            {...(renderRequest === undefined ? {} : { renderRequest })}
-          />
-          {startFailed && <p className="my-3 text-del">{t('sessions.page.startFailed')}</p>}
-          {resumeFailed && <p className="my-3 text-del">{t('sessions.page.resumeFailed')}</p>}
+          <div ref={activity}>
+            {/* Said only once the history has taken a while, so that one read quickly, or ahead,
+                shows at once in its place. */}
+            {closed && state.loadingHistory && (
+              <p className="my-3 animate-appear text-faint">{t('sessions.page.loadingHistory')}</p>
+            )}
+            {closed && state.historyFailed && (
+              <p className="my-3 text-del">{t('sessions.page.historyFailed')}</p>
+            )}
+            <Timeline
+              state={state}
+              from={rendered.from}
+              agent={providerName}
+              {...(pending === null ? {} : { pending })}
+              {...(renderRequest === undefined ? {} : { renderRequest })}
+            />
+            {startFailed && <p className="my-3 text-del">{t('sessions.page.startFailed')}</p>}
+            {resumeFailed && <p className="my-3 text-del">{t('sessions.page.resumeFailed')}</p>}
+          </div>
         </section>
         {/* The composer, on which images can be dropped, marked while they are dragged over it. */}
         <div
@@ -467,7 +537,16 @@ export function SessionPage({
               </button>
             )}
           </div>
-          <SessionSettings settings={choosers} />
+          {/* The settings of a session the page shows, but has not started, are not known until its
+              state comes, and show nothing until then rather than the defaults they would change
+              from. */}
+          <div
+            className={
+              sessionId !== null && state === null && starting === null ? 'invisible' : undefined
+            }
+          >
+            <SessionSettings settings={choosers} />
+          </div>
         </div>
       </div>
     </TimelineActionsContext>
