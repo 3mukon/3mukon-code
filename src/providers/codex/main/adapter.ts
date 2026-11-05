@@ -565,7 +565,7 @@ class CodexSession implements ProviderSession {
     return Promise.resolve();
   }
 
-  // Codex 0.164.0 takes a sandbox only for the turns that follow, in its stable and its experimental
+  // Codex 0.166.0 takes a sandbox only for the turns that follow, in its stable and its experimental
   // API alike, so a switch during a turn applies from the next one.
   setSandbox(sandbox: SandboxLevel): Promise<void> {
     this.settings.sandbox = sandbox;
