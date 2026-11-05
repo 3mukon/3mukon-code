@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { dataFolder, launchIsolated } from './app';
+import { dataFolder, launchIsolated, providerProcesses, stillRunning } from './app';
 
-test('the Accounts panel opens from the gauge and says which providers are not signed in, as session pages do', async () => {
+test('the Accounts panel opens from the gauge and says which providers are not signed in, as session pages do, and quitting ends the providers’ processes', async () => {
   const data = dataFolder();
   try {
     const app = await launchIsolated(data.path);
+    let running: number[] = [];
     try {
       const window = await app.firstWindow();
       await window.getByRole('button', { name: 'Accounts' }).click();
@@ -27,9 +28,14 @@ test('the Accounts panel opens from the gauge and says which providers are not s
       const page = main.getByRole('region', { name: 'New session' });
       await expect(page).toContainText('Claude Code is not signed in.');
       await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible();
+      // The providers' processes still running as the app quits, such as those reading the accounts
+      // or listing the models, which quitting ends and waits for, so that none writes to the data
+      // folder after the app has gone.
+      running = providerProcesses(app);
     } finally {
       await app.close();
     }
+    expect(stillRunning(running)).toEqual([]);
   } finally {
     data.remove();
   }

@@ -3,13 +3,14 @@ import { rmSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type {
-  Provider,
-  ProviderSession,
-  SessionEventListener,
-  StartOptions,
-  Toolset,
-  ToolsetAccess,
+import {
+  Probes,
+  type Provider,
+  type ProviderSession,
+  type SessionEventListener,
+  type StartOptions,
+  type Toolset,
+  type ToolsetAccess,
 } from '../../../sessions/main/provider';
 import type {
   ApprovalAnswer,
@@ -177,6 +178,30 @@ export function createCodexProvider({
 }: CodexProviderOptions): Provider & AccountSource {
   const connect: Connect = (cwd, handlers, launch) =>
     initialize(startRpc(cwd, handlers, launch), clientVersion);
+  // The probes' app-servers, each kept from the moment it starts, before Codex answers it, so that
+  // closing ends one still starting.
+  const probes = new Probes();
+  const probeConnect: Connect = async (cwd, handlers, launch) => {
+    let markEnded: () => void = () => undefined;
+    const ended = new Promise<void>((resolve) => {
+      markEnded = resolve;
+    });
+    const { rpc } = await probes.start(() => {
+      const started = startRpc(
+        cwd,
+        {
+          ...handlers,
+          exit: (error) => {
+            markEnded();
+            handlers.exit(error);
+          },
+        },
+        launch,
+      );
+      return { rpc: started, ended, stop: () => started.close() };
+    });
+    return initialize(rpc, clientVersion);
+  };
   const listeners = new Set<(news: AccountNews) => void>();
   const link: AccountLink = {
     sessions: new Set(),
@@ -194,7 +219,7 @@ export function createCodexProvider({
     const cwd = await mkdtemp(join(tmpdir(), 'codex-account-'));
     probeFolders.add(cwd);
     try {
-      return await withCodex(connect, cwd, use);
+      return await withCodex(probeConnect, cwd, use);
     } finally {
       probeFolders.delete(cwd);
       await rm(cwd, { recursive: true, force: true });
@@ -213,7 +238,7 @@ export function createCodexProvider({
     // Read through a short-lived app-server, which lists the thread's turns and reads its name without
     // loading it, the name being the title Codex keeps for the session, as a running session reports it.
     history(sessionId, cwd) {
-      return withCodex(connect, cwd, async (rpc): Promise<SessionEvent[]> => {
+      return withCodex(probeConnect, cwd, async (rpc): Promise<SessionEvent[]> => {
         const events = await pastEvents(rpc, sessionId, new Translator(cwd));
         const params: ThreadReadParams = { threadId: sessionId, includeTurns: false };
         const { thread } = await rpc.request<ThreadReadResponse>('thread/read', params);
@@ -223,7 +248,7 @@ export function createCodexProvider({
       });
     },
     listSessions(cwd, limit) {
-      return withCodex(connect, cwd, async (rpc): Promise<HistoryEntry[]> => {
+      return withCodex(probeConnect, cwd, async (rpc): Promise<HistoryEntry[]> => {
         const { data } = await rpc.request<ThreadListResponse>('thread/list', {
           cwd,
           limit,
@@ -249,7 +274,7 @@ export function createCodexProvider({
       const cwd = await mkdtemp(join(tmpdir(), 'codex-models-'));
       probeFolders.add(cwd);
       try {
-        return withGatewayModel(modelOptions(await withCodex(connect, cwd, allModels)), own);
+        return withGatewayModel(modelOptions(await withCodex(probeConnect, cwd, allModels)), own);
       } finally {
         probeFolders.delete(cwd);
         await rm(cwd, { recursive: true, force: true });
@@ -269,6 +294,9 @@ export function createCodexProvider({
       return () => {
         listeners.delete(listener);
       };
+    },
+    close() {
+      return probes.close();
     },
   };
 }
@@ -315,7 +343,8 @@ async function pastEvents(
   return events;
 }
 
-// One exchange with a short-lived app-server that starts no thread.
+// One exchange with a short-lived app-server, a probe, that starts no thread; it ends once the process
+// has exited.
 async function withCodex<Result>(
   connect: Connect,
   cwd: string,

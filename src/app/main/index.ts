@@ -37,7 +37,7 @@ import { serveBridge } from './bridge';
 import { windowPrompts } from './prompts';
 import { createMainWindow, pageUrl } from './window';
 
-// How long quitting waits for the sessions and the toolset to close.
+// How long quitting waits for the sessions, the providers' other processes and the toolset to close.
 const CLOSE_TIMEOUT_MS = 5_000;
 // How long after the app opens its search starts catching up on the sessions it has no text for,
 // so that it leaves the providers alone while the window opens (ADR-0014).
@@ -109,7 +109,7 @@ void app
       accountsUi: (window) => windowAccountsUi(windowPrompts(window), t),
       page: pageUrl(),
     });
-    closeBeforeQuitting(sessions, toolset, () => {
+    closeBeforeQuitting(sessions, adapters, toolset, () => {
       terminals.closeAll();
       accounts.close();
     });
@@ -174,11 +174,12 @@ function providers(
   ];
 }
 
-// Closes the sessions, with their provider processes, and the toolset before the app quits, waiting
-// a few seconds at most, after ending the rest at once: the terminals' programs and the accounts'
-// reading.
+// Closes the sessions, with their provider processes, the providers' other processes, such as those
+// listing models or reading an account, and the toolset before the app quits, waiting a few seconds at
+// most, after ending the rest at once: the terminals' programs and the accounts' reading.
 function closeBeforeQuitting(
   sessions: SessionHost,
+  providers: readonly Provider[],
   toolset: RunningToolset | undefined,
   endTheRest: () => void,
 ): void {
@@ -190,7 +191,11 @@ function closeBeforeQuitting(
     endTheRest();
     const timeout = new Promise((resolve) => setTimeout(resolve, CLOSE_TIMEOUT_MS));
     void Promise.race([
-      Promise.allSettled([sessions.closeAll(), toolset?.close()]),
+      Promise.allSettled([
+        sessions.closeAll(),
+        ...providers.map((provider) => provider.close()),
+        toolset?.close(),
+      ]),
       timeout,
     ]).finally(() => {
       // Electron ignores a quit asked for while it still handles the one held back here, which it

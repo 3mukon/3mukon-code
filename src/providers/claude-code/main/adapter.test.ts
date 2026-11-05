@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,10 +29,28 @@ const fakes = vi.hoisted(() => {
         : Promise.resolve({ ...usage }),
     );
     closed = false;
+    // The process that the app's own spawn starts, where the app gives one, as the SDK starts it: a
+    // real one, which reads its input until the input ends and then takes a moment to exit, as Claude
+    // Code does.
+    readonly child: ChildProcess | undefined;
     private readonly messages: unknown[] = [];
     private wake: (() => void) | null = null;
 
     constructor(readonly params: QueryParams) {
+      const spawnProcess = params.options.spawnClaudeCodeProcess as
+        | ((options: {
+            command: string;
+            args: string[];
+            env: NodeJS.ProcessEnv;
+            signal: AbortSignal;
+          }) => ChildProcess)
+        | undefined;
+      this.child = spawnProcess?.({
+        command: '/bin/sh',
+        args: ['-c', 'cat > /dev/null; sleep 0.2'],
+        env: process.env,
+        signal: new AbortController().signal,
+      });
       void (async () => {
         for await (const message of params.prompt) this.inputs.push(message);
       })();
@@ -65,6 +84,7 @@ const fakes = vi.hoisted(() => {
 
     close(): void {
       this.closed = true;
+      this.child?.stdin?.end();
       this.wake?.();
     }
 
@@ -550,5 +570,26 @@ describe('a Claude Code session', () => {
     await session.close();
     await waitFor(() => events.some((event) => event.type === 'closed'));
     expect(events.filter((event) => event.type === 'closed')).toHaveLength(1);
+  });
+});
+
+describe('closing the Claude Code provider', () => {
+  it('waits for its probes’ Claude Code to exit as it closes, and starts no more', async () => {
+    const provider = createClaudeCodeProvider({ gatewaysDir });
+    // The answer comes before the probe's process has exited.
+    expect(await provider.listModels(null)).toEqual([opus]);
+    const child = current().child;
+    expect(current().closed).toBe(true);
+    expect(child?.exitCode).toBeNull();
+    let closed = false;
+    const closing = provider.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(closed).toBe(false);
+    await closing;
+    expect(child?.exitCode).toBe(0);
+    await expect(provider.listModels(null)).rejects.toThrow('closed');
+    expect(fakes.queries).toHaveLength(1);
   });
 });

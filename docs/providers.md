@@ -20,6 +20,7 @@ The app drives three providers. Each has an adapter module that implements the s
 - Each provider keeps its own settings and its own sign-in, in its own home folder. The app never reads, stores, logs or shows a provider's key or token, and passes one only with a Codex gateway file's settings to Codex (invariant 9, ADR-0008). Each provider's own sign-in command runs in a terminal panel.
 - Every session starts in a folder with a permission mode, auto unless the user chose yolo (ADR-0006), and a sandbox level, workspace-write unless the user chose another. Mode, level, model and reasoning effort can change while the session runs; how soon each takes effect is the provider's.
 - The Codex and Grok Build adapters drain what their processes log and keep none of it. The providers' processes end as their sessions close and as the app quits.
+- Besides its sessions' processes, each adapter starts short-lived ones, its probes, which list its models and read its history or its account. The adapter keeps each probe until its process has exited, which the answer of a Claude Code or Grok Build probe does not wait for (the sessions module's `Probes`), and as the app quits it stops those still running and waits for them, so that none goes on writing to the provider's settings once the app has gone.
 - Each adapter has an opt-in live test that drives a real session on the signed-in account (`corepack pnpm run test:live`), which the check command never runs.
 
 ## Side by side
@@ -45,6 +46,6 @@ The app drives three providers. Each has an adapter module that implements the s
 
 ## Where things are
 
-- The `Provider` interface, the session events and the session settings: `src/sessions/shared/` (DOC-mod-sessions).
+- The `Provider` interface: `src/sessions/main/provider.ts`; the session events and the session settings: `src/sessions/shared/` (DOC-mod-sessions).
 - The sign-in and usage contract: `src/accounts/shared/` (DOC-mod-accounts).
 - The pinned versions: `package.json`. The protocol types Codex's adapter uses are generated from the bundled Codex (`corepack pnpm run codex:protocol`).

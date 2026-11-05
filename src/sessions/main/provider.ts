@@ -57,6 +57,10 @@ export interface Provider {
   // The models a session through this gateway, or through the provider's own configuration when it is
   // null, could use. Found without starting a session, so nothing appears in the provider's history.
   listModels(gateway: string | null): Promise<ModelOption[]>;
+  // Ends the processes the provider runs outside its sessions, such as those listing its models or
+  // reading its account, and starts no more; resolves once they have ended. The app calls it as it
+  // quits, so that none of them outlives the app.
+  close(): Promise<void>;
 }
 
 export interface ProviderSession {
@@ -106,4 +110,56 @@ export interface ToolsetAccess {
   readonly credential: string;
   // Ends the session's access.
   close(): void;
+}
+
+// A process a provider starts outside its sessions, such as one that lists its models or reads its
+// account: a probe.
+export interface ProbeProcess {
+  // Resolves once the process has ended, however it ended; it never rejects.
+  readonly ended: Promise<unknown>;
+  // Ends the process; resolves once it has ended. Called again, it only waits.
+  stop(): Promise<void>;
+}
+
+const CLOSED = 'The provider has closed, so it starts no more processes.';
+
+// A provider's probes, each kept from its start until it ends, so that the provider can end them as the
+// app quits: once it closes, it starts no probe, stops those it keeps, and resolves once every one has
+// ended, including those still starting as it closed.
+export class Probes {
+  private closing = false;
+  private readonly starting = new Set<Promise<unknown>>();
+  private readonly running = new Set<ProbeProcess>();
+
+  // Starts a probe and keeps it until it ends. Rejects once the provider is closing; a probe that
+  // starts as it closes is stopped first.
+  start<P extends ProbeProcess>(start: () => P | Promise<P>): Promise<P> {
+    if (this.closing) return Promise.reject(new Error(CLOSED));
+    const started = (async () => {
+      const probe = await start();
+      this.running.add(probe);
+      const forget = () => {
+        this.running.delete(probe);
+      };
+      probe.ended.then(forget, forget);
+      if (this.closing) {
+        await probe.stop();
+        throw new Error(CLOSED);
+      }
+      return probe;
+    })();
+    this.starting.add(started);
+    const settled = () => {
+      this.starting.delete(started);
+    };
+    started.then(settled, settled);
+    return started;
+  }
+
+  // Starts no more probes, stops those kept, and resolves once every one has ended.
+  async close(): Promise<void> {
+    this.closing = true;
+    await Promise.allSettled(this.starting);
+    await Promise.allSettled([...this.running].map((probe) => probe.stop()));
+  }
 }

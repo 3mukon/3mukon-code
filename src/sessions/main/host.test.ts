@@ -94,6 +94,7 @@ function fakeProvider(id: ProviderId, fail = false) {
     history,
     listGateways: () => Promise.resolve(['work']),
     listModels,
+    close: () => Promise.resolve(),
   };
   return { provider, listeners, sessions, closed, resumed, listModels, history };
 }

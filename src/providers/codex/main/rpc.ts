@@ -15,7 +15,7 @@ export interface RpcHandlers {
 export interface Rpc {
   request<Result>(method: string, params: unknown): Promise<Result>;
   notify(method: string, params?: unknown): void;
-  // Ends the process; resolves once it has exited.
+  // Ends the process; resolves once it has exited. Called again, it only waits.
   close(): Promise<void>;
 }
 
@@ -97,11 +97,11 @@ export class CodexRpc implements Rpc {
   }
 
   close(): Promise<void> {
-    this.closing = true;
-    if (!this.ended) {
+    if (!this.closing && !this.ended) {
       this.child.stdin.end();
       this.child.kill();
     }
+    this.closing = true;
     return this.exited;
   }
 

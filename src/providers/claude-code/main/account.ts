@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import type { SDKControlGetUsageResponse, SDKRateLimitInfo } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { SignIn, UsageWindow, WindowSpan } from '../../../accounts/shared/accounts';
+import type { ProbeProcess, Probes } from '../../../sessions/main/provider';
 
 // How long Claude Code may take to say how it is signed in.
 const STATUS_TIMEOUT_MS = 15_000;
@@ -31,22 +32,52 @@ export function claudeSignIn(answer: unknown): SignIn {
 }
 
 // Asks the binary how Claude Code is signed in, which it answers from its own settings without a
-// model call. It says so in JSON whether or not it is signed in.
-export function readClaudeSignIn(binary: string): Promise<SignIn> {
-  return new Promise((resolve) => {
-    execFile(
-      binary,
-      ['auth', 'status', '--json'],
-      { timeout: STATUS_TIMEOUT_MS },
-      (_error, stdout) => {
-        try {
-          resolve(claudeSignIn(JSON.parse(stdout)));
-        } catch {
-          resolve({ state: 'unknown' });
-        }
-      },
-    );
+// model call. It says so in JSON whether or not it is signed in. The command can write Claude Code's
+// settings file as it runs, so the probes keep its process until it has exited.
+export async function readClaudeSignIn(binary: string, probes: Probes): Promise<SignIn> {
+  const status = await probes.start(() => signInStatus(binary));
+  return status.signIn;
+}
+
+// `claude auth status --json`, with what it says.
+function signInStatus(binary: string): ProbeProcess & { signIn: Promise<SignIn> } {
+  let answer: (signIn: SignIn) => void = () => undefined;
+  const signIn = new Promise<SignIn>((resolve) => {
+    answer = resolve;
   });
+  const child = execFile(
+    binary,
+    ['auth', 'status', '--json'],
+    { timeout: STATUS_TIMEOUT_MS },
+    (_error, stdout) => {
+      try {
+        answer(claudeSignIn(JSON.parse(stdout)));
+      } catch {
+        answer({ state: 'unknown' });
+      }
+    },
+  );
+  const ended = new Promise<void>((resolve) => {
+    child.once('exit', () => {
+      resolve();
+    });
+    child.once('error', () => {
+      // Only a process that never started ends with its error; any other exits too.
+      if (child.pid === undefined) resolve();
+    });
+  });
+  let stopping = false;
+  return {
+    signIn,
+    ended,
+    stop() {
+      if (!stopping) {
+        stopping = true;
+        child.kill();
+      }
+      return ended;
+    },
+  };
 }
 
 type Limits = NonNullable<SDKControlGetUsageResponse['rate_limits']>;

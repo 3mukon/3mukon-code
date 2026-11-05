@@ -7,7 +7,7 @@ export interface GrokProcess {
   readonly stream: Stream;
   // Resolves once the process has ended: with nothing when stop ended it, else with what happened.
   readonly ended: Promise<string | undefined>;
-  // Ends the process; resolves once it has exited.
+  // Ends the process; resolves once it has exited. Called again, it only waits.
   stop(): Promise<void>;
 }
 
@@ -42,9 +42,11 @@ export function spawnGrok(binary: string, cwd: string, args: string[]): GrokProc
     ),
     ended,
     async stop() {
-      stopping = true;
-      child.stdin.end();
-      child.kill();
+      if (!stopping) {
+        stopping = true;
+        child.stdin.end();
+        child.kill();
+      }
       await ended;
     },
   };

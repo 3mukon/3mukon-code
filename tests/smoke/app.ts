@@ -1,6 +1,7 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 
 // A throwaway data folder for the app, so that smoke tests never read or change the user's own.
@@ -108,6 +109,38 @@ export async function withApp(
     await app.close();
     data.remove();
   }
+}
+
+// The binaries of the providers' processes: Claude Code's, Codex's and Grok Build's.
+const PROVIDER_BINARY = /^(claude|codex|grok-.+)$/;
+
+// The ids of the providers' processes the app runs now, for its sessions or to list models or read
+// accounts.
+export function providerProcesses(app: ElectronApplication): number[] {
+  const parent = app.process().pid;
+  return execFileSync('ps', ['-A', '-o', 'pid=,ppid=,comm='], { encoding: 'utf8' })
+    .split('\n')
+    .flatMap((line) => {
+      const [, pid, ppid, command] = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line) ?? [];
+      return pid !== undefined &&
+        command !== undefined &&
+        Number(ppid) === parent &&
+        PROVIDER_BINARY.test(basename(command))
+        ? [Number(pid)]
+        : [];
+    });
+}
+
+// Those of the processes that still run.
+export function stillRunning(pids: readonly number[]): number[] {
+  return pids.filter((pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 // Stands in for the user in the native folder picker, which a test cannot click: it chooses the

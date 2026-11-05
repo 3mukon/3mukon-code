@@ -940,3 +940,64 @@ describe('Codex’s account through the adapter', () => {
     expect((await codex.signInCommand()).args).toEqual(['login']);
   });
 });
+
+// An app-server whose model list runs until it stops, and which exits only once the test lets it,
+// as Codex takes its time to.
+class SlowCodex extends FakeCodex {
+  private stopListing: (error: Error) => void = () => undefined;
+
+  constructor(
+    cwd: string,
+    handlers: RpcHandlers,
+    launch: Launch | undefined,
+    private readonly exited: Promise<void>,
+  ) {
+    super(cwd, handlers, launch);
+  }
+
+  override request<Result>(method: string, params: unknown): Promise<Result> {
+    if (method !== 'model/list') return super.request(method, params);
+    this.calls.push({ method, params: params as Params });
+    return new Promise<Result>((_resolve, reject) => {
+      this.stopListing = reject;
+    });
+  }
+
+  override async close(): Promise<void> {
+    await this.exited;
+    this.stopListing(new Error('Codex has stopped.'));
+    await super.close();
+  }
+}
+
+describe('closing the Codex provider', () => {
+  it('stops a short-lived app-server as it closes, waits for it to exit, and starts no more', async () => {
+    let exit: () => void = () => undefined;
+    const exited = new Promise<void>((resolve) => {
+      exit = resolve;
+    });
+    const codex = createCodexProvider({
+      toolset,
+      gatewaysDir,
+      startRpc: (cwd, handlers, launch) => {
+        const fake = new SlowCodex(cwd, handlers, launch, exited);
+        fakes.push(fake);
+        return fake;
+      },
+    });
+    const listing = codex.listModels(null);
+    await waitFor(() => fakes.at(-1)?.calls.some((call) => call.method === 'model/list') === true);
+    let closed = false;
+    const closing = codex.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(closed).toBe(false);
+    exit();
+    await closing;
+    await expect(listing).rejects.toThrow('stopped');
+    expect(current().closed).toBe(true);
+    await expect(codex.listModels(null)).rejects.toThrow('closed');
+    expect(fakes).toHaveLength(1);
+  });
+});

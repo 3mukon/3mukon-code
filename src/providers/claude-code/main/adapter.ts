@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -11,6 +12,7 @@ import {
   type CanUseTool,
   type EffortLevel,
   type ModelInfo,
+  type Options,
   type PermissionMode as ClaudePermissionMode,
   type PermissionResult,
   type Query,
@@ -19,11 +21,13 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type {
-  Provider,
-  ProviderSession,
-  SessionEventListener,
-  StartOptions,
+import {
+  Probes,
+  type ProbeProcess,
+  type Provider,
+  type ProviderSession,
+  type SessionEventListener,
+  type StartOptions,
 } from '../../../sessions/main/provider';
 import type {
   ApprovalAnswer,
@@ -97,6 +101,9 @@ interface AccountLink {
 export function createClaudeCodeProvider({
   gatewaysDir = defaultGatewaysDir(),
 }: ClaudeCodeProviderOptions = {}): Provider & AccountSource {
+  // The processes it starts outside its sessions: the models' and the usage's probes, and the status
+  // command that says how Claude Code is signed in.
+  const probes = new Probes();
   const listeners = new Set<(news: AccountNews) => void>();
   const link: AccountLink = {
     sessions: new Set(),
@@ -146,12 +153,15 @@ export function createClaudeCodeProvider({
       return listGateways(gatewaysDir);
     },
     async listModels(gateway) {
-      return probeModels(gateway === null ? null : await existingGatewayPath(gatewaysDir, gateway));
+      return probeModels(
+        probes,
+        gateway === null ? null : await existingGatewayPath(gatewaysDir, gateway),
+      );
     },
     // The sign-in from Claude Code's own status; the usage through a running session's query on
     // Claude Code's own sign-in, or else through a probe.
     async readAccount(withUsage) {
-      const signIn = await readClaudeSignIn(bundledClaudeBinary());
+      const signIn = await readClaudeSignIn(bundledClaudeBinary(), probes);
       if (!withUsage || signIn.state !== 'signed-in' || signIn.method !== 'subscription') {
         return { signIn };
       }
@@ -159,7 +169,7 @@ export function createClaudeCodeProvider({
       for (const session of link.sessions) query ??= session.accountQuery();
       let answer: SDKControlGetUsageResponse;
       try {
-        answer = query === null ? await probeUsage() : await usageOf(query);
+        answer = query === null ? await probeUsage(probes) : await usageOf(query);
       } catch (error) {
         console.error('Claude Code could not be asked for its usage:', error);
         return { signIn, usageProblem: 'unreachable' };
@@ -180,6 +190,9 @@ export function createClaudeCodeProvider({
         listeners.delete(listener);
       };
     },
+    close() {
+      return probes.close();
+    },
   };
 }
 
@@ -191,34 +204,85 @@ function usageOf(query: Query): Promise<SDKControlGetUsageResponse> {
 
 // The plan's usage limits from a Claude Code that initializes and is closed before any message, as
 // the models' probe does, on the user's own settings with their hooks off.
-async function probeUsage(): Promise<SDKControlGetUsageResponse> {
+async function probeUsage(probes: Probes): Promise<SDKControlGetUsageResponse> {
   const cwd = await mkdtemp(join(tmpdir(), 'claude-code-usage-'));
   probeFolders.add(cwd);
-  const input = new InputQueue();
-  const probe = query({
-    prompt: input,
-    options: {
+  let probe: ClaudeProbe | undefined;
+  try {
+    probe = await startProbe(probes, {
       pathToClaudeCodeExecutable: bundledClaudeBinary(),
       cwd,
       persistSession: false,
       env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
       settingSources: ['user'],
       settings: { disableAllHooks: true },
-    },
-  });
-  try {
+    });
     await withinTime(
-      probe.initializationResult(),
+      probe.query.initializationResult(),
       PROBE_TIMEOUT_MS,
       'Claude Code did not start in time to read its usage.',
     );
-    return await usageOf(probe);
+    return await usageOf(probe.query);
   } finally {
-    input.end();
-    probe.close();
+    void probe?.stop();
     probeFolders.delete(cwd);
     await rm(cwd, { recursive: true, force: true });
   }
+}
+
+// A Claude Code started outside a session, with no message to send, such as the models' probe.
+interface ClaudeProbe extends ProbeProcess {
+  readonly query: Query;
+}
+
+// Starts a probe on the options. The SDK runs Claude Code through the app's own spawn, as it would
+// itself but without Claude Code's error output, so that the probe knows when the process has exited,
+// which takes Claude Code about two seconds once closed; the probes keep it until then. The answer
+// does not wait for it.
+function startProbe(probes: Probes, options: Options): Promise<ClaudeProbe> {
+  return probes.start(() => {
+    const input = new InputQueue();
+    let spawned = false;
+    let stopping = false;
+    let markEnded: () => void = () => undefined;
+    const ended = new Promise<void>((resolve) => {
+      markEnded = resolve;
+    });
+    const probe = query({
+      prompt: input,
+      options: {
+        ...options,
+        spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
+          spawned = true;
+          const child = spawn(command, args, {
+            cwd,
+            env,
+            signal,
+            stdio: ['pipe', 'pipe', 'ignore'],
+          });
+          child.once('exit', markEnded);
+          child.once('error', () => {
+            // Only a process that never started ends with its error; any other exits too.
+            if (child.pid === undefined) markEnded();
+          });
+          return child;
+        },
+      },
+    });
+    return {
+      query: probe,
+      ended,
+      stop() {
+        if (!stopping) {
+          stopping = true;
+          input.end();
+          probe.close();
+          if (!spawned) markEnded();
+        }
+        return ended;
+      },
+    };
+  });
 }
 
 async function sessionSettings(
@@ -249,13 +313,12 @@ async function sessionSettings(
 // so that the default is the model they set. It never reads a project's settings, whose hooks and
 // servers could run from a folder no one trusted yet. The app opens none of these files itself. A
 // Claude Code that has not started within the probe's time is closed, and the list fails.
-async function probeModels(gatewayFile: string | null): Promise<ModelOption[]> {
+async function probeModels(probes: Probes, gatewayFile: string | null): Promise<ModelOption[]> {
   const cwd = await mkdtemp(join(tmpdir(), 'claude-code-models-'));
   probeFolders.add(cwd);
-  const input = new InputQueue();
-  const probe = query({
-    prompt: input,
-    options: {
+  let probe: ClaudeProbe | undefined;
+  try {
+    probe = await startProbe(probes, {
       pathToClaudeCodeExecutable: bundledClaudeBinary(),
       cwd,
       persistSession: false,
@@ -263,18 +326,15 @@ async function probeModels(gatewayFile: string | null): Promise<ModelOption[]> {
       ...(gatewayFile === null
         ? { settingSources: ['user'], settings: { disableAllHooks: true } }
         : { settingSources: [], settings: gatewayFile }),
-    },
-  });
-  try {
+    });
     const init = await withinTime(
-      probe.initializationResult(),
+      probe.query.initializationResult(),
       PROBE_TIMEOUT_MS,
       'Claude Code did not start in time to list its models.',
     );
-    return modelOptions(init.models, (await countContext(probe))?.model);
+    return modelOptions(init.models, (await countContext(probe.query))?.model);
   } finally {
-    input.end();
-    probe.close();
+    void probe?.stop();
     probeFolders.delete(cwd);
     await rm(cwd, { recursive: true, force: true });
   }

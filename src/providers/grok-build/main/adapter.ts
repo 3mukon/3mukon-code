@@ -18,11 +18,12 @@ import {
   type SessionNotification,
   type StopReason,
 } from '@agentclientprotocol/sdk';
-import type {
-  Provider,
-  ProviderSession,
-  SessionEventListener,
-  StartOptions,
+import {
+  Probes,
+  type Provider,
+  type ProviderSession,
+  type SessionEventListener,
+  type StartOptions,
 } from '../../../sessions/main/provider';
 import type {
   ApprovalAnswer,
@@ -147,6 +148,17 @@ export function createGrokBuildProvider(
   const clientVersion = options.clientVersion ?? '0.0.0';
   const connect: Connect = (cwd, sandbox, handlers) =>
     connectGrok(startGrok, cwd, sandbox, handlers, clientVersion);
+  // The probes' processes, each kept from the moment it starts, before Grok answers it, so that closing
+  // ends one still starting.
+  const probes = new Probes();
+  const probeConnect: Connect = (cwd, sandbox, handlers) =>
+    connectGrok(
+      (folder, args) => probes.start(() => startGrok(folder, args)),
+      cwd,
+      sandbox,
+      handlers,
+      clientVersion,
+    );
   const listeners = new Set<(news: AccountNews) => void>();
   const link: AccountLink = {
     sessions: new Set(),
@@ -169,7 +181,7 @@ export function createGrokBuildProvider(
       const translator = new Translator(cwd);
       const events: SessionEvent[] = [];
       return withGrok(
-        connect,
+        probeConnect,
         cwd,
         async ({ connection }) => {
           await connection.agent.request('session/load', {
@@ -191,7 +203,7 @@ export function createGrokBuildProvider(
       );
     },
     listSessions(cwd, limit) {
-      return withGrok(connect, cwd, async ({ connection }): Promise<HistoryEntry[]> => {
+      return withGrok(probeConnect, cwd, async ({ connection }): Promise<HistoryEntry[]> => {
         const sessions = await grokSessions(connection, cwd);
         return sessions
           .map((session) => ({
@@ -212,7 +224,7 @@ export function createGrokBuildProvider(
       const cwd = await mkdtemp(join(tmpdir(), 'grok-models-'));
       probeFolders.add(cwd);
       try {
-        return await withGrok(connect, cwd, (agent) =>
+        return await withGrok(probeConnect, cwd, (agent) =>
           Promise.resolve(catalogOf(agent.initialize).models),
         );
       } finally {
@@ -229,7 +241,7 @@ export function createGrokBuildProvider(
       const cwd = await mkdtemp(join(tmpdir(), 'grok-account-'));
       probeFolders.add(cwd);
       try {
-        return await withGrok(connect, cwd, ({ connection }) =>
+        return await withGrok(probeConnect, cwd, ({ connection }) =>
           readGrokAccount(connection, withUsage),
         );
       } finally {
@@ -246,6 +258,9 @@ export function createGrokBuildProvider(
       return () => {
         listeners.delete(listener);
       };
+    },
+    close() {
+      return probes.close();
     },
   };
 }
@@ -313,9 +328,10 @@ async function grokSessions(connection: ClientConnection, cwd: string): Promise<
   return sessions;
 }
 
-// One exchange with a short-lived process that starts no session; it runs read-only. The answer comes
-// as soon as the exchange ends, without waiting for the process to stop, which takes Grok about four
-// seconds; it leaves nothing behind in its folder.
+// One exchange with a short-lived process, a probe, that starts no session; it runs read-only. The
+// answer comes as soon as the exchange ends, without waiting for the process to stop, which takes Grok
+// about four seconds and which the probes wait for as the provider closes; it leaves nothing behind in
+// its folder.
 async function withGrok<Result>(
   connect: Connect,
   cwd: string,

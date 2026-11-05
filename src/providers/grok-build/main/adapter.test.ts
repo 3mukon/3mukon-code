@@ -1017,3 +1017,65 @@ describe('Grok Build’s account through the adapter', () => {
     await expect(grok.signInCommand()).rejects.toThrow('no binary of its own');
   });
 });
+
+describe('closing', () => {
+  it('waits for its short-lived processes to exit as it closes, and starts no more', async () => {
+    let exit: () => void = () => undefined;
+    const exited = new Promise<void>((resolve) => {
+      exit = resolve;
+    });
+    const grok = createGrokBuildProvider({
+      startGrok: (cwd, args) => {
+        const started = new FakeGrok(cwd, args);
+        fakes.push(started);
+        // A process that exits only once the test lets it, as Grok takes its time to.
+        return Promise.resolve({
+          stream: started.process.stream,
+          ended: exited.then(() => undefined),
+          stop: async () => {
+            await started.process.stop();
+            await exited;
+          },
+        });
+      },
+    });
+    // The answer comes before the process has exited.
+    expect((await grok.readAccount(false)).signIn.state).toBe('signed-in');
+    expect(fake(0).stopped).toBe(true);
+    let closed = false;
+    const closing = grok.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(closed).toBe(false);
+    exit();
+    await closing;
+    await expect(grok.listModels(null)).rejects.toThrow('closed');
+    expect(fakes).toHaveLength(1);
+  });
+
+  it('stops a short-lived process that starts as it closes, before Grok is asked anything', async () => {
+    // The process starts once the test lets it, as the binary is unpacked first.
+    const starting: { start?: () => void } = {};
+    const grok = createGrokBuildProvider({
+      startGrok: (cwd, args) =>
+        new Promise((resolve) => {
+          starting.start = () => {
+            const started = new FakeGrok(cwd, args);
+            fakes.push(started);
+            resolve(started.process);
+          };
+        }),
+    });
+    const reading = grok.readAccount(false);
+    for (let attempt = 0; attempt < 200 && starting.start === undefined; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    const closing = grok.close();
+    starting.start?.();
+    await expect(reading).rejects.toThrow('closed');
+    await closing;
+    expect(fake(0).stopped).toBe(true);
+    expect(fake(0).methods()).toEqual([]);
+  });
+});
