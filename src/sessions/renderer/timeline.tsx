@@ -5,6 +5,7 @@ import type { MessageImage, Task } from '../shared/events';
 import {
   openRequests,
   type RequestItem,
+  type Retrying,
   type SessionState,
   type SessionStatus,
   type TimelineItem,
@@ -49,7 +50,8 @@ interface TimelineProps {
 // user's at the right and the agent's at the left, so that the two never read alike, and the agent's
 // thinking quieter; each tool call as one entry, with the files it changed and their diffs; the
 // approvals and questions, as the page's composer renders them; errors, then the agent's task list
-// with finished rows struck through and the current one bright, and Working while a turn runs.
+// with finished rows struck through and the current one bright, and Working while a turn runs, with
+// the provider's retry of a failed request to the model under it while it retries.
 export function Timeline({ state, from = 0, pending, agent, renderRequest }: TimelineProps) {
   const { t } = useTranslation();
   const working = pending !== undefined || state?.turnRunning === true;
@@ -88,7 +90,23 @@ export function Timeline({ state, from = 0, pending, agent, renderRequest }: Tim
           {t('sessions.page.working')}
         </p>
       )}
+      {working && state?.retrying !== undefined && <RetryNotice retrying={state.retrying} />}
     </>
+  );
+}
+
+// Which retry the provider makes, of how many where it says, and why, in the provider's words, which
+// show on at most three lines here and whole in the tooltip.
+function RetryNotice({ retrying: { attempt, maxRetries, reason } }: { retrying: Retrying }) {
+  const { t } = useTranslation();
+  const retry =
+    maxRetries === undefined
+      ? t('sessions.page.retrying', { attempt })
+      : t('sessions.page.retryingOf', { attempt, max: maxRetries });
+  return (
+    <p className="line-clamp-3 wrap-anywhere text-faint" title={reason}>
+      {reason === undefined ? retry : t('sessions.page.retryReason', { retry, reason })}
+    </p>
   );
 }
 

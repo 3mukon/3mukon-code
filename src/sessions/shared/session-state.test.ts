@@ -269,10 +269,84 @@ describe('applyEvent', () => {
     ).toEqual([{ decision: 'allow-once' }, { decision: 'decline' }]);
   });
 
+  it('follows the provider’s retries of a failed request until the agent goes on', () => {
+    const retrying = fold([
+      { type: 'turn-started' },
+      { type: 'retrying', attempt: 1, maxRetries: 15, reason: 'API error (status 500)' },
+      { type: 'retrying', attempt: 2, maxRetries: 15, reason: 'API error (status 503)' },
+    ]);
+    expect(retrying.retrying).toEqual({
+      attempt: 2,
+      maxRetries: 15,
+      reason: 'API error (status 503)',
+    });
+    expect(sessionStatus(retrying)).toBe('running');
+    // The user's own message, sent meanwhile, leaves the wait as it was.
+    const sent = applyEvent(retrying, {
+      type: 'message',
+      id: 'u1',
+      role: 'user',
+      text: 'Still there?',
+    });
+    expect(sent.retrying).toEqual(retrying.retrying);
+    expect(
+      applyEvent(sent, { type: 'message-delta', id: 'm1', role: 'agent', text: 'Back' }),
+    ).not.toHaveProperty('retrying');
+  });
+
+  it('counts the retries of a provider that does not count them, from the first it reports', () => {
+    const state = fold([
+      { type: 'turn-started' },
+      { type: 'retrying', reason: 'Connection failed' },
+      { type: 'retrying', reason: '' },
+    ]);
+    expect(state.retrying).toEqual({ attempt: 2 });
+    // A count the provider gives stands, with only what its own notice says.
+    expect(applyEvent(state, { type: 'retrying', attempt: 4, maxRetries: 5 }).retrying).toEqual({
+      attempt: 4,
+      maxRetries: 5,
+    });
+  });
+
+  it('ends the wait for a retried request with the agent’s output, approval or question, or the turn’s or the session’s end', () => {
+    const waiting = fold([
+      { type: 'turn-started' },
+      { type: 'retrying', attempt: 3, maxRetries: 10, reason: '529 overloaded' },
+    ]);
+    const goingOn: SessionEvent[] = [
+      { type: 'message', id: 'm1', role: 'agent', text: 'Done' },
+      { type: 'message-delta', id: 'm2', role: 'thinking', text: 'Reading the logs' },
+      { type: 'tool', id: 't1', kind: 'read', title: 'a.ts', status: 'running' },
+      { type: 'tool-output', id: 't1', text: 'ok' },
+      { type: 'tasks', tasks: [] },
+      { type: 'file-change', change: { id: 'f1', path: 'a.ts', kind: 'update', diff: '' } },
+      { type: 'approval-requested', request: approval },
+      { type: 'question-asked', request: question },
+      { type: 'turn-ended', outcome: 'failed', error: 'Service unavailable' },
+      { type: 'turn-started' },
+      { type: 'history', events: [] },
+      { type: 'closed' },
+    ];
+    for (const event of goingOn) {
+      expect(applyEvent(waiting, event), event.type).not.toHaveProperty('retrying');
+    }
+    const aside: SessionEvent[] = [
+      { type: 'context', used: 1200, size: null },
+      { type: 'title', title: 'Fix the build' },
+      { type: 'settings', model: 'opus' },
+      { type: 'error', message: 'Rate limited' },
+      { type: 'request-resolved', requestId: 'approval-1', outcome: 'answered' },
+    ];
+    for (const event of aside) {
+      expect(applyEvent(waiting, event).retrying, event.type).toEqual(waiting.retrying);
+    }
+  });
+
   it('never changes the state it is given', () => {
     const before = fold([
       { type: 'message', id: 'm1', role: 'agent', text: 'a' },
       { type: 'approval-requested', request: approval },
+      { type: 'retrying', attempt: 1, reason: 'overloaded' },
     ]);
     const snapshot = structuredClone(before);
     fold(
@@ -294,7 +368,9 @@ describe('applyEvent', () => {
       { type: 'tool', id: 't1', kind: 'edit', title: 'Edit', status: 'running', paths: ['a.ts'] },
       { type: 'question-asked', request: question },
       { type: 'error', message: 'Rate limited' },
+      { type: 'retrying', attempt: 2, maxRetries: 5, reason: 'stream disconnected' },
     ]);
+    expect(state.retrying).toBeDefined();
     expect(JSON.parse(JSON.stringify(state))).toEqual(state);
   });
 });

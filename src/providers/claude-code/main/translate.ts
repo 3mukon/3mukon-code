@@ -120,6 +120,7 @@ export class Translator {
   live(message: SDKMessage): SessionEvent[] {
     switch (message.type) {
       case 'system': {
+        if (message.subtype === 'api_retry') return [retrying(message)];
         // Each turn starts with an init message, which names the mode. It names the model too, but as
         // Claude Code resolved it, such as claude-opus-5-5 for opus, and the session's model stays the
         // one it chose, which its list knows.
@@ -373,4 +374,20 @@ function resultText(content: unknown): string {
 function resultError(message: Extract<SDKMessage, { type: 'result' }>): string | undefined {
   if (message.subtype !== 'success') return message.errors.join('\n') || undefined;
   return str((message as { result?: unknown }).result) || undefined;
+}
+
+// A request to the model that Claude Code retries: which retry it makes, of how many, and why, as the
+// HTTP status and the kind of error Claude Code names, such as 529 overloaded. A connection that
+// failed has no status, and an error of no known kind leaves the status alone.
+function retrying({
+  attempt,
+  max_retries: maxRetries,
+  error_status: status,
+  error,
+}: Extract<SDKMessage, { subtype: 'api_retry' }>): SessionEvent {
+  const reason = [status === null ? '' : String(status), error === 'unknown' ? '' : error]
+    .filter((part) => part !== '')
+    .join(' ')
+    .replaceAll('_', ' ');
+  return { type: 'retrying', attempt, maxRetries, ...(reason === '' ? {} : { reason }) };
 }

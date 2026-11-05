@@ -25,6 +25,7 @@ import type { ThreadItem } from './protocol/v2/ThreadItem';
 import type { ThreadNameUpdatedNotification } from './protocol/v2/ThreadNameUpdatedNotification';
 import type { ThreadTokenUsageUpdatedNotification } from './protocol/v2/ThreadTokenUsageUpdatedNotification';
 import type { TurnCompletedNotification } from './protocol/v2/TurnCompletedNotification';
+import type { TurnError } from './protocol/v2/TurnError';
 import type { TurnPlanUpdatedNotification } from './protocol/v2/TurnPlanUpdatedNotification';
 
 // Tool output is kept to this many characters, so that long command output stays cheap to hold.
@@ -85,7 +86,8 @@ export class Translator {
         return this.turnCompleted(params as TurnCompletedNotification);
       case 'error': {
         const { error, willRetry } = params as ErrorNotification;
-        if (!willRetry) this.turnError = error.message;
+        if (willRetry) return [retrying(error)];
+        this.turnError = error.message;
         return [];
       }
       case 'thread/name/updated': {
@@ -301,6 +303,20 @@ export class Translator {
       },
     ];
   }
+}
+
+// A request to the model that Codex retries, as its notice says it: "Reconnecting... 2/5" names the
+// retry it makes, counted from 1, and how many it makes at most, while its details say why. A notice
+// without a count, such as while Codex waits for the network, says why itself where it has no details.
+function retrying({ message, additionalDetails }: TurnError): SessionEvent {
+  const count = /(\d+)\/(\d+)\s*$/.exec(message);
+  const details = additionalDetails?.trim() ?? '';
+  const reason = details !== '' ? details : count === null ? message.trim() : '';
+  return {
+    type: 'retrying',
+    ...(count === null ? {} : { attempt: Number(count[1]), maxRetries: Number(count[2]) }),
+    ...(reason === '' ? {} : { reason }),
+  };
 }
 
 function taskStatus(status: 'pending' | 'inProgress' | 'completed'): Task['status'] {

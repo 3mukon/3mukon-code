@@ -157,6 +157,11 @@ export interface HistoryEntry {
 export type SessionEvent =
   | { type: 'turn-started' }
   | { type: 'turn-ended'; outcome: 'completed' | 'interrupted' | 'failed'; error?: string }
+  // The provider retries a request to the model that failed, and the turn waits for it: the retry it
+  // makes, counted from 1, out of how many it makes at most, and why the request failed, in the
+  // provider's own words, as far as the provider says. The agent's next output, approval or question,
+  // or the turn's end, ends the wait, which no event of its own reports.
+  | { type: 'retrying'; attempt?: number; maxRetries?: number; reason?: string }
   // Sets the whole text of a message, and its images.
   | { type: 'message'; id: string; role: MessageRole; text: string; images?: MessageImage[] }
   // Adds streamed text, and images, to the end of a message.

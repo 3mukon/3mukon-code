@@ -1,5 +1,6 @@
 import type { ContentBlock, StopReason } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
+import type { SessionEvent } from '../../../sessions/shared/events';
 
 // Grok Build's extension messages about turns, which its own terminal client uses, as seen with Grok
 // 1.0.70: an interjection that adds a message to the running turn, and the notices of a turn that Grok
@@ -39,12 +40,13 @@ export function parseQueueChanged(params: unknown): QueueChanged {
   return queueChanged.parse(params);
 }
 
-// Grok's notices about a session, among them that a prompt's turn completed, and how.
+// Grok's notices about a session, among them that a prompt's turn completed, and how, and that Grok
+// retries a request to the model; each kind of notice keeps fields of its own in the update.
 export const SESSION_NOTICE = '_x.ai/session_notification';
 
 const sessionNotice = z.object({
   sessionId: z.string(),
-  update: z.object({
+  update: z.looseObject({
     sessionUpdate: z.string(),
     prompt_id: z.string().nullish(),
     stop_reason: z.string().nullish(),
@@ -64,6 +66,32 @@ const stopReasons: readonly string[] = [
   'refusal',
   'cancelled',
 ] satisfies StopReason[];
+
+// Grok's state as it retries a request to the model that failed, as seen with Grok 1.0.70: retrying,
+// with the retry it makes, of how many at most, and why. Its other states, exhausted and failed, come
+// as it gives up, and the turn's end follows them, which ends the wait.
+const retryState = z.object({
+  sessionUpdate: z.literal('retry_state'),
+  type: z.literal('retrying'),
+  attempt: z.number().nullish().catch(undefined),
+  max_retries: z.number().nullish().catch(undefined),
+  reason: z.string().nullish().catch(undefined),
+});
+
+// The retry a notice says Grok makes; nothing for other notices.
+export function retryOf(
+  notice: SessionNotice,
+): Extract<SessionEvent, { type: 'retrying' }> | undefined {
+  const parsed = retryState.safeParse(notice.update);
+  if (!parsed.success) return undefined;
+  const { attempt, max_retries: maxRetries, reason } = parsed.data;
+  return {
+    type: 'retrying',
+    ...(attempt == null ? {} : { attempt }),
+    ...(maxRetries == null ? {} : { maxRetries }),
+    ...(reason == null || reason === '' ? {} : { reason }),
+  };
+}
 
 // The prompt whose turn a notice says completed, and the turn's stop reason; nothing for other notices.
 export function completedTurn(

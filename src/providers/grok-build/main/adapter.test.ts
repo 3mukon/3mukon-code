@@ -587,6 +587,42 @@ describe('turns', () => {
     expect(last(events, 'turn-ended')).toEqual({ type: 'turn-ended', outcome: 'completed' });
   });
 
+  it('reports each retry of a request to the model that Grok notices, and leaves its giving up to the turn’s end', async () => {
+    const { session, events, until } = await open((onEvent) =>
+      provider.start({ cwd: '/work' }, onEvent),
+    );
+    events.length = 0;
+    const retry = (state: Params, sessionId = 'grok-1') =>
+      fake().notify('_x.ai/session_notification', {
+        sessionId,
+        update: { sessionUpdate: 'retry_state', ...state },
+      });
+    const retries = () => events.filter((event) => event.type === 'retrying');
+    await session.send('Fix the build');
+    await fake().prompted();
+    const reason = 'API error (status 500 Internal Server Error): Service temporarily unavailable';
+    await retry({ type: 'retrying', attempt: 1, max_retries: 15, reason, is_rate_limited: false });
+    // Another session's, such as a subagent's, stays out.
+    await retry({ type: 'retrying', attempt: 1, max_retries: 15, reason }, 'subagent');
+    await retry({ type: 'retrying', attempt: 2, max_retries: 15, reason });
+    await until(() => retries().length === 2);
+    expect(retries()).toEqual([
+      { type: 'retrying', attempt: 1, maxRetries: 15, reason },
+      { type: 'retrying', attempt: 2, maxRetries: 15, reason },
+    ]);
+    // Giving up says nothing of its own: the prompt's failure ends the turn, and with it the wait.
+    await retry({ type: 'exhausted', attempt: 15, max_retries: 15, reason });
+    fake().rejectPrompt(reason);
+    await until(has('turn-ended'));
+    expect(events.map((event) => event.type)).toEqual([
+      'turn-started',
+      'message',
+      'retrying',
+      'retrying',
+      'turn-ended',
+    ]);
+  });
+
   it('ends a turn as Grok’s stop reason says', async () => {
     const { session, events, until } = await open((onEvent) =>
       provider.start({ cwd: '/work' }, onEvent),

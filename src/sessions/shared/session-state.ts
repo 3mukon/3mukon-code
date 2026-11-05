@@ -56,6 +56,15 @@ export type TimelineItem =
 // An approval or a question in the timeline.
 export type RequestItem = Extract<TimelineItem, { type: 'approval' | 'question' }>;
 
+// A request to the model that failed, which the provider retries while the turn waits: the retry it
+// makes, counted from 1, out of how many it makes at most where it says, and why the request failed,
+// in the provider's own words where it gives them.
+export interface Retrying {
+  attempt: number;
+  maxRetries?: number;
+  reason?: string;
+}
+
 // What the UI shows of one session, folded from its events by applyEvent.
 export interface SessionState {
   // In the order things first happened.
@@ -80,6 +89,9 @@ export interface SessionState {
   models?: ModelOption[];
   // How much of the model's context window the conversation takes, once the provider has said.
   context?: { used: number; size: number | null };
+  // The provider retries a request to the model that failed, until the agent goes on, with output, an
+  // approval or a question, or the turn or the session ends.
+  retrying?: Retrying;
 }
 
 export function initialSessionState(loadingHistory = false): SessionState {
@@ -112,9 +124,27 @@ export function sessionStatus(state: SessionState): SessionStatus {
 
 // Folds one event into the state. The state passed in is never changed.
 export function applyEvent(state: SessionState, event: SessionEvent): SessionState {
+  const next = fold(state, event);
+  return endsRetrying(event) ? withoutRetrying(next) : next;
+}
+
+function fold(state: SessionState, event: SessionEvent): SessionState {
   switch (event.type) {
     case 'turn-started':
       return { ...state, turnRunning: true };
+    case 'retrying': {
+      // A provider that does not count its retries has them counted here, from the first it reports.
+      const attempt = event.attempt ?? (state.retrying?.attempt ?? 0) + 1;
+      const { maxRetries, reason } = event;
+      return {
+        ...state,
+        retrying: {
+          attempt,
+          ...(maxRetries === undefined ? {} : { maxRetries }),
+          ...(reason === undefined || reason === '' ? {} : { reason }),
+        },
+      };
+    }
     case 'turn-ended': {
       const ended = { ...cancelOpenRequests(state, 'turn'), turnRunning: false };
       return event.outcome === 'failed' ? append(ended, errorItem(event.error)) : ended;
@@ -321,6 +351,35 @@ function cancelOpenRequests(state: SessionState, over: 'turn' | 'session'): Sess
       cancelled(item) ? { ...item, resolution: 'cancelled' } : item,
     ),
   };
+}
+
+// Whether an event ends the wait for a retried request: the agent's output, its approvals and
+// questions, and the end of the turn or of the session say that the provider no longer retries, while
+// the user's own message, sent during the turn, says nothing of it.
+function endsRetrying(event: SessionEvent): boolean {
+  switch (event.type) {
+    case 'message':
+    case 'message-delta':
+      return event.role !== 'user';
+    case 'tool':
+    case 'tool-output':
+    case 'tasks':
+    case 'file-change':
+    case 'approval-requested':
+    case 'question-asked':
+    case 'turn-started':
+    case 'turn-ended':
+    case 'history':
+    case 'closed':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function withoutRetrying(state: SessionState): SessionState {
+  const { retrying, ...rest } = state;
+  return retrying === undefined ? state : rest;
 }
 
 function isApprovalAnswer(answer: ApprovalAnswer | QuestionAnswer): answer is ApprovalAnswer {

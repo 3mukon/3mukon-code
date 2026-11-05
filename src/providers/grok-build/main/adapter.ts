@@ -60,6 +60,7 @@ import {
   parseQueueChanged,
   parseSessionNotice,
   QUEUE_CHANGED,
+  retryOf,
   SESSION_NOTICE,
   type InterjectParams,
   type QueueChanged,
@@ -819,6 +820,11 @@ class GrokSession implements ProviderSession {
       },
       notice: (notice) => {
         if (!current() || notice.sessionId !== this.sessionId) return;
+        const retry = retryOf(notice);
+        if (retry !== undefined) {
+          if (!this.replaying) this.onEvent(retry);
+          return;
+        }
         const completed = completedTurn(notice);
         if (completed?.promptId !== this.grokTurn) return;
         this.endTurn(turnEndedBy(completed.stopReason), completed.promptId);

@@ -73,6 +73,32 @@ describe('Translator.live', () => {
     expect(translator.live(init)).toEqual([{ type: 'mode', mode: 'auto' }]);
   });
 
+  it('reports each retry of a request to the model, with its status and kind of error as the reason', () => {
+    const translator = new Translator(cwd);
+    const retry = (status: number | null, error: string) =>
+      ({
+        type: 'system',
+        subtype: 'api_retry',
+        attempt: 2,
+        max_retries: 10,
+        retry_delay_ms: 1200,
+        error_status: status,
+        error,
+        uuid: 'r1',
+        session_id: 's1',
+      }) as unknown as SDKMessage;
+    expect(translator.live(retry(529, 'overloaded'))).toEqual([
+      { type: 'retrying', attempt: 2, maxRetries: 10, reason: '529 overloaded' },
+    ]);
+    expect(translator.live(retry(500, 'server_error'))).toEqual([
+      { type: 'retrying', attempt: 2, maxRetries: 10, reason: '500 server error' },
+    ]);
+    // A connection that failed has no status, and an error of no known kind says nothing more.
+    expect(translator.live(retry(null, 'unknown'))).toEqual([
+      { type: 'retrying', attempt: 2, maxRetries: 10 },
+    ]);
+  });
+
   it('streams text and thinking as deltas, and does not repeat them from the complete message', () => {
     const translator = new Translator(cwd);
     const stream = (event: unknown, parent: string | null = null) =>

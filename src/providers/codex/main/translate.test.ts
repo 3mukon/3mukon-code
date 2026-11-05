@@ -214,9 +214,12 @@ describe('Translator.live', () => {
       });
     expect(ended('completed')).toEqual([{ type: 'turn-ended', outcome: 'completed' }]);
     expect(ended('interrupted')).toEqual([{ type: 'turn-ended', outcome: 'interrupted' }]);
-    expect(
-      translator.live('error', { ...turn, willRetry: true, error: { message: 'Retrying' } }),
-    ).toEqual([]);
+    // A request that Codex retries is not the turn's error.
+    translator.live('error', {
+      ...turn,
+      willRetry: true,
+      error: { message: 'Reconnecting... 1/5', additionalDetails: 'stream disconnected' },
+    });
     translator.live('error', {
       ...turn,
       willRetry: false,
@@ -227,6 +230,33 @@ describe('Translator.live', () => {
     ]);
     expect(ended('failed', { message: 'Bad request' })).toEqual([
       { type: 'turn-ended', outcome: 'failed', error: 'Bad request' },
+    ]);
+  });
+
+  it('reports each retry of a request to the model, with the count Codex gives and its details as the reason', () => {
+    const translator = new Translator(cwd);
+    const retry = (message: string, additionalDetails: string | null) =>
+      translator.live('error', {
+        ...turn,
+        willRetry: true,
+        error: {
+          message,
+          codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 500 } },
+          additionalDetails,
+          misalignment: null,
+        },
+      });
+    const details = 'unexpected status 500 Internal Server Error: Service temporarily unavailable';
+    expect(retry('Reconnecting... 2/5', details)).toEqual([
+      { type: 'retrying', attempt: 2, maxRetries: 5, reason: details },
+    ]);
+    expect(retry('Reconnecting... 3/5', null)).toEqual([
+      { type: 'retrying', attempt: 3, maxRetries: 5 },
+    ]);
+    // Without a count, as while Codex waits for the network, the notice says why where it has no
+    // details.
+    expect(retry('Reconnecting... waiting for network', null)).toEqual([
+      { type: 'retrying', reason: 'Reconnecting... waiting for network' },
     ]);
   });
 
