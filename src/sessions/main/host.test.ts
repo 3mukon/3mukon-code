@@ -7,7 +7,7 @@ import type { SessionAction, SessionList, SessionSettings } from '../shared/sess
 import { SessionHost, type SessionsMenuUi } from './host';
 import type { Provider, ProviderSession, ResumeOptions, SessionEventListener } from './provider';
 import { SessionRecords, type SessionRecord } from './records';
-import { memoryTextStorage } from './texts';
+import { memoryTextStorage, type TextStorage } from './texts';
 
 // Sessions start in real folders, which the host checks.
 let root: string;
@@ -426,6 +426,43 @@ describe('SessionHost', () => {
       'closed',
       'closed',
     ]);
+  });
+
+  it('waits, closing every session, for each to end as its provider reports a moment later, and for the text its end keeps', async () => {
+    const claude = fakeProvider('claude-code');
+    const provider: Provider = {
+      ...claude.provider,
+      start: (_options, onEvent) =>
+        Promise.resolve({
+          id: 'late-1',
+          ...sessionCalls(),
+          close: () => {
+            setTimeout(() => {
+              onEvent({ type: 'closed' });
+            }, 20);
+            return Promise.resolve();
+          },
+        }),
+    };
+    const texts = new Map<string, string>();
+    const memory = memoryTextStorage(texts);
+    let writing = Promise.resolve();
+    // Each write takes a moment.
+    const slow: TextStorage = {
+      ...memory,
+      write: (id, text) => {
+        writing = new Promise((resolve) => setTimeout(resolve, 20)).then(() =>
+          memory.write(id, text),
+        );
+        return writing;
+      },
+      settled: () => writing,
+    };
+    const host = new SessionHost([provider], memoryRecords().records, slow);
+    const id = await host.start('claude-code', { cwd: folder('a') });
+    await host.closeAll();
+    expect(host.list().sessions.map((summary) => summary.status)).toEqual(['closed']);
+    expect(texts.has(id)).toBe(true);
   });
 });
 

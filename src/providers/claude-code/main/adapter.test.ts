@@ -1,6 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { getSessionInfo, getSessionMessages, listSessions } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
 import { createClaudeCodeProvider } from './adapter';
@@ -303,14 +304,26 @@ describe('a Claude Code session', () => {
       maxTokens: 200_000,
       model: 'claude-opus-5',
     });
+    // Without a title of the user's or of Claude Code's own, Claude Code's summary is the latest
+    // prompt, which is not reported, or every message would retitle the session.
+    const info = { sessionId: 's', lastModified: 0, firstPrompt: 'Fix the build' };
+    const asked = vi.mocked(getSessionInfo).mock.calls.length;
+    vi.mocked(getSessionInfo)
+      .mockResolvedValueOnce({ ...info, summary: 'Fix the build' })
+      .mockResolvedValueOnce({ ...info, summary: 'Again', customTitle: 'Build fixes' })
+      .mockResolvedValueOnce({ ...info, summary: 'Once more', customTitle: 'Build fixes' });
     await playTurn(session, events, 'Fix the build');
-    await waitFor(() => events.some((event) => event.type === 'title'));
+    await waitFor(() => vi.mocked(getSessionInfo).mock.calls.length === asked + 1);
     expect(events).toContainEqual({ type: 'context', used: 4800, size: 200_000 });
-    expect(events).toContainEqual({ type: 'title', title: 'Fix the build' });
-    // The same title is not reported again.
     await playTurn(session, events, 'Again');
-    await waitFor(() => events.filter((event) => event.type === 'context').length === 3);
-    expect(events.filter((event) => event.type === 'title')).toHaveLength(1);
+    await waitFor(() => events.some((event) => event.type === 'title'));
+    // The same title is not reported again.
+    await playTurn(session, events, 'Once more');
+    await waitFor(() => vi.mocked(getSessionInfo).mock.calls.length === asked + 3);
+    await waitFor(() => events.filter((event) => event.type === 'context').length === 4);
+    expect(events.filter((event) => event.type === 'title')).toEqual([
+      { type: 'title', title: 'Build fixes' },
+    ]);
   });
 
   it('switches the model and the effort in place', async () => {
@@ -367,6 +380,40 @@ describe('a Claude Code session', () => {
     expect(events.some((event) => event.type === 'closed')).toBe(false);
     await playTurn(session, events, 'again');
     expect(current().inputs).toHaveLength(1);
+  });
+
+  it('lets a switch on its way finish before a gateway switch ends the process, and starts the new one with it', async () => {
+    const { session, events } = await startSession();
+    await playTurn(session, events, 'hello');
+    const first = current();
+    // Claude Code answers the effort switch only once the gateway switch has been asked for.
+    let answer: () => void = () => undefined;
+    first.applyFlagSettings.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const effort = session.setEffort('low');
+    const gateway = session.setGateway('work');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(first.closed).toBe(false);
+    answer();
+    await effort;
+    await gateway;
+    expect(first.closed).toBe(true);
+    expect(current().params.options).toMatchObject({
+      effort: 'low',
+      settings: join(gatewaysDir, 'work.json'),
+    });
+    expect(events).toContainEqual({ type: 'settings', effort: 'low' });
+    expect(events).toContainEqual({ type: 'settings', gateway: 'work' });
+    // A switch asked for while the gateway switch is under way goes to the new process.
+    const switching = session.setGateway(null);
+    await session.setModel('haiku');
+    await switching;
+    expect(current().setModel).toHaveBeenCalledExactlyOnceWith('haiku');
+    expect(fakes.queries).toHaveLength(3);
   });
 
   it('switches a gateway asked for during a turn once the turn has ended', async () => {
@@ -445,6 +492,57 @@ describe('a Claude Code session', () => {
     expect(events).toContainEqual(
       expect.objectContaining({ type: 'message', role: 'user', images: [image] }),
     );
+  });
+
+  it('reads the history from Claude Code’s transcript, with the title Claude Code keeps, if any', async () => {
+    const provider = createClaudeCodeProvider({ gatewaysDir });
+    vi.mocked(getSessionMessages).mockResolvedValueOnce([
+      {
+        type: 'user',
+        uuid: 'u1',
+        session_id: 's',
+        parent_tool_use_id: null,
+        parent_agent_id: null,
+        message: { role: 'user', content: 'Fix the build' },
+      },
+    ]);
+    vi.mocked(getSessionInfo).mockResolvedValueOnce({
+      sessionId: 's',
+      lastModified: 0,
+      summary: 'Fix the build',
+      customTitle: 'Build fixes',
+    });
+    const events = await provider.history('s', '/work');
+    expect(events.at(-1)).toEqual({ type: 'title', title: 'Build fixes' });
+    expect(events.some((event) => event.type === 'message' && event.text === 'Fix the build')).toBe(
+      true,
+    );
+    // Without such a title, the history has none: its summary would be the latest prompt.
+    vi.mocked(getSessionInfo).mockResolvedValueOnce({
+      sessionId: 's',
+      lastModified: 0,
+      summary: 'Fix the build',
+    });
+    expect((await provider.history('s', '/work')).some((event) => event.type === 'title')).toBe(
+      false,
+    );
+  });
+
+  it('lists the folder’s sessions by the title Claude Code keeps, or else their first prompt', async () => {
+    vi.mocked(listSessions).mockResolvedValueOnce([
+      { sessionId: 'a', lastModified: 2, summary: 'Latest', firstPrompt: 'First', cwd: '/work' },
+      {
+        sessionId: 'b',
+        lastModified: 1,
+        summary: 'Latest',
+        customTitle: 'Named',
+        firstPrompt: 'x',
+      },
+    ]);
+    expect(await createClaudeCodeProvider({ gatewaysDir }).listSessions('/work', 10)).toEqual([
+      { id: 'a', title: 'First', cwd: '/work', updatedAt: 2 },
+      { id: 'b', title: 'Named', cwd: '/work', updatedAt: 1 },
+    ]);
   });
 
   it('reports closed once when closed', async () => {

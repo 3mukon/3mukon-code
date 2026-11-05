@@ -63,6 +63,8 @@ const EFFORT_LEVELS = new Set<string>([
 const PROBE_TIMEOUT_MS = 30_000;
 // How long Claude Code's own count of the context may take before it is left out.
 const COUNT_TIMEOUT_MS = 5_000;
+// How long a gateway switch waits for the switches already sent to the process it ends.
+const SENT_TIMEOUT_MS = 10_000;
 
 // The folders of the probes still listing models, removed as the app's process exits, should it quit
 // during a probe, so that quitting leaves none behind.
@@ -117,17 +119,25 @@ export function createClaudeCodeProvider({
       onEvent({ type: 'replay-finished' });
       return ClaudeCodeSession.open(settings, onEvent, translator, link);
     },
-    // Read from Claude Code's own transcript, without starting Claude Code.
+    // Read from Claude Code's own transcript, without starting Claude Code, with the title Claude Code
+    // keeps for the session where it keeps one, as a running session reports it.
     async history(sessionId, cwd) {
       const translator = new Translator(cwd);
-      const messages = await getSessionMessages(sessionId, { dir: cwd });
-      return messages.flatMap((message) => translator.history(message));
+      const [messages, info] = await Promise.all([
+        getSessionMessages(sessionId, { dir: cwd }),
+        getSessionInfo(sessionId, { dir: cwd }).catch(() => undefined),
+      ]);
+      const events = messages.flatMap((message) => translator.history(message));
+      const title = info?.customTitle;
+      return title === undefined || title === '' ? events : [...events, { type: 'title', title }];
     },
     async listSessions(cwd, limit) {
       const sessions = await listSessions({ dir: cwd, limit });
       return sessions.map((session) => ({
         id: session.sessionId,
-        title: session.customTitle ?? session.summary,
+        // The user's title or Claude Code's own, or else the first prompt, which stays as the session
+        // goes on, where the summary would be the latest prompt.
+        title: session.customTitle ?? session.firstPrompt ?? session.summary,
         cwd: session.cwd ?? cwd,
         updatedAt: session.lastModified,
       }));
@@ -360,6 +370,9 @@ class ClaudeCodeSession implements ProviderSession {
   private pendingGateway: string | null | undefined;
   // The gateway switch under way, which a message waits for; it never rejects.
   private switching: Promise<void> | null = null;
+  // The switches sent to the running process and not yet answered, which a gateway switch lets
+  // finish there first.
+  private readonly sent = new Set<Promise<void>>();
   // The title last reported.
   private title: string | undefined;
 
@@ -456,30 +469,39 @@ class ClaudeCodeSession implements ProviderSession {
   }
 
   async setMode(mode: PermissionMode): Promise<void> {
-    await (await this.process()).setPermissionMode(nativeModes[mode]);
-    this.settings.mode = mode;
+    await this.sendSwitch(async (query) => {
+      await query.setPermissionMode(nativeModes[mode]);
+      this.settings.mode = mode;
+    });
     this.onEvent({ type: 'mode', mode });
   }
 
   async setModel(model: string | null): Promise<void> {
-    await (await this.process()).setModel(model ?? undefined);
-    this.settings.model = model;
+    await this.sendSwitch(async (query) => {
+      await query.setModel(model ?? undefined);
+      this.settings.model = model;
+    });
     this.onEvent({ type: 'settings', model });
   }
 
   async setEffort(effort: ReasoningEffort | null): Promise<void> {
     const level = effortLevel(effort);
-    await (await this.process()).applyFlagSettings({ effortLevel: level });
-    this.settings.effort = level;
+    await this.sendSwitch(async (query) => {
+      await query.applyFlagSettings({ effortLevel: level });
+      this.settings.effort = level;
+    });
     this.onEvent({ type: 'settings', effort: level });
   }
 
   // Claude Code takes the new level at once, during a turn too.
   async setSandbox(sandbox: SandboxLevel): Promise<void> {
-    const query = await this.process();
-    const leavingReadOnly = this.settings.sandbox === 'read-only';
-    await query.applyFlagSettings(sandboxSettings(sandbox, this.settings.folders, leavingReadOnly));
-    this.settings.sandbox = sandbox;
+    await this.sendSwitch(async (query) => {
+      const leavingReadOnly = this.settings.sandbox === 'read-only';
+      await query.applyFlagSettings(
+        sandboxSettings(sandbox, this.settings.folders, leavingReadOnly),
+      );
+      this.settings.sandbox = sandbox;
+    });
     this.onEvent({ type: 'settings', sandbox });
   }
 
@@ -545,6 +567,23 @@ class ClaudeCodeSession implements ProviderSession {
     return this.connection.query;
   }
 
+  // Sends a switch to the running process, once a gateway switch under way has finished with it, and
+  // keeps it among those sent until it is answered, together with the change it makes to the
+  // session's settings, so that a gateway switch asked for meanwhile lets it finish and starts the new
+  // process with the change. Whether to wait is decided in the same turn of the event loop as the
+  // sending, so that no gateway switch can start in between.
+  private sendSwitch(apply: (query: Query) => Promise<void>): Promise<void> {
+    if (this.switching !== null) return this.switching.then(() => this.sendSwitch(apply));
+    if (this.closed) return Promise.reject(new Error('The session is closed.'));
+    const sent = apply(this.connection.query);
+    this.sent.add(sent);
+    const answered = () => {
+      this.sent.delete(sent);
+    };
+    sent.then(answered, answered);
+    return sent;
+  }
+
   // Waits for Claude Code's initialization, which lists the models the session can use, and puts the
   // process on the session's sandbox level before any message. The level goes in as flag settings,
   // since the SDK's own sandbox option cannot go beside a gateway's settings file.
@@ -561,8 +600,10 @@ class ClaudeCodeSession implements ProviderSession {
   }
 
   // After each turn, how much of the context window the conversation takes, from Claude Code's own
-  // count without asking the API, and the title Claude Code keeps for the session: the one the user
-  // gave it, the one it wrote itself, or else its first prompt.
+  // count without asking the API, and the title Claude Code keeps for the session, where it keeps
+  // one: the one the user gave it or the one it wrote itself. Its summary is not taken, since without
+  // such a title it is the latest prompt, which would retitle the session with every message, and
+  // the host's first message stands in for the title instead.
   private async afterTurn(): Promise<void> {
     // Without a count, or once the session has closed, nothing is reported; the next turn tries again.
     const usage = await this.process().then(countContext, () => undefined);
@@ -571,7 +612,7 @@ class ClaudeCodeSession implements ProviderSession {
     }
     try {
       const info = await getSessionInfo(this.settings.sessionId, { dir: this.settings.cwd });
-      const title = info?.customTitle ?? info?.summary;
+      const title = info?.customTitle;
       if (title !== undefined && title !== '' && title !== this.title) {
         this.title = title;
         this.onEvent({ type: 'title', title });
@@ -596,11 +637,17 @@ class ClaudeCodeSession implements ProviderSession {
   }
 
   // Ends the Claude Code process and continues the session in a new one that reads the other
-  // gateway's file, so the session keeps its id and its history.
+  // gateway's file, so the session keeps its id and its history. The switches already sent to the
+  // process finish there first, for a while at most, so that the new process starts with them.
   private async reconnect(gateway: string | null): Promise<void> {
     if (this.closed) return;
     const previous = this.connection;
     this.retired.add(previous);
+    await withinTime(
+      Promise.allSettled(this.sent),
+      SENT_TIMEOUT_MS,
+      'Claude Code did not answer the switches sent before the gateway switch in time.',
+    ).catch(() => undefined);
     previous.input.end();
     previous.query.close();
     await previous.done;

@@ -21,6 +21,8 @@ const ROOTS = [
   'v2/ThreadResumeResponse',
   'v2/ThreadListParams',
   'v2/ThreadListResponse',
+  'v2/ThreadReadParams',
+  'v2/ThreadReadResponse',
   'v2/ThreadTurnsListParams',
   'v2/ThreadTurnsListResponse',
   'v2/TurnStartParams',

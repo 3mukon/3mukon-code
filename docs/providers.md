@@ -39,7 +39,7 @@ The app drives three providers. Each has an adapter module that implements the s
 | A message during a turn | Joins the running turn between tool calls | Joins it through `turn/steer` | Joins it through Grok's interjection |
 | Questions | AskUserQuestion, in yolo too | Codex's own question tools, the async one answered by the user's next message (ADR-0012) | Grok's own question tool |
 | Allow for the session | Claude Code's suggested rules, for the session only | Codex's session approval | Not offered: Grok's "always" outlasts the session |
-| History and resume | The SDK's transcripts | `thread/list`, `thread/turns/list` and `thread/resume` | `session/list` and `session/load` |
+| History and resume | The SDK's transcripts and session info | `thread/list`, `thread/turns/list`, `thread/read` and `thread/resume` | `session/list` and `session/load` |
 | Usage limits | The SDK's experimental usage call and the turns' rate-limit events | `account/rateLimits/read` and its updates; a reset spends a reset credit | `x.ai/billing`, the plan's current period; no reset |
 | The app's toolset | Not given | Given to every session (ADR-0012) | Not given |
 

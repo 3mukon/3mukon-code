@@ -124,6 +124,8 @@ export class SessionHost {
   private readonly unreadable = new Set<string>();
   // Set as the app quits, which stops the catch-up.
   private closing = false;
+  // What each session closing as the app quits calls as it ends, by session.
+  private readonly ending = new Map<string, () => void>();
 
   constructor(
     providers: readonly Provider[],
@@ -407,10 +409,16 @@ export class SessionHost {
     };
   }
 
-  // Closes every session and its provider process, as the app does when it quits.
+  // Closes every session and its provider process, as the app does when it quits, and waits for each
+  // to end as its provider reports, and for the texts their ends keep, so that quitting leaves none
+  // half-written.
   async closeAll(): Promise<void> {
     this.closing = true;
-    await Promise.allSettled([...this.sessions.values()].map((hosted) => this.close(hosted)));
+    const open = [...this.sessions.values()].filter(
+      (hosted) => hosted.session !== undefined && !hosted.state.closed,
+    );
+    await Promise.all(open.map((hosted) => this.closeToEnd(hosted)));
+    await this.texts.settled();
   }
 
   // The sessions of the Sessions list, or of the archived list, whose title and conversation hold every
@@ -493,6 +501,20 @@ export class SessionHost {
 
   private async close(hosted: Hosted): Promise<void> {
     if (hosted.session !== undefined && !hosted.state.closed) await hosted.session.close();
+  }
+
+  // Closes the session and waits for the closed event that follows, unless closing it fails.
+  private async closeToEnd(hosted: Hosted): Promise<void> {
+    const ended = new Promise<void>((resolve) => {
+      this.ending.set(hosted.id, resolve);
+    });
+    try {
+      await this.close(hosted);
+    } catch {
+      this.ending.delete(hosted.id);
+      return;
+    }
+    await ended;
   }
 
   private async reopen(
@@ -601,6 +623,10 @@ export class SessionHost {
     this.keep(hosted);
     this.report(hosted);
     if (TEXT_EVENTS.has(event.type)) this.keepText(hosted);
+    if (event.type === 'closed') {
+      this.ending.get(hosted.id)?.();
+      this.ending.delete(hosted.id);
+    }
   }
 
   // Keeps the text of the session's messages as they are now, once the provider has started it and

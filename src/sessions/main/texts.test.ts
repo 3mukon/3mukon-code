@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -34,6 +34,33 @@ describe('textStorage', () => {
     await storage.remove('s1');
     await storage.remove('gone');
     expect(await storage.ids()).toEqual(['s2']);
+  });
+
+  it('writes a session’s texts one at a time, the latest last, leaving no half-written file', async () => {
+    const folder = join(data(), 'session-texts');
+    const storage = textStorage(folder);
+    await Promise.all(['one', 'two', 'three'].map((text) => storage.write('s1', text)));
+    expect(await storage.read('s1')).toBe('three');
+    await storage.write('s1', 'four');
+    const later = storage.write('s1', 'five');
+    await storage.remove('s1');
+    await later;
+    expect(await storage.read('s1')).toBeUndefined();
+    expect(readdirSync(folder)).toEqual([]);
+  });
+
+  it('removes what an earlier run left half-written as it opens, and settles once its writes are done', async () => {
+    const folder = join(data(), 'session-texts');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 's1.txt'), 'Kept');
+    writeFileSync(join(folder, 's1.txt.123.writing'), 'Half');
+    const storage = textStorage(folder);
+    expect(await storage.ids()).toEqual(['s1']);
+    expect(readdirSync(folder)).toEqual(['s1.txt']);
+    void storage.write('s2', 'Written');
+    await storage.settled();
+    expect(await storage.read('s2')).toBe('Written');
+    expect(await storage.read('s1')).toBe('Kept');
   });
 
   it('keeps a text only under an id that is a file name of its own', async () => {

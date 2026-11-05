@@ -95,7 +95,7 @@ export function AccountsPanel({ bridge, accounts, onSignIn }: AccountsPanelProps
             </div>
             <Usage account={account} now={now} />
             {account.resettable && account.usage !== undefined && (
-              <div className="mt-2 flex items-center gap-3 text-[12px] text-muted">
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted">
                 {account.usage.resets !== undefined && (
                   <span>{t('accounts.resetsLeft', { count: account.usage.resets })}</span>
                 )}
@@ -123,6 +123,12 @@ export function AccountsPanel({ bridge, accounts, onSignIn }: AccountsPanelProps
   );
 }
 
+// A window's row: its name and bar, then what it says, beside them while 10rem are left there, and on
+// a line of its own below them in a narrower panel, rather than squeezed a word or a character to a
+// line.
+const ROW = 'flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px]';
+const ROW_TEXT = 'min-w-[min(10rem,100%)] flex-1';
+
 // A subscription's windows with when they were read, and why the last read could not read them anew;
 // while none were ever read, a dashed bar and why they could not be; nothing otherwise.
 function Usage({ account, now }: { account: ProviderAccount; now: number }) {
@@ -132,12 +138,10 @@ function Usage({ account, now }: { account: ProviderAccount; now: number }) {
   if (usage === undefined) {
     return usageProblem === undefined ? null : (
       <ul className="mt-2 flex flex-col gap-1.5">
-        <li className="flex items-baseline gap-3 text-[12px]">
+        <li className={ROW}>
           <span className="w-36 shrink-0 truncate text-muted">{t('accounts.window.other')}</span>
           <UnknownBar />
-          <span className="min-w-0 flex-1 text-faint">
-            {problemText(t, usageProblem, provider)}
-          </span>
+          <span className={`${ROW_TEXT} text-faint`}>{problemText(t, usageProblem, provider)}</span>
         </li>
       </ul>
     );
@@ -170,7 +174,7 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
   const fill =
     used === null ? '' : used >= 100 ? 'bg-del' : used >= NEARLY_USED ? 'bg-wait' : 'bg-ink';
   return (
-    <li className="flex items-baseline gap-3 text-[12px]">
+    <li className={ROW}>
       <span className="w-36 shrink-0 truncate text-muted" title={name}>
         {name}
       </span>
@@ -188,7 +192,7 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
           <span className={`block h-full ${fill}`} style={{ width: `${String(used)}%` }} />
         </span>
       )}
-      <span className="min-w-0 flex-1">
+      <span className={ROW_TEXT}>
         {used === null
           ? t('accounts.unreported')
           : t('accounts.used', { share: share(used, i18n.language) })}

@@ -7,22 +7,50 @@ export interface TextStorage {
   // The sessions that have a text.
   ids(): Promise<string[]>;
   read(id: string): Promise<string | undefined>;
+  // Resolves once the text, or a later one of the same session, is kept.
   write(id: string, text: string): Promise<void>;
   remove(id: string): Promise<void>;
+  // Resolves once the writes asked for so far have finished.
+  settled(): Promise<void>;
 }
 
 // A session's id as a file's name: the app's ids are UUIDs, and anything else is refused.
 const SAFE_ID = /^[A-Za-z0-9-]{1,100}$/;
 const EXTENSION = '.txt';
+// The end of the name of a text being written, which takes the text's place once it is whole.
+const WRITING = '.writing';
 
 // One file per session, <id>.txt, in the folder, a folder of the app's data, both readable by the user
 // alone. A text is written whole to a file of its own first, so that a read never sees half of it.
+// One session's texts are written one at a time, a text that a later one replaces before its turn
+// never being written, so that no two writes share that file. What an earlier run left half-written,
+// having quit in the middle of a write, is removed as the storage opens.
 export function textStorage(folder: string): TextStorage {
   const fileOf = (id: string) => {
     if (!SAFE_ID.test(id)) throw new Error('A session’s text is kept only under the app’s own id.');
     return join(folder, id + EXTENSION);
   };
-  const made = mkdir(folder, { recursive: true, mode: 0o700 }).then(() => chmod(folder, 0o700));
+  const made = mkdir(folder, { recursive: true, mode: 0o700 })
+    .then(() => chmod(folder, 0o700))
+    .then(() => removeHalfWritten(folder));
+  // Its failure reaches each call that waits for it, and is not reported where none does.
+  made.catch(() => undefined);
+  // The text each session is to have next, and the writes under way, by session.
+  const next = new Map<string, string>();
+  const writing = new Map<string, Promise<void>>();
+  const writeInTurn = async (id: string, file: string) => {
+    try {
+      await made;
+      for (let text = next.get(id); text !== undefined; text = next.get(id)) {
+        next.delete(id);
+        const written = `${file}.${String(process.pid)}${WRITING}`;
+        await writeFile(written, text, { encoding: 'utf8', mode: 0o600 });
+        await rename(written, file);
+      }
+    } finally {
+      writing.delete(id);
+    }
+  };
   return {
     async ids() {
       await made;
@@ -40,17 +68,36 @@ export function textStorage(folder: string): TextStorage {
         throw error;
       }
     },
+    // Everything before the wait happens as the call is made, so that calls queue in their order.
     async write(id, text) {
-      await made;
       const file = fileOf(id);
-      const written = `${file}.${String(process.pid)}.writing`;
-      await writeFile(written, text, { encoding: 'utf8', mode: 0o600 });
-      await rename(written, file);
+      next.set(id, text);
+      let underWay = writing.get(id);
+      if (underWay === undefined) {
+        underWay = writeInTurn(id, file);
+        writing.set(id, underWay);
+      }
+      await underWay;
     },
     async remove(id) {
-      await rm(fileOf(id), { force: true });
+      const file = fileOf(id);
+      next.delete(id);
+      await writing.get(id)?.catch(() => undefined);
+      await rm(file, { force: true });
+    },
+    async settled() {
+      await Promise.allSettled(writing.values());
     },
   };
+}
+
+async function removeHalfWritten(folder: string): Promise<void> {
+  const names = await readdir(folder);
+  await Promise.all(
+    names
+      .filter((name) => name.endsWith(WRITING))
+      .map((name) => rm(join(folder, name), { force: true })),
+  );
 }
 
 // A storage that keeps the texts in memory, for a host that keeps none on disk, such as in tests.
@@ -66,6 +113,7 @@ export function memoryTextStorage(texts = new Map<string, string>()): TextStorag
       texts.delete(id);
       return Promise.resolve();
     },
+    settled: () => Promise.resolve(),
   };
 }
 

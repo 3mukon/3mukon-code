@@ -40,6 +40,8 @@ import type { SandboxMode } from './protocol/v2/SandboxMode';
 import type { SandboxPolicy } from './protocol/v2/SandboxPolicy';
 import type { ServerRequestResolvedNotification } from './protocol/v2/ServerRequestResolvedNotification';
 import type { ThreadListResponse } from './protocol/v2/ThreadListResponse';
+import type { ThreadReadParams } from './protocol/v2/ThreadReadParams';
+import type { ThreadReadResponse } from './protocol/v2/ThreadReadResponse';
 import type { ThreadResumeParams } from './protocol/v2/ThreadResumeParams';
 import type { ThreadResumeResponse } from './protocol/v2/ThreadResumeResponse';
 import type { ThreadStartParams } from './protocol/v2/ThreadStartParams';
@@ -208,9 +210,17 @@ export function createCodexProvider({
       const settings = sessionSettings(options, gatewaysDir);
       return CodexSession.open(settings, options.sessionId, connect, toolset, link, onEvent);
     },
-    // Read through a short-lived app-server, which lists the thread's turns without loading it.
+    // Read through a short-lived app-server, which lists the thread's turns and reads its name without
+    // loading it, the name being the title Codex keeps for the session, as a running session reports it.
     history(sessionId, cwd) {
-      return withCodex(connect, cwd, (rpc) => pastEvents(rpc, sessionId, new Translator(cwd)));
+      return withCodex(connect, cwd, async (rpc): Promise<SessionEvent[]> => {
+        const events = await pastEvents(rpc, sessionId, new Translator(cwd));
+        const params: ThreadReadParams = { threadId: sessionId, includeTurns: false };
+        const { thread } = await rpc.request<ThreadReadResponse>('thread/read', params);
+        return thread.name === null || thread.name === ''
+          ? events
+          : [...events, { type: 'title', title: thread.name }];
+      });
     },
     listSessions(cwd, limit) {
       return withCodex(connect, cwd, async (rpc): Promise<HistoryEntry[]> => {

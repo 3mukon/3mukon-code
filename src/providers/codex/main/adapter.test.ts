@@ -52,6 +52,8 @@ let heldSandbox: Params | undefined;
 let duringResume: (() => void) | undefined;
 // A turn/steer refused, as Codex refuses one into a turn that cannot take it.
 let failSteer: string | undefined;
+// The name thread/read gives a thread, the title Codex keeps for it.
+let threadName: string | null;
 
 function sandboxOf(mode: unknown): Params {
   if (heldSandbox !== undefined) return heldSandbox;
@@ -107,6 +109,8 @@ function reply(method: string, params: Params): unknown {
             data: [{ id: 'old2', items: [{ type: 'agentMessage', id: 'a1', text: 'Reply' }] }],
             nextCursor: null,
           };
+    case 'thread/read':
+      return { thread: { id: params.threadId, name: threadName } };
     case 'model/list':
       return { data: MODELS, nextCursor: null };
     case 'turn/start':
@@ -250,6 +254,7 @@ beforeEach(() => {
   heldSandbox = undefined;
   duringResume = undefined;
   failSteer = undefined;
+  threadName = null;
   gatewaysDir = mkdtempSync(join(tmpdir(), 'codex-gateways-'));
   writeFileSync(
     join(gatewaysDir, 'work.toml'),
@@ -478,6 +483,21 @@ describe('the Codex provider', () => {
     ]);
     expect(current().closed).toBe(true);
     expect(await codex.listGateways()).toEqual(['work']);
+  });
+
+  it('reads a thread’s history page by page from a short-lived app-server, with the name Codex keeps for it', async () => {
+    const codex = provider();
+    expect(await codex.history('th1', '/work')).toEqual([
+      { type: 'message', id: 'u1', role: 'user', text: 'Earlier' },
+      { type: 'message', id: 'a1', role: 'agent', text: 'Reply' },
+    ]);
+    expect(current().params('thread/read')).toEqual({ threadId: 'th1', includeTurns: false });
+    expect(current().closed).toBe(true);
+    threadName = 'Build fixes';
+    expect((await codex.history('th1', '/work')).at(-1)).toEqual({
+      type: 'title',
+      title: 'Build fixes',
+    });
   });
 
   it('resumes a thread and replays its history, page by page', async () => {

@@ -73,7 +73,7 @@ The main process's menus and questions show in the page, in the app's own look, 
 
 ## Language
 
-The window and the main process's menus and questions are in English or Simplified Chinese, following the Language setting: System, which takes macOS's preferred languages, English or 简体中文. Every string exists in both catalogs. (DOC-mod-i18n)
+The window and the main process's menus and questions are in English or Simplified Chinese, following the Language setting: System, which takes macOS's preferred languages, English or 简体中文. Every string exists in both catalogs. Names that come from the providers or their files stay as they are in either language: models, gateways and reasoning effort levels, the levels with a capital first letter as the other settings have. (DOC-mod-i18n)
 
 ## Access
 

@@ -876,6 +876,39 @@ describe('resuming and history', () => {
     ).toEqual(['user: Earlier', 'agent: Reply', 'replay-finished', 'mode', 'settings', 'models']);
   });
 
+  it('reads a session’s history from a read-only process, with the title Grok lists for it, which its replay leaves out', async () => {
+    replay = [
+      { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'Earlier' } },
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Reply' } },
+    ];
+    pages = [
+      {
+        sessions: [{ sessionId: 'other', cwd: '/work', title: 'Another', updatedAt: null }],
+        nextCursor: '1',
+      },
+      { sessions: [{ sessionId: 's9', cwd: '/work', title: 'Grok’s own', updatedAt: null }] },
+    ];
+    const events = await provider.history('s9', '/work');
+    expect(
+      events.map((event) =>
+        event.type === 'message-delta' ? `${event.role}: ${event.text}` : event.type,
+      ),
+    ).toEqual(['user: Earlier', 'agent: Reply', 'title']);
+    expect(events.at(-1)).toEqual({ type: 'title', title: 'Grok’s own' });
+    expect(fake().args[2]).toBe('read-only');
+    expect(fake().methods()).toEqual([
+      'initialize',
+      'session/load',
+      'session/list',
+      'session/list',
+    ]);
+    // A session Grok lists without a title, or does not list, has none in its history.
+    pages = [{ sessions: [{ sessionId: 's9', cwd: '/work', updatedAt: null }] }];
+    expect((await provider.history('s9', '/work')).some((event) => event.type === 'title')).toBe(
+      false,
+    );
+  });
+
   it('lists the folder’s sessions newest first, page by page, from a read-only process', async () => {
     pages = [
       {

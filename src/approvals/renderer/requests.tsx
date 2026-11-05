@@ -525,6 +525,8 @@ function useFocusOn(focusKey: number | undefined) {
   return element;
 }
 
+// A request's block lies on the window's paper, grain and all, under a dashed line, so that only what
+// it holds, such as a diff, is paper set apart.
 function Block({
   label,
   ref,
@@ -542,7 +544,7 @@ function Block({
       aria-label={label}
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      className="group/request my-3 rounded-md border border-dashed border-line bg-well px-3 py-2"
+      className="group/request my-3 rounded-md border border-dashed border-line px-3 py-2"
     >
       {children}
     </section>

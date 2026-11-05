@@ -163,7 +163,8 @@ export function createGrokBuildProvider(
       return GrokSession.open(options, options.sessionId, connect, link, onEvent);
     },
     // Grok replays a session to the process that loads it, so a short-lived process in the read-only
-    // profile loads it and ends; nothing is sent to the session.
+    // profile loads it and ends; nothing is sent to the session. The replay leaves out the title Grok
+    // keeps for the session, which its list of sessions gives, as a running session reports it.
     history(sessionId, cwd) {
       const translator = new Translator(cwd);
       const events: SessionEvent[] = [];
@@ -178,7 +179,11 @@ export function createGrokBuildProvider(
             sessionId,
           });
           translator.endMessage();
-          return events;
+          const listed = (await grokSessions(connection, cwd)).find(
+            (session) => session.sessionId === sessionId,
+          );
+          const title = listed?.title;
+          return title == null || title === '' ? events : [...events, { type: 'title', title }];
         },
         ({ sessionId: loaded, update }) => {
           if (loaded === sessionId) events.push(...translator.update(update));
@@ -187,16 +192,7 @@ export function createGrokBuildProvider(
     },
     listSessions(cwd, limit) {
       return withGrok(connect, cwd, async ({ connection }): Promise<HistoryEntry[]> => {
-        const sessions: SessionInfo[] = [];
-        let cursor: string | null | undefined;
-        do {
-          const page = await connection.agent.request('session/list', {
-            cwd,
-            ...(cursor == null ? {} : { cursor }),
-          });
-          sessions.push(...page.sessions);
-          cursor = page.nextCursor;
-        } while (cursor != null);
+        const sessions = await grokSessions(connection, cwd);
         return sessions
           .map((session) => ({
             id: session.sessionId,
@@ -300,6 +296,21 @@ async function connectGrok(
 async function stopAgent({ process, connection }: Pick<Agent, 'process' | 'connection'>) {
   connection.close();
   await process.stop();
+}
+
+// Every session Grok lists for the folder, page by page.
+async function grokSessions(connection: ClientConnection, cwd: string): Promise<SessionInfo[]> {
+  const sessions: SessionInfo[] = [];
+  let cursor: string | null | undefined;
+  do {
+    const page = await connection.agent.request('session/list', {
+      cwd,
+      ...(cursor == null ? {} : { cursor }),
+    });
+    sessions.push(...page.sessions);
+    cursor = page.nextCursor;
+  } while (cursor != null);
+  return sessions;
 }
 
 // One exchange with a short-lived process that starts no session; it runs read-only. The answer comes
