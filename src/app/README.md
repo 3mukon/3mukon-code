@@ -47,4 +47,4 @@ None: this module is the entry point, and no other module imports it. Feature mo
 - The main process answers only the app's own page, and only with the calls the bridge declares.
 - Only web links leave the app: `shell.openExternal` never receives another scheme.
 - The window's page never scrolls: `tests/smoke/sessions.spec.ts` opens a long session, given by the main process in place of a provider's, and checks that the page is no taller than the window and that the wheel moves only the timeline (L-0001).
-- Smoke tests run the built app on a throwaway data folder of their own (`tests/smoke/app.ts`), never on the user's.
+- Smoke tests run the built app on a throwaway data folder of their own, never on the user's, in a login's environment with each provider's settings in that folder, where it is signed in to nothing, never the user's own (`isolatedEnvironment()` in `tests/smoke/app.ts`, L-0006, L-0007).

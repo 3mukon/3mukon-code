@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { answerQuestion, dataFolder, launchIsolated, pickFolder } from './app';
+import { answerQuestion, dataFolder, launch, pickFolder } from './app';
 
 // Types a command into the terminal and runs it.
 async function run(window: Page, terminal: Locator, command: string) {
@@ -58,7 +58,7 @@ test('a workspace’s menu opens a terminal in its folder, ⌃` another beside i
   const data = dataFolder();
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'smoke-terminal-')));
   try {
-    const app = await launchIsolated(data.path);
+    const app = await launch(data.path, '--lang=en-US');
     try {
       const window = await app.firstWindow();
       await pickFolder(app, folder);
@@ -114,7 +114,7 @@ test('a folder’s menu in a workspace’s tree opens a terminal in that folder'
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'smoke-terminal-')));
   mkdirSync(join(folder, 'docs'));
   try {
-    const app = await launchIsolated(data.path);
+    const app = await launch(data.path, '--lang=en-US');
     try {
       const window = await app.firstWindow();
       await pickFolder(app, folder);
@@ -183,7 +183,7 @@ test('a terminal tells a program that asks for its colours the window’s ink an
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'smoke-terminal-')));
   writeFileSync(join(folder, 'ask.cjs'), ASK_COLOURS);
   try {
-    const app = await launchIsolated(data.path);
+    const app = await launch(data.path, '--lang=en-US');
     try {
       const window = await app.firstWindow();
       await pickFolder(app, folder);

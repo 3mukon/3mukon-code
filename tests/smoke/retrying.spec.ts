@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
-import { answerQuestion, dataFolder, loginEnvironment, pickFolder } from './app';
+import { answerQuestion, dataFolder, isolatedEnvironment, pickFolder } from './app';
 
 // A model's service that fails every request to the model with an error 500, which Claude Code retries,
 // and answers anything else with a 404.
@@ -34,26 +34,17 @@ async function failingService(): Promise<{ url: string; close: () => void }> {
   };
 }
 
-// The app in English on the given data folder, in a login's environment, so that the variables of
-// whatever runs the test, such as an agent session's own, never reach Claude Code (L-0006), with each
-// provider reading its settings from a folder inside it and Claude Code sending its requests to the
-// given service, through at most three retries. Claude Code sends nothing without a key; this one is
-// a placeholder that no service takes. The test only clicks and types, so it launches the app itself,
-// as the settings' smoke test does (L-0004).
+// The app in English on the given data folder, in the isolated environment, so that the variables of
+// whatever runs the test, such as an agent session's own, never reach Claude Code (L-0006) and each
+// provider reads its settings from a folder inside it (L-0007), with Claude Code sending its requests
+// to the given service, through at most three retries. Claude Code sends nothing without a key; this
+// one is a placeholder that no service takes. The test only clicks and types, so it launches the app
+// itself, as the settings' smoke test does (L-0004).
 function launchAgainst(data: string, service: string) {
-  const folders = {
-    CLAUDE_CONFIG_DIR: join(data, 'claude'),
-    CODEX_HOME: join(data, 'codex'),
-    GROK_HOME: join(data, 'grok'),
-    ZDOTDIR: join(data, 'zsh'),
-  };
-  for (const folder of Object.values(folders)) mkdirSync(folder, { recursive: true });
   return electron.launch({
     args: ['.', `--user-data-dir=${data}`, '--lang=en-US'],
     env: {
-      ...loginEnvironment(),
-      ...folders,
-      SHELL: '/bin/zsh',
+      ...isolatedEnvironment(data),
       ANTHROPIC_BASE_URL: service,
       ANTHROPIC_API_KEY: 'placeholder',
       CLAUDE_CODE_MAX_RETRIES: '3',

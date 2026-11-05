@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { dataFolder, launchIsolated, providerProcesses, stillRunning } from './app';
+import { dataFolder, launch, providerProcesses, stillRunning } from './app';
 
 test('the Accounts panel opens from the gauge and says which providers are not signed in, as session pages do, and quitting ends the providers’ processes', async () => {
   const data = dataFolder();
   try {
-    const app = await launchIsolated(data.path);
+    const app = await launch(data.path, '--lang=en-US');
     let running: number[] = [];
     try {
       const window = await app.firstWindow();

@@ -1,12 +1,12 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { dataFolder, loginEnvironment } from './app';
+import { dataFolder, isolatedEnvironment } from './app';
 
-// Launches the built app on the data folder in English in a login's environment, its page following
-// macOS's appearance as the app sets it, which Playwright otherwise holds at light.
+// Launches the built app on the data folder in English in the isolated environment, its page
+// following macOS's appearance as the app sets it, which Playwright otherwise holds at light.
 const launch = (data: string) =>
   electron.launch({
     args: ['.', `--user-data-dir=${data}`, '--lang=en-US'],
-    env: loginEnvironment(),
+    env: isolatedEnvironment(data),
     colorScheme: null,
   });
 

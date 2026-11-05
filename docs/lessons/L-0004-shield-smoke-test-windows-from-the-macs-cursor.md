@@ -33,7 +33,7 @@ Playwright drives the page through the DevTools protocol and keeps it focused wi
 
 ## Fix
 
-`launch()` and `launchIsolated()` in `tests/smoke/app.ts`, and so `withApp()`, lay a shield over each window of the app they start: a transparent `BaseWindow`, a child of the window, without a page and taking no focus, which takes the cursor and its clicks while Playwright's input still reaches the page. It shows as the window becomes ready to show, just before the app shows the window, so that the window never appears bare under a cursor at rest, and follows the window as it moves and resizes. It is a `BaseWindow` because a `BrowserWindow` would add a page that `firstWindow()` can return and a window to `BrowserWindow.getAllWindows()`. A test that hovers or drags launches the app through these functions; `tests/smoke/settings.spec.ts` launches it itself and only clicks.
+`launch()` in `tests/smoke/app.ts`, and so `withApp()`, lays a shield over each window of the app it starts: a transparent `BaseWindow`, a child of the window, without a page and taking no focus, which takes the cursor and its clicks while Playwright's input still reaches the page. It shows as the window becomes ready to show, just before the app shows the window, so that the window never appears bare under a cursor at rest, and follows the window as it moves and resizes. It is a `BaseWindow` because a `BrowserWindow` would add a page that `firstWindow()` can return and a window to `BrowserWindow.getAllWindows()`. A test that hovers or drags launches the app through these functions; `tests/smoke/settings.spec.ts` launches it itself and only clicks.
 
 ## Occurrences
 

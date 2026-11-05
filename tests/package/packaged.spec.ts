@@ -1,35 +1,22 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
-import { loginEnvironment } from '../smoke/app';
+import { isolatedEnvironment } from '../smoke/app';
 
 // The packaged app, as scripts/package.sh builds it.
 const executable = join('dist', 'mac-arm64', '3mukon-code.app', 'Contents', 'MacOS', '3mukon-code');
 
 test('the packaged app starts, and runs each provider’s binary and a terminal from outside its archive', async () => {
   const data = mkdtempSync(join(tmpdir(), '3mukon-code-packaged-'));
-  // Each provider reads settings in the throwaway folder, which sign it in to nothing, so that the
-  // test reads none of the user's accounts and asks no provider's service; the shell reads none of
-  // the user's startup files.
-  const folders = {
-    CLAUDE_CONFIG_DIR: join(data, 'claude'),
-    CODEX_HOME: join(data, 'codex'),
-    GROK_HOME: join(data, 'grok'),
-    ZDOTDIR: join(data, 'zsh'),
-  };
-  for (const folder of Object.values(folders)) mkdirSync(folder, { recursive: true });
-  // The app starts in a login's environment with launchd's minimal PATH, as when opened from the
-  // Finder.
+  // The app starts in the isolated environment, each provider reading settings in the throwaway
+  // folder, which sign it in to nothing, so that the test reads none of the user's accounts and asks
+  // no provider's service, and the shell none of the user's startup files; with launchd's minimal
+  // PATH, as when opened from the Finder.
   const app = await electron.launch({
     executablePath: executable,
     args: [`--user-data-dir=${join(data, 'app')}`, '--lang=en-US'],
-    env: {
-      ...loginEnvironment(),
-      ...folders,
-      SHELL: '/bin/zsh',
-      PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
-    },
+    env: { ...isolatedEnvironment(data), PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
   });
   try {
     expect(await app.evaluate(({ app: electronApp }) => electronApp.isPackaged)).toBe(true);

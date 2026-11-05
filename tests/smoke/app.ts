@@ -24,7 +24,7 @@ export function dataFolder(): { path: string; remove: () => void } {
 const LOGIN_VARIABLES = ['HOME', 'PATH', 'TMPDIR', 'USER', 'LOGNAME', 'LANG'];
 
 // The environment of a login: those of the variables that the test's own environment has.
-export function loginEnvironment(): Record<string, string> {
+function loginEnvironment(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const name of LOGIN_VARIABLES) {
     const value = process.env[name];
@@ -33,11 +33,32 @@ export function loginEnvironment(): Record<string, string> {
   return env;
 }
 
-// Launches the built app on the given data folder in a login's environment, with any further
-// switches.
+// The environment the app under test starts in: a login's, with each provider reading its settings
+// from a folder made inside the given throwaway folder, where it is signed in to nothing, and a
+// terminal's shell reading none of the user's own startup files. The app runs the providers of its
+// own accord, listing their models as its window opens and reading their accounts five seconds later,
+// so every test runs them, whatever it tests; in a login's environment alone they would read the
+// user's own settings, and with them the user's sign-ins, with which they ask their services, and the
+// user's sessions (L-0007).
+export function isolatedEnvironment(folder: string): Record<string, string> {
+  const folders = {
+    CLAUDE_CONFIG_DIR: join(folder, 'claude'),
+    CODEX_HOME: join(folder, 'codex'),
+    GROK_HOME: join(folder, 'grok'),
+    ZDOTDIR: join(folder, 'zsh'),
+  };
+  for (const made of Object.values(folders)) mkdirSync(made, { recursive: true });
+  return { ...loginEnvironment(), ...folders, SHELL: '/bin/zsh' };
+}
+
+// Launches the built app on the given data folder in the isolated environment, with any further
+// switches, such as the language's.
 export function launch(data: string, ...args: string[]): Promise<ElectronApplication> {
   return shielded(
-    electron.launch({ args: ['.', `--user-data-dir=${data}`, ...args], env: loginEnvironment() }),
+    electron.launch({
+      args: ['.', `--user-data-dir=${data}`, ...args],
+      env: isolatedEnvironment(data),
+    }),
   );
 }
 
@@ -91,26 +112,6 @@ async function shielded(launching: Promise<ElectronApplication>): Promise<Electr
     });
   });
   return app;
-}
-
-// Launches the built app in English on the given data folder in a login's environment, with each
-// provider reading its settings from a folder inside it, where it is signed in to nothing, so that no
-// test reads the user's accounts or asks the providers' services; and with a terminal's shell reading
-// none of the user's own startup files.
-export function launchIsolated(data: string): Promise<ElectronApplication> {
-  const folders = {
-    CLAUDE_CONFIG_DIR: join(data, 'claude'),
-    CODEX_HOME: join(data, 'codex'),
-    GROK_HOME: join(data, 'grok'),
-    ZDOTDIR: join(data, 'zsh'),
-  };
-  for (const folder of Object.values(folders)) mkdirSync(folder, { recursive: true });
-  return shielded(
-    electron.launch({
-      args: ['.', `--user-data-dir=${data}`, '--lang=en-US'],
-      env: { ...loginEnvironment(), ...folders, SHELL: '/bin/zsh' },
-    }),
-  );
 }
 
 // Runs the built app on a throwaway data folder of its own, and closes it afterwards.
