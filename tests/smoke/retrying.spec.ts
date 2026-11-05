@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
-import { answerQuestion, dataFolder, pickFolder } from './app';
+import { answerQuestion, dataFolder, loginEnvironment, pickFolder } from './app';
 
 // A model's service that fails every request to the model with an error 500, which Claude Code retries,
 // and answers anything else with a 404.
@@ -34,11 +34,11 @@ async function failingService(): Promise<{ url: string; close: () => void }> {
   };
 }
 
-// The app in English on the given data folder, with each provider reading its settings from a folder
-// inside it and Claude Code sending its requests to the given service, through at most three retries.
-// The app gets a login's environment alone, so that the variables of whatever runs the test, such as an
-// agent session's own, never reach Claude Code. Claude Code sends nothing without a key; this one is a
-// placeholder that no service takes. The test only clicks and types, so it launches the app itself,
+// The app in English on the given data folder, in a login's environment, so that the variables of
+// whatever runs the test, such as an agent session's own, never reach Claude Code (L-0006), with each
+// provider reading its settings from a folder inside it and Claude Code sending its requests to the
+// given service, through at most three retries. Claude Code sends nothing without a key; this one is
+// a placeholder that no service takes. The test only clicks and types, so it launches the app itself,
 // as the settings' smoke test does (L-0004).
 function launchAgainst(data: string, service: string) {
   const folders = {
@@ -48,15 +48,10 @@ function launchAgainst(data: string, service: string) {
     ZDOTDIR: join(data, 'zsh'),
   };
   for (const folder of Object.values(folders)) mkdirSync(folder, { recursive: true });
-  const login: Record<string, string> = {};
-  for (const name of ['HOME', 'PATH', 'TMPDIR', 'USER', 'LOGNAME', 'LANG']) {
-    const value = process.env[name];
-    if (value !== undefined) login[name] = value;
-  }
   return electron.launch({
     args: ['.', `--user-data-dir=${data}`, '--lang=en-US'],
     env: {
-      ...login,
+      ...loginEnvironment(),
       ...folders,
       SHELL: '/bin/zsh',
       ANTHROPIC_BASE_URL: service,

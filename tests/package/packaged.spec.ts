@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
+import { loginEnvironment } from '../smoke/app';
 
 // The packaged app, as scripts/package.sh builds it.
 const executable = join('dist', 'mac-arm64', '3mukon-code.app', 'Contents', 'MacOS', '3mukon-code');
@@ -18,15 +19,17 @@ test('the packaged app starts, and runs each provider’s binary and a terminal 
     ZDOTDIR: join(data, 'zsh'),
   };
   for (const folder of Object.values(folders)) mkdirSync(folder, { recursive: true });
-  const env: Record<string, string> = {};
-  for (const [name, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[name] = value;
-  }
-  // The app starts with launchd's minimal PATH, as when opened from the Finder.
+  // The app starts in a login's environment with launchd's minimal PATH, as when opened from the
+  // Finder.
   const app = await electron.launch({
     executablePath: executable,
     args: [`--user-data-dir=${join(data, 'app')}`, '--lang=en-US'],
-    env: { ...env, ...folders, SHELL: '/bin/zsh', PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+    env: {
+      ...loginEnvironment(),
+      ...folders,
+      SHELL: '/bin/zsh',
+      PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+    },
   });
   try {
     expect(await app.evaluate(({ app: electronApp }) => electronApp.isPackaged)).toBe(true);
