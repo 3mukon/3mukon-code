@@ -14,6 +14,8 @@ Read this first and open documents based on their summaries. One line per docume
 
 | ID | Status | Title | Summary |
 |---|---|---|---|
+| [DOC-providers](providers.md) | current | The three providers side by side | Claude Code runs through the Claude Agent SDK in the main process, Codex as an app-server and Grok Build in ACP agent mode, each from a binary that comes with the app and on its own sign-in, and each adapter maps its provider's modes, sandboxes, gateways, models, questions and usage onto the app's one session model, as the table here sets side by side |
+| [DOC-ui](ui.md) | current | The window, its panels, keys and look | One window holds a sidebar of workspaces and sessions beside a main area of panels that split, move and close, with the title bar's buttons for archived sessions, accounts, settings and waiting sessions; it is drawn in an e-ink look in light and dark, in English or Simplified Chinese, shows the main process's menus and questions in its own page, and works from the keyboard as well as the pointer |
 
 ## Modules
 

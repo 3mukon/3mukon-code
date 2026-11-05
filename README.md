@@ -6,7 +6,7 @@ This description is a working version.
 
 ## Status
 
-The window shell is in place, in English and Simplified Chinese and in light and dark appearance: the title bar, the sidebar and an empty main area. Sessions and providers are not built yet.
+The first version is built and awaits its acceptance run. It runs sessions with Claude Code, Codex and Grok Build in the folders of the user's workspaces, follows them live with their approvals and questions answered in place, and resumes and searches them after a restart; its main area arranges sessions, files, terminals and its own panels side by side; it shows each provider's sign-in and usage limits; and it comes in English and Simplified Chinese, in light and dark. [docs/ui.md](docs/ui.md) maps the window, and [docs/providers.md](docs/providers.md) sets the providers side by side.
 
 ## Quick start
 
