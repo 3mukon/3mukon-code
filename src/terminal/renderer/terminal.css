@@ -13,5 +13,6 @@
 
 .terminal-paper .xterm .composition-view {
   background: var(--bubble);
+  background-image: var(--bubble-grain);
   color: var(--ink);
 }

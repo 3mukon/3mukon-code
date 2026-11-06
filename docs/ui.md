@@ -19,7 +19,7 @@ The app has one main window, built from the feature modules' renderer parts and 
 - **Title bar**: the window's top 40 pixels, which move the window and show no title. macOS's window buttons sit in it, and just after them, wherever they lie, the archived sessions' button, the accounts' gauge, the settings' gear and, while any session waits on the user, the count of waiting sessions. Over the main area, the title bar holds the headers of the panels at the top. (DOC-mod-app)
 - **Sidebar**, 220 pixels wide, which ⌘B hides and shows: the app's name; the Workspaces section, with Add workspace and the workspaces as a tree of their folders and files (DOC-mod-workspaces); then the Sessions section, with New session, a filter by workspace and a search by title and conversation, and the sessions not archived, the most recently active first (DOC-mod-sessions).
 - **Main area**: the panel area, empty until something opens in it (DOC-mod-panels).
-- The page itself never scrolls; each pane and list scrolls within itself (L-0001). The paper's grain lies over the whole window.
+- The page itself never scrolls; each pane and list scrolls within itself (L-0001). The paper's grain lies behind the content, including on filled surfaces. (DOC-mod-ui)
 
 ## Panels
 

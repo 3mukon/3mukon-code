@@ -225,7 +225,7 @@ export function FileEditor({
     <div onKeyDown={onKeyDown} className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)]">
       <div role="status">
         {bar !== null && (
-          <div className="flex min-w-0 items-center gap-2 border-y border-dashed border-line bg-well px-5 py-1.5 text-[12px] text-ink">
+          <div className="flex min-w-0 items-center gap-2 border-y border-dashed border-line paper-well px-5 py-1.5 text-[12px] text-ink">
             <span className="min-w-0 flex-1">{t(barKey(bar))}</span>
             {bar.kind === 'changed' ? (
               <>

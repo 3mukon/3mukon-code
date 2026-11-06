@@ -1,3 +1,12 @@
+/* Only inline code has an inset and a fill of its own. A block's pre supplies both, including when
+   its code has no language class, as unnamed fences and indented blocks do. */
+:not(pre) > .markdown-code {
+  border-radius: 0.25rem;
+  background-color: var(--well);
+  background-image: var(--well-grain);
+  padding: 1px 4px;
+}
+
 /* Code in Markdown, as highlight.js marks it up, in the syntax colours of the ui module's tokens, and
    its math, as KaTeX sets it. */
 .hljs-comment,

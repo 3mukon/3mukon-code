@@ -17,8 +17,20 @@ test('files of common formats open rendered, with a toggle to their raw text, an
   writeFileSync(join(folder, 'img', 'pixel.png'), PIXEL);
   writeFileSync(
     join(folder, 'README.md'),
-    '# Guide\n\nSee [the settings](settings.json).\n\n![pixel](img/pixel.png)\n',
+    [
+      '# Guide',
+      'See [the settings](settings.json).',
+      '![pixel](img/pixel.png)',
+      'Use `inline code` in a sentence.',
+      '```\nfirst line\nsecond line\n```',
+      '```text\nfirst line\nsecond line\n```',
+      '```ts\nconst answer = 42;\n```',
+      '    indented first line\n    indented second line',
+      '> A quote with `nested code`.',
+      '| Name | Value |\n| --- | --- |\n| `example` | Paper |',
+    ].join('\n\n'),
   );
+  writeFileSync(join(folder, 'table.csv'), 'Name,Value\nExample,Paper\n');
   writeFileSync(
     join(folder, 'settings.json'),
     '{"theme": "ink", "panels": {"left": {"width": 220}}}',
@@ -51,9 +63,36 @@ test('files of common formats open rendered, with a toggle to their raw text, an
         'src',
         /^data:image\/png;base64,/,
       );
+      const blocks = readme.locator('article pre > code');
+      await expect(blocks).toHaveCount(4);
+      for (const appearance of ['light', 'dark'] as const) {
+        await window.emulateMedia({ colorScheme: appearance });
+        const well = appearance === 'light' ? 'rgb(226, 224, 217)' : 'rgb(28, 27, 26)';
+        // Opaque fills retain the paper's grain, including inline code nested in a quote or table.
+        for (const surface of await readme
+          .locator('article pre, article blockquote, article th, article :not(pre) > code')
+          .all()) {
+          await expect(surface).toHaveCSS('background-color', well);
+          await expect(surface).toHaveCSS('background-image', /url\(/);
+        }
+        // Language labels must not decide whether a block gets the inline-code inset and fill.
+        for (const block of await blocks.all()) {
+          await expect(block).toHaveCSS('padding', '0px');
+          await expect(block).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+          await expect(block).toHaveCSS('background-image', 'none');
+        }
+        await expect(readme.getByText('inline code', { exact: true })).toHaveCSS(
+          'padding',
+          '1px 4px',
+        );
+      }
       await readme.getByRole('button', { name: 'Raw' }).click();
       await expect(readme.locator('.cm-editor')).toBeVisible();
       await expect(readme.getByRole('heading', { name: 'Guide' })).toHaveCount(0);
+      await window.keyboard.press('Meta+f');
+      await expect(readme.locator('.cm-textfield').first()).toBeVisible();
+      await expect(readme.locator('.cm-textfield').first()).toHaveCSS('background-image', /url\(/);
+      await window.keyboard.press('Escape');
       await readme.getByRole('button', { name: 'Rendered' }).click();
       // A link to a file opens it in a panel, where JSON shows as a tree.
       await readme.getByRole('link', { name: 'the settings' }).click();
@@ -75,6 +114,10 @@ test('files of common formats open rendered, with a toggle to their raw text, an
       await expect(
         main.getByRole('region', { name: 'mark.svg' }).getByRole('img', { name: 'mark.svg' }),
       ).toHaveAttribute('src', /^data:image\/svg\+xml/);
+      await open('table.csv');
+      await expect(
+        main.getByRole('region', { name: 'table.csv' }).getByRole('columnheader').first(),
+      ).toHaveCSS('background-image', /url\(/);
     } finally {
       await app.close();
     }

@@ -65,12 +65,12 @@ describe('Timeline', () => {
     // The user's message at the right, filled, and the agent's at the left, outlined, each named for
     // VoiceOver.
     const prompt = screen.getByText('Fix the build').closest('.rounded-lg');
-    expect(prompt?.className).toContain('bg-bubble');
+    expect(prompt?.className).toContain('paper-bubble');
     expect(prompt?.parentElement?.className).toContain('justify-end');
     expect(prompt?.parentElement?.firstElementChild?.textContent).toBe('You:');
     const reply = screen.getByRole('link', { name: 'the docs' }).closest('.rounded-lg');
     expect(reply?.querySelector('.border-bubble-line')).not.toBeNull();
-    expect(reply?.className).not.toContain('bg-bubble');
+    expect(reply?.className).not.toContain('paper-bubble');
     expect(reply?.parentElement?.className).toContain('justify-start');
     expect(reply?.parentElement?.firstElementChild?.textContent).toBe('Claude Code:');
     expect(screen.getByText('Looking at the logs').closest('.text-faint')).not.toBeNull();

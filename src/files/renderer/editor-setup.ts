@@ -89,6 +89,7 @@ const theme = EditorView.theme({
   '.cm-gutters:hover .cm-foldGutter .cm-gutterElement': { opacity: '1' },
   '.cm-foldPlaceholder': {
     backgroundColor: 'var(--well)',
+    backgroundImage: 'var(--well-grain)',
     border: '1px dashed var(--line)',
     color: 'var(--muted)',
   },
@@ -109,6 +110,7 @@ const theme = EditorView.theme({
   '.cm-panel.cm-search [name=close]': { color: 'var(--faint)', right: '10px' },
   '.cm-textfield': {
     backgroundColor: 'var(--well)',
+    backgroundImage: 'var(--well-grain)',
     border: '1px dashed var(--line)',
     borderRadius: '4px',
     color: 'var(--ink)',
@@ -127,7 +129,7 @@ const theme = EditorView.theme({
   // A sheet of the window's paper, as the ui module's paper utility draws one.
   '.cm-tooltip': {
     backgroundColor: 'var(--frame)',
-    backgroundImage: 'linear-gradient(var(--paper-veil), var(--paper-veil)), var(--grain-image)',
+    backgroundImage: 'var(--paper-grain)',
     border: '1px dashed var(--menu-line)',
     boxShadow: 'none',
     color: 'var(--ink)',

@@ -1,8 +1,8 @@
 /* Design tokens: an e-ink look after the Ink Paper theme, on its Flexoki palette. In macOS's light
    appearance, near-black ink on a warm grey paper; in the dark one, pale ink on dark paper. Both papers
    carry a faint grain (grain.svg, and grain-pale.svg with pale specks for the dark paper, which the
-   app module lays over the window with the grain tokens, and the paper utility lays under what opens
-   over it),
+   app module lays over the window with the grain tokens, and the paper utilities restore on filled
+   surfaces),
    and colour is kept for states, changes and the accent. Components reach the tokens through the Tailwind theme at the end (bg-frame,
    text-muted, border-line and so on); Tailwind's default palette is removed, so that no colour
    bypasses the tokens. */
@@ -49,12 +49,26 @@
   /* The grain: dark specks on the light paper, and how strongly they show. */
   --grain-image: url('./grain.svg');
   --grain-opacity: 0.1;
-  /* The paper at the strength the grain leaves it, laid over the grain under the paper utility. */
+  /* Each opaque paper covers the window's grain, so it carries the same grain beneath a veil of its
+     own colour. Keeping these layers together also lets editor and terminal styles use them. */
   --paper-veil: color-mix(
     in srgb,
     var(--frame) calc(100% - var(--grain-opacity) * 100%),
     transparent
   );
+  --well-veil: color-mix(
+    in srgb,
+    var(--well) calc(100% - var(--grain-opacity) * 100%),
+    transparent
+  );
+  --bubble-veil: color-mix(
+    in srgb,
+    var(--bubble) calc(100% - var(--grain-opacity) * 100%),
+    transparent
+  );
+  --paper-grain: linear-gradient(var(--paper-veil), var(--paper-veil)), var(--grain-image);
+  --well-grain: linear-gradient(var(--well-veil), var(--well-veil)), var(--grain-image);
+  --bubble-grain: linear-gradient(var(--bubble-veil), var(--bubble-veil)), var(--grain-image);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -93,12 +107,21 @@
   }
 }
 
-/* A sheet of the window's paper, grain and all, for what opens over the window and so covers the
-   grain laid over it: the paper, the grain, and the paper again over them, which leaves the grain as
-   strong as the window shows it. */
+/* The window's paper, a well and a message's paper, with their grain behind the content. An opaque
+   base keeps nested surfaces from accumulating tint. */
 @utility paper {
   background-color: var(--frame);
-  background-image: linear-gradient(var(--paper-veil), var(--paper-veil)), var(--grain-image);
+  background-image: var(--paper-grain);
+}
+
+@utility paper-well {
+  background-color: var(--well);
+  background-image: var(--well-grain);
+}
+
+@utility paper-bubble {
+  background-color: var(--bubble);
+  background-image: var(--bubble-grain);
 }
 
 @theme inline {

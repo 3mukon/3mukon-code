@@ -109,7 +109,7 @@ export function Attachments({
               onClick={() => {
                 onRemove(attachment.id);
               }}
-              className="absolute -top-1.5 -right-1.5 grid size-4 place-items-center rounded-full border border-line bg-frame text-faint hover:text-ink"
+              className="absolute -top-1.5 -right-1.5 grid size-4 place-items-center rounded-full border border-line paper text-faint hover:text-ink"
             >
               <X className="size-2.5" />
             </button>

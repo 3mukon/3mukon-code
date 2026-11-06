@@ -53,7 +53,7 @@ export function Thumbnail({
           event.preventDefault();
           actions.imageMenu(image);
         }}
-        className={`block overflow-hidden rounded-md border border-line bg-well ${small ? 'shrink-0' : 'max-w-full min-w-0'}`}
+        className={`block overflow-hidden rounded-md border border-line paper-well ${small ? 'shrink-0' : 'max-w-full min-w-0'}`}
       >
         <img
           src={imageUrl(image)}

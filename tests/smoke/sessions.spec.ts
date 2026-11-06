@@ -60,6 +60,16 @@ test('a long session scrolls within its page, and the window’s page itself nev
     await window.getByRole('button', { name: /Long session/ }).click();
     const activity = window.getByRole('region', { name: 'Activity' });
     await expect(activity.getByText('Step 39', { exact: true })).toBeVisible();
+    // The user's filled bubble carries grain in both appearances, as the surrounding paper does.
+    const bubble = activity.getByText('Step 39', { exact: true }).locator('..');
+    for (const appearance of ['light', 'dark'] as const) {
+      await window.emulateMedia({ colorScheme: appearance });
+      await expect(bubble).toHaveCSS(
+        'background-color',
+        appearance === 'light' ? 'rgb(221, 219, 211)' : 'rgb(40, 39, 38)',
+      );
+      await expect(bubble).toHaveCSS('background-image', /url\(/);
+    }
     // How much taller than the window its page is, and how far the page has scrolled.
     const page = () =>
       window.evaluate(() => {

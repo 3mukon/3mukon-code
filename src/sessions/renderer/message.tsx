@@ -76,7 +76,7 @@ export function Message({ role, text, images = [], agent }: MessageProps) {
       </span>
       <div
         className={`group relative flex max-w-[88%] min-w-0 flex-col gap-1.5 rounded-lg px-2.5 py-1.5 text-ink [--notch:3.5rem] ${
-          user ? 'bg-bubble' : ''
+          user ? 'paper-bubble' : ''
         }`}
       >
         <span

@@ -280,7 +280,7 @@ function RowAction({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="grid size-5 place-items-center rounded-md text-faint hover:bg-frame hover:text-ink"
+      className="grid size-5 place-items-center rounded-md text-faint hover:paper hover:text-ink"
     >
       {children}
     </button>

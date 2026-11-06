@@ -34,7 +34,7 @@ Read this first and open documents based on their summaries. One line per docume
 | [DOC-mod-settings](../src/settings/README.md) | current | settings module | The app's settings, the window's language and its appearance, kept in the app's own data, with the panel that changes them in the e-ink look and the hook that keeps the window's language in step with them |
 | [DOC-mod-terminal](../src/terminal/README.md) | current | terminal module | The terminal panels, each the user's login shell or a provider's sign-in command in a pseudo-terminal of the main process, drawn in the window by xterm.js in the e-ink look, which pass what runs in them between the user and its programs without the app reading, keeping or logging it |
 | [DOC-mod-toolset](../src/toolset/README.md) | current | toolset module | The app's own MCP toolset, 3mukon-code, which the main process serves over local streamable HTTP to each session's provider process with a credential of its own, and which has no tools yet |
-| [DOC-mod-ui](../src/ui/README.md) | current | ui module | The reference design's tokens, as a dark theme and a warm light theme that follow macOS, and the presentational components and icons other modules build their UI from |
+| [DOC-mod-ui](../src/ui/README.md) | current | ui module | The e-ink palette and textured paper surfaces in light and dark, and the presentational components and icons other modules build their UI from |
 | [DOC-mod-workspaces](../src/workspaces/README.md) | current | workspaces module | The user's workspaces, folders on this Mac with the user's trust answer and one of them selected, kept in the app's own data, with the sidebar's Workspaces section and each workspace's folder tree |
 
 ## Architecture decisions

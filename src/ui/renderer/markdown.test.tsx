@@ -37,7 +37,10 @@ describe('Markdown', () => {
     expect(named?.querySelector('.hljs-keyword')?.textContent).toBe('const');
     expect(named?.querySelector('.hljs-number')?.textContent).toBe('42');
     expect(unnamed?.querySelector('[class^="hljs-"]')).toBeNull();
-    expect(screen.getByText('const inline').className).toContain('bg-well');
+    // Inline code takes its inset and fill from markdown.css, which leaves a block's code to its pre.
+    const inline = screen.getByText('const inline');
+    expect(inline.className).toBe('markdown-code');
+    expect(inline.closest('pre')).toBeNull();
   });
 
   it('keeps a table column’s alignment', () => {

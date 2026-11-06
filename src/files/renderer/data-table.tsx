@@ -19,7 +19,7 @@ export function DataTable({ rows }: { rows: string[][] }) {
           <thead>
             <tr>
               {Array.from({ length: width }, (_, index) => (
-                <th key={index} title={header[index]} className={`${cell} bg-well font-medium`}>
+                <th key={index} title={header[index]} className={`${cell} paper-well font-medium`}>
                   {header[index]}
                 </th>
               ))}

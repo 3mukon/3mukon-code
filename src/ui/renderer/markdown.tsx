@@ -77,17 +77,19 @@ function componentsFor({
     li: ({ children }) => <li className="my-0.5">{children}</li>,
     a: ({ children, href }) => link(href, children),
     blockquote: ({ children }) => (
-      <blockquote className="my-2 rounded-sm border-l-[3px] border-line bg-well py-1 pr-2 pl-3 text-muted">
+      <blockquote className="my-2 rounded-sm border-l-[3px] border-line paper-well py-1 pr-2 pl-3 text-muted">
         {children}
       </blockquote>
     ),
     pre: ({ children }) => (
-      <pre className="my-2 overflow-x-auto rounded-md border border-dashed border-line bg-well px-3 py-2">
+      <pre className="my-2 overflow-x-auto rounded-md border border-dashed border-line paper-well px-3 py-2">
         {children}
       </pre>
     ),
     code: ({ children, className }) => (
-      <code className={className ?? 'rounded bg-well px-1 py-px'}>{children}</code>
+      <code className={className === undefined ? 'markdown-code' : `markdown-code ${className}`}>
+        {children}
+      </code>
     ),
     table: ({ children }) => (
       <div className="my-2 overflow-x-auto">
@@ -96,7 +98,7 @@ function componentsFor({
     ),
     // A column's alignment comes in its cells' style.
     th: ({ children, style }) => (
-      <th style={style} className="border border-line bg-well px-2 py-1 text-left font-medium">
+      <th style={style} className="border border-line paper-well px-2 py-1 text-left font-medium">
         {children}
       </th>
     ),

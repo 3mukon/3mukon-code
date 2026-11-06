@@ -77,7 +77,7 @@ export function DiffView({ diff }: { diff: string }) {
   const lines = useMemo(() => diffLines(diff), [diff]);
   const shown = lines.slice(0, SHOWN_LINES);
   return (
-    <div className="max-h-96 overflow-auto rounded-md border border-dashed border-line bg-well py-1 text-[11.5px]/[1.6] [tab-size:4]">
+    <div className="max-h-96 overflow-auto rounded-md border border-dashed border-line paper-well py-1 text-[11.5px]/[1.6] [tab-size:4]">
       <div className="grid grid-cols-[auto_auto_auto_minmax(0,1fr)]">
         {shown.map((line, index) =>
           line.kind === 'gap' ? (
