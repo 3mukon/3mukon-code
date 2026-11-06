@@ -27,6 +27,18 @@ export interface Launch {
 
 export type StartRpc = (cwd: string, handlers: RpcHandlers, launch?: Launch) => Rpc;
 
+// An error from Codex, with the kind of error that Codex's answer names, such as
+// modelProviderMismatch, where it names one. Of the answer's data only that kind is kept, since the rest
+// may repeat a gateway's settings.
+export class CodexError extends Error {
+  constructor(
+    message: string,
+    readonly kind: string | undefined,
+  ) {
+    super(message);
+  }
+}
+
 interface Waiting {
   resolve(result: unknown): void;
   reject(error: Error): void;
@@ -126,11 +138,15 @@ export class CodexRpc implements Rpc {
     const waiting = this.waiting.get(id);
     if (waiting === undefined) return;
     this.waiting.delete(id);
-    const error = message.error as { message?: unknown } | undefined;
+    const error = message.error as { message?: unknown; data?: unknown } | undefined;
     if (error === undefined) waiting.resolve(message.result);
     else {
+      const kind = (error.data as { type?: unknown } | null | undefined)?.type;
       waiting.reject(
-        new Error(typeof error.message === 'string' ? error.message : 'Codex refused the request.'),
+        new CodexError(
+          typeof error.message === 'string' ? error.message : 'Codex refused the request.',
+          typeof kind === 'string' ? kind : undefined,
+        ),
       );
     }
   }

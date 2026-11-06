@@ -28,7 +28,13 @@ import { imageUrl } from '../../../sessions/shared/images';
 import type { AccountNews, AccountSource } from '../../../accounts/main/source';
 import { isSignInError, readCodexAccount, resetCodexLimits, updatedWindows } from './account';
 import { bundledCodexBinary } from './binary';
-import { defaultGatewaysDir, listGateways, readGateway, redact } from './gateways';
+import {
+  defaultGatewaysDir,
+  gatewayLaunchArgs,
+  listGateways,
+  readGateway,
+  redact,
+} from './gateways';
 import type { InitializeParams } from './protocol/InitializeParams';
 import type { RequestId } from './protocol/RequestId';
 import type { CommandExecutionRequestApprovalParams } from './protocol/v2/CommandExecutionRequestApprovalParams';
@@ -65,7 +71,14 @@ import {
   userInputQuestion,
   type CodexRequest,
 } from './requests';
-import { CodexRpc, type Launch, type Rpc, type RpcHandlers, type StartRpc } from './rpc';
+import {
+  CodexError,
+  CodexRpc,
+  type Launch,
+  type Rpc,
+  type RpcHandlers,
+  type StartRpc,
+} from './rpc';
 import { Translator } from './translate';
 
 // Codex's approval settings behind each of the app's two permission modes (ADR-0006), for a thread
@@ -400,6 +413,22 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// The errors with which Codex keeps a thread on the provider it started with, as it resumes the thread
+// on an app-server whose configuration names another provider.
+const PROVIDER_KEPT: ReadonlySet<string> = new Set([
+  'modelProviderMismatch',
+  'modelProviderNotConfigured',
+]);
+
+function keepsProvider(error: unknown): boolean {
+  return error instanceof CodexError && error.kind !== undefined && PROVIDER_KEPT.has(error.kind);
+}
+
+// A gateway in words, or Codex's own configuration where there is none.
+function gatewayWords(gateway: string | null): string {
+  return gateway === null ? "Codex's own configuration" : `the gateway "${gateway}"`;
+}
+
 interface SessionSettings {
   cwd: string;
   mode: PermissionMode;
@@ -432,7 +461,6 @@ interface Attached {
   response: ThreadStartResponse | ThreadResumeResponse;
   // From the gateway's file, as it was read for this connection.
   gatewayModel: string | undefined;
-  gatewayProvider: string | undefined;
 }
 
 class CodexSession implements ProviderSession {
@@ -630,12 +658,16 @@ class CodexSession implements ProviderSession {
   }
 
   // Starts an app-server and starts the thread on it, or resumes the thread there, with the session's
-  // settings and the gateway's file as they are now. Codex's errors are told without the file's text.
+  // settings and the gateway's file as they are now: the app-server names the gateway's provider, which
+  // Codex takes the thread's messages through, and the file's settings go with the thread. Codex's
+  // errors are told without the file's text.
   private async attach(resumeId: string | null): Promise<Attached> {
     const { cwd, mode, model, sandbox, gatewaysDir, gateway: name } = this.settings;
     const gateway = name === null ? null : await readGateway(gatewaysDir, name);
+    const provider = name === null || gateway === null ? [] : gatewayLaunchArgs(name, gateway);
+    const launch = { ...this.launch, args: [...this.launch.args, ...provider] };
     const generation = ++this.generations;
-    const rpc = await this.connect(cwd, this.handlers(generation), this.launch);
+    const rpc = await this.connect(cwd, this.handlers(generation), launch);
     const params: Pick<
       ThreadResumeParams,
       | 'cwd'
@@ -662,18 +694,12 @@ class CodexSession implements ProviderSession {
               threadId: resumeId,
               excludeTurns: true,
             });
-      return {
-        rpc,
-        generation,
-        sandbox,
-        response,
-        gatewayModel: gateway?.model,
-        gatewayProvider: gateway?.modelProvider,
-      };
+      return { rpc, generation, sandbox, response, gatewayModel: gateway?.model };
     } catch (error) {
       void rpc.close();
-      // eslint-disable-next-line preserve-caught-error -- the original error may show the gateway's settings.
-      throw new Error(redact(errorMessage(error), gateway));
+      // Without the original error as its cause, since that may show the gateway's settings.
+      const kind = error instanceof CodexError ? error.kind : undefined;
+      throw new CodexError(redact(errorMessage(error), gateway), kind);
     }
   }
 
@@ -759,9 +785,10 @@ class CodexSession implements ProviderSession {
   // Moves the thread to a new app-server that resumes it with the other gateway's settings, so the
   // session keeps its id and its history. Codex lets one app-server write a thread at a time, so the
   // current one ends first; what it still reports is ignored, and its end does not end the session.
-  // Should the new one fail, the thread is resumed again on the earlier gateway. Codex may keep a
-  // resumed thread on its earlier provider; the session then says so. A close asked for during the
-  // switch ends the session once the new app-server is up.
+  // Should the new one fail, the thread is resumed again on the earlier gateway. Codex keeps a thread on
+  // the provider it started with, and refuses a gateway with another provider, or none in place of one;
+  // the session then says so. A close asked for during the switch ends the session once the new
+  // app-server is up.
   private async reconnect(gateway: string | null): Promise<void> {
     if (this.closed) return;
     const previousGateway = this.settings.gateway;
@@ -777,8 +804,12 @@ class CodexSession implements ProviderSession {
         this.use(await this.attach(this.threadId));
       } catch (again) {
         this.finish(errorMessage(again));
+        throw error;
       }
-      throw error;
+      if (!keepsProvider(error)) throw error;
+      const message = `Codex keeps this session on the model provider it started with, so it stays on ${gatewayWords(previousGateway)}; ${gatewayWords(gateway)} applies to new sessions.`;
+      this.onEvent({ type: 'error', message });
+      throw new Error(message, { cause: error });
     }
     if (this.closing) {
       await attached.rpc.close();
@@ -792,13 +823,6 @@ class CodexSession implements ProviderSession {
       model: attached.response.model,
       sandbox: this.settings.sandbox,
     });
-    const { gatewayProvider, response } = attached;
-    if (gatewayProvider !== undefined && response.modelProvider !== gatewayProvider) {
-      this.onEvent({
-        type: 'error',
-        message: `Codex kept this session on its provider "${response.modelProvider}"; the gateway's provider "${gatewayProvider}" applies to new sessions.`,
-      });
-    }
     await this.refreshModels(attached.gatewayModel);
   }
 

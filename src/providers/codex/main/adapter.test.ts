@@ -6,7 +6,7 @@ import type { AccountNews } from '../../../accounts/main/source';
 import type { Toolset, ToolsetAccess } from '../../../sessions/main/provider';
 import type { SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
 import { createCodexProvider } from './adapter';
-import type { Launch, Rpc, RpcHandlers } from './rpc';
+import { CodexError, type Launch, type Rpc, type RpcHandlers } from './rpc';
 
 type Params = Record<string, unknown>;
 
@@ -43,9 +43,9 @@ const MODELS = [
 ];
 
 // What the fake app-server answers; a test can change it.
-let resumedProvider: string | undefined;
 let failStart: string | undefined;
-let failResume: string | undefined;
+// What a thread/resume through the gateway's provider fails with.
+let failResume: Error | undefined;
 // A sandbox the fake's own settings hold every thread to, whatever was asked for.
 let heldSandbox: Params | undefined;
 // Runs while the fake handles a thread/resume, before it answers.
@@ -83,11 +83,8 @@ function reply(method: string, params: Params): unknown {
       return thread('th1');
     case 'thread/resume':
       duringResume?.();
-      if (failResume !== undefined && params.modelProvider === 'proxy') throw new Error(failResume);
-      return {
-        ...thread(params.threadId as string),
-        ...(resumedProvider === undefined ? {} : { modelProvider: resumedProvider }),
-      };
+      if (failResume !== undefined && params.modelProvider === 'proxy') throw failResume;
+      return thread(params.threadId as string);
     case 'thread/turns/list':
       return params.cursor === undefined
         ? {
@@ -248,7 +245,6 @@ let gatewaysDir: string;
 beforeEach(() => {
   fakes = [];
   toolset = new FakeToolset();
-  resumedProvider = undefined;
   failStart = undefined;
   failResume = undefined;
   heldSandbox = undefined;
@@ -375,6 +371,15 @@ describe('the Codex provider', () => {
         },
       },
     });
+    // Codex takes the thread's messages through the provider its command line names, which the
+    // app-server's command line gives by its id alone; the file's settings go only with the thread.
+    expect(current().launch?.args.slice(-4)).toEqual([
+      '-c',
+      'model_provider="proxy"',
+      '-c',
+      'model_providers.proxy.name="proxy"',
+    ]);
+    expect(JSON.stringify(current().launch)).not.toMatch(/secret-token-value|proxy\.example\.com/);
     expect(session.id).toBe('th1');
     expect(events).toEqual([
       { type: 'mode', mode: 'auto' },
@@ -445,6 +450,18 @@ describe('the Codex provider', () => {
     failStart = 'bad provider secret-token-value';
     await expect(startSession({ gateway: 'work' })).rejects.toThrow('bad provider [hidden]');
     expect(current().closed).toBe(true);
+    expect(toolset.opened[0]?.closed).toBe(true);
+  });
+
+  it('starts no app-server for a gateway whose provider Codex cannot take from its command line', async () => {
+    writeFileSync(
+      join(gatewaysDir, 'dotted.toml'),
+      ['model_provider = "my.proxy"', '[model_providers."my.proxy"]', 'base_url = "x"'].join('\n'),
+    );
+    await expect(startSession({ gateway: 'dotted' })).rejects.toThrow(
+      'The gateway "dotted" defines a provider whose id Codex cannot take',
+    );
+    expect(fakes).toHaveLength(0);
     expect(toolset.opened[0]?.closed).toBe(true);
   });
 
@@ -838,33 +855,53 @@ describe('a Codex session', () => {
       sandbox: 'read-only',
     });
     expect(events.some((event) => event.type === 'closed' || event.type === 'error')).toBe(false);
-    // The session keeps its toolset access, which the new app-server is started with.
+    // The session keeps its toolset access, which the new app-server is started with, naming the
+    // gateway's provider.
     expect(toolset.opened).toHaveLength(1);
     expect(toolset.opened[0]?.closed).toBe(false);
-    expect(current().launch).toEqual(first.launch);
+    expect(current().launch).toEqual({
+      args: [
+        ...(first.launch?.args ?? []),
+        '-c',
+        'model_provider="proxy"',
+        '-c',
+        'model_providers.proxy.name="proxy"',
+      ],
+      env: first.launch?.env,
+    });
     await session.send('again');
     expect(current().params('turn/start')).toMatchObject({ threadId: 'th1' });
   });
 
-  it('says so when Codex keeps the thread on its earlier provider', async () => {
-    resumedProvider = 'openai';
-    const { session, events } = await startSession();
-    await session.setGateway('work');
-    expect(events).toContainEqual({
-      type: 'error',
-      message:
-        'Codex kept this session on its provider "openai"; the gateway\'s provider "proxy" applies to new sessions.',
-    });
-  });
-
   it('resumes the thread on its earlier gateway when the new one fails', async () => {
-    failResume = 'cannot reach secret-token-value';
+    failResume = new Error('cannot reach secret-token-value');
     const { session, events } = await startSession();
     await expect(session.setGateway('work')).rejects.toThrow('cannot reach [hidden]');
     expect(fakes).toHaveLength(3);
     expect(fakes.slice(0, 2).every((fake) => fake.closed)).toBe(true);
     expect(current().params('thread/resume')).not.toHaveProperty('modelProvider');
+    expect(current().launch?.args).not.toContain('model_provider="proxy"');
+    expect(events.some((event) => event.type === 'closed' || event.type === 'error')).toBe(false);
+    await session.send('still here');
+    expect(current().params('turn/start')).toMatchObject({ threadId: 'th1' });
+  });
+
+  it('stays on its gateway, and says why, when Codex keeps the thread on the provider it started with', async () => {
+    failResume = new CodexError(
+      'This chat uses openai, but your current provider is proxy. Switch to openai to continue.',
+      'modelProviderMismatch',
+    );
+    const { session, events } = await startSession();
+    const why =
+      'Codex keeps this session on the model provider it started with, so it stays on Codex\'s own configuration; the gateway "work" applies to new sessions.';
+    await expect(session.setGateway('work')).rejects.toThrow(why);
+    expect(fakes).toHaveLength(3);
+    expect(current().launch?.args).not.toContain('model_provider="proxy"');
+    expect(events).toContainEqual({ type: 'error', message: why });
     expect(events.some((event) => event.type === 'closed')).toBe(false);
+    expect(events.some((event) => event.type === 'settings' && event.gateway === 'work')).toBe(
+      false,
+    );
     await session.send('still here');
     expect(current().params('turn/start')).toMatchObject({ threadId: 'th1' });
   });

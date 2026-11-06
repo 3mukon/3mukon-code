@@ -86,6 +86,44 @@ export async function readGateway(dir: string, name: string): Promise<GatewaySet
   };
 }
 
+// Codex 0.166.0's built-in model providers, which a configuration may name but never define anew.
+const BUILT_IN_PROVIDERS: ReadonlySet<string> = new Set([
+  'openai',
+  'amazon-bedrock',
+  'amazon-bedrock-runtime',
+  'gcp',
+  'ollama',
+  'lmstudio',
+]);
+// A provider id that a dotted key on Codex's command line can name.
+const PLAIN_KEY = /^[A-Za-z0-9_-]+$/;
+
+// What the app-server of a session through the gateway starts with, so that Codex takes the gateway's
+// provider. Codex 0.166.0 takes a thread's messages only on the provider of its own configuration, the
+// one its home folder and its command line give, never on one that the thread alone was started with,
+// and it keeps each thread on the provider it started with. So the provider's id goes on the command
+// line, and, where the file defines that provider itself, a definition holding nothing but that id as
+// its name, so that Codex knows the provider as it starts; the file's settings, a token included, still
+// go only with the thread. A gateway that names no provider needs nothing.
+export function gatewayLaunchArgs(name: string, settings: GatewaySettings): string[] {
+  const id = settings.modelProvider;
+  if (id === undefined) return [];
+  const args = ['-c', `model_provider=${JSON.stringify(id)}`];
+  const providers = settings.config.model_providers;
+  const defined =
+    typeof providers === 'object' &&
+    providers !== null &&
+    !Array.isArray(providers) &&
+    typeof providers[id] === 'object';
+  if (!defined || BUILT_IN_PROVIDERS.has(id)) return args;
+  if (!PLAIN_KEY.test(id)) {
+    throw new Error(
+      `The gateway "${name}" defines a provider whose id Codex cannot take from its command line: use letters, digits, hyphens and underscores.`,
+    );
+  }
+  return [...args, '-c', `model_providers.${id}.name=${JSON.stringify(id)}`];
+}
+
 // The text with every string of a gateway's settings that could be a secret hidden, so that an error
 // from Codex can never show a token from the file.
 export function redact(text: string, settings: GatewaySettings | null): string {

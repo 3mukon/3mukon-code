@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { gatewayPath, listGateways, readGateway, redact } from './gateways';
+import { gatewayLaunchArgs, gatewayPath, listGateways, readGateway, redact } from './gateways';
 
 let dir: string;
 beforeEach(() => {
@@ -87,5 +87,40 @@ describe('Codex gateways', () => {
       'bad token [hidden] for gpt',
     );
     expect(redact('unchanged', null)).toBe('unchanged');
+  });
+
+  it('names the gateway’s provider for its app-server’s command line, defined by its id alone where the file defines it', async () => {
+    const launchOf = async (name: string, lines: string[]) => {
+      writeFileSync(join(dir, `${name}.toml`), lines.join('\n'));
+      return gatewayLaunchArgs(name, await readGateway(dir, name));
+    };
+    const defined = await launchOf('work', [
+      'model_provider = "proxy"',
+      '[model_providers.proxy]',
+      'base_url = "https://proxy.example.com/v1"',
+      'experimental_bearer_token = "secret-token-value"',
+    ]);
+    expect(defined).toEqual([
+      '-c',
+      'model_provider="proxy"',
+      '-c',
+      'model_providers.proxy.name="proxy"',
+    ]);
+    // A provider defined elsewhere, such as Codex's own or one in Codex's own settings, by its id only.
+    expect(await launchOf('local', ['model_provider = "ollama"', 'model = "llama"'])).toEqual([
+      '-c',
+      'model_provider="ollama"',
+    ]);
+    expect(
+      await launchOf('bedrock', [
+        'model_provider = "amazon-bedrock"',
+        '[model_providers.amazon-bedrock]',
+        'region = "eu-west-1"',
+      ]),
+    ).toEqual(['-c', 'model_provider="amazon-bedrock"']);
+    expect(await launchOf('model', ['model = "gpt-other"'])).toEqual([]);
+    await expect(
+      launchOf('dotted', ['model_provider = "my.proxy"', '[model_providers."my.proxy"]']),
+    ).rejects.toThrow('The gateway "dotted" defines a provider whose id Codex cannot take');
   });
 });
