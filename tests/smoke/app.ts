@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import { LOGIN_VARIABLES } from '../login-variables';
 
 // A throwaway data folder for the app, so that smoke tests never read or change the user's own.
 export function dataFolder(): { path: string; remove: () => void } {
@@ -15,15 +16,9 @@ export function dataFolder(): { path: string; remove: () => void } {
   };
 }
 
-// The variables a login gives every program, the only ones of the test's own environment that the app
-// starts with. Playwright otherwise gives the app the whole of it, which holds the variables of
-// whatever runs the tests, and the app passes its environment on to the providers it starts and to
-// the terminals' shells. Run from an agent session, such as Claude Code's, they hold that session's
-// base URL, account, sockets and tokens, with which a provider could ask its service as the agent's
-// host (L-0006).
-const LOGIN_VARIABLES = ['HOME', 'PATH', 'TMPDIR', 'USER', 'LOGNAME', 'LANG'];
-
-// The environment of a login: those of the variables that the test's own environment has.
+// The environment of a login, the only part of the test's own environment that the app starts with,
+// since Playwright otherwise gives the app the whole of it: those of a login's variables that the
+// test's environment has (L-0006).
 function loginEnvironment(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const name of LOGIN_VARIABLES) {
