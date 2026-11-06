@@ -2,9 +2,11 @@ import {
   Archive as LucideArchive,
   ArchiveRestore as LucideArchiveRestore,
   Brain as LucideBrain,
+  CaseSensitive as LucideCaseSensitive,
   Check as LucideCheck,
   ChevronDown as LucideChevronDown,
   ChevronRight as LucideChevronRight,
+  ChevronUp as LucideChevronUp,
   CircleQuestionMark as LucideCircleQuestionMark,
   Copy as LucideCopy,
   FileText as LucideFileText,
@@ -13,6 +15,8 @@ import {
   Globe as LucideGlobe,
   Pencil as LucidePencil,
   Plus as LucidePlus,
+  Regex as LucideRegex,
+  Replace as LucideReplace,
   Search as LucideSearch,
   Settings as LucideSettings,
   ShieldCheck as LucideShieldCheck,
@@ -20,6 +24,7 @@ import {
   Terminal as LucideTerminal,
   ToggleRight as LucideToggleRight,
   Trash as LucideTrash,
+  WholeWord as LucideWholeWord,
   Wrench as LucideWrench,
   X as LucideX,
   type LucideIcon,
@@ -58,3 +63,8 @@ export const Archive = decorative(LucideArchive);
 export const ArchiveRestore = decorative(LucideArchiveRestore);
 export const Gear = decorative(LucideSettings);
 export const Gauge = decorative(LucideGauge);
+export const ChevronUp = decorative(LucideChevronUp);
+export const CaseSensitive = decorative(LucideCaseSensitive);
+export const WholeWord = decorative(LucideWholeWord);
+export const Regex = decorative(LucideRegex);
+export const Replace = decorative(LucideReplace);

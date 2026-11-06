@@ -11,7 +11,7 @@ import {
   type LanguageSupport,
 } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
-import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
+import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { countColumn, EditorState, RangeSetBuilder, type Extension } from '@codemirror/state';
 import {
   crosshairCursor,
@@ -30,9 +30,10 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
+import { searchPanel } from './search-panel';
 
-// The words CodeMirror shows and announces, in its search panel, its folding and its announcements
-// for VoiceOver, each with its key under the catalog's files.editor.
+// The words the editor shows and announces, in its search bar, its folding and its announcements for
+// VoiceOver, each with its key under the catalog's files.editor.
 export const PHRASES = {
   'Control character': 'controlCharacter',
   close: 'close',
@@ -46,6 +47,11 @@ export const PHRASES = {
   'by word': 'byWord',
   replace: 'replaceOne',
   'replace all': 'replaceAll',
+  'Replace with': 'replaceWith',
+  Invalid: 'invalid',
+  'No results': 'noResults',
+  '$ found': 'found',
+  '$1 of $2': 'matchOfTotal',
   'current match': 'currentMatch',
   'on line': 'onLine',
   'replaced $ matches': 'replacedMatches',
@@ -67,8 +73,8 @@ const tinted = (token: string, share: number) =>
   `color-mix(in srgb, var(${token}) ${String(share)}%, transparent)`;
 
 // The editor in the ui module's tokens, so that it follows the light and the dark appearance as the
-// rest of the window does: in the activity's small monospaced type, on the panel's own paper, with
-// dashed lines around its search panel as around the activity's code.
+// rest of the window does: in the activity's small monospaced type, on the panel's own paper, with a
+// dashed line under its search bar and around its Go to line panel's field.
 const theme = EditorView.theme({
   '&': { height: '100%', color: 'var(--ink)', backgroundColor: 'transparent', fontSize: '12.5px' },
   '&.cm-focused': { outline: 'none' },
@@ -105,9 +111,7 @@ const theme = EditorView.theme({
   '.cm-panels': { backgroundColor: 'transparent', color: 'var(--ink)' },
   '.cm-panels.cm-panels-top': { borderBottom: '1px dashed var(--line)' },
   '.cm-panels.cm-panels-bottom': { borderTop: '1px dashed var(--line)' },
-  '.cm-panel.cm-search, .cm-panel.cm-gotoLine': { padding: '6px 20px', fontSize: '11.5px' },
-  '.cm-panel.cm-search label': { color: 'var(--muted)' },
-  '.cm-panel.cm-search [name=close]': { color: 'var(--faint)', right: '10px' },
+  '.cm-panel.cm-gotoLine': { padding: '6px 20px', fontSize: '11.5px' },
   '.cm-textfield': {
     backgroundColor: 'var(--well)',
     backgroundImage: 'var(--well-grain)',
@@ -246,7 +250,7 @@ function indentsOf(view: EditorView): DecorationSet {
 }
 
 // The editor's own setup, assembled from CodeMirror's parts: line numbers, folding, history, bracket
-// matching and closing, several selections, search and replace and Go to line, Tab to indent
+// matching and closing, several selections, the app's search bar with replace, Go to line, Tab to indent
 // (Escape, then Tab, moves the focus on), and long lines wrapped at the panel's width at their own
 // indentation, in the tokens' look and the given words. ⌘D stays the panel area's, which splits the panel, rather than selecting
 // the next match.
@@ -268,6 +272,7 @@ export function editorSetup(phrases: Readonly<Record<string, string>>, label: st
     crosshairCursor(),
     highlightActiveLine(),
     highlightSelectionMatches(),
+    search({ top: true, createPanel: searchPanel }),
     EditorView.lineWrapping,
     wrappedIndent,
     keymap.of([

@@ -89,10 +89,18 @@ test('files of common formats open rendered, with a toggle to their raw text, an
       await readme.getByRole('button', { name: 'Raw' }).click();
       await expect(readme.locator('.cm-editor')).toBeVisible();
       await expect(readme.getByRole('heading', { name: 'Guide' })).toHaveCount(0);
+      // ⌘F opens the editor's search bar at its top, which counts the matches, finds the next with
+      // Return and closes at Escape.
       await window.keyboard.press('Meta+f');
-      await expect(readme.locator('.cm-textfield').first()).toBeVisible();
-      await expect(readme.locator('.cm-textfield').first()).toHaveCSS('background-image', /url\(/);
+      const find = readme.getByRole('textbox', { name: 'Find' });
+      await expect(find).toBeFocused();
+      await window.keyboard.type('second line');
+      const count = readme.locator('.cm-search').getByRole('status');
+      await expect(count).toHaveText('3 found');
+      await window.keyboard.press('Enter');
+      await expect(count).toHaveText('1 of 3');
       await window.keyboard.press('Escape');
+      await expect(find).toHaveCount(0);
       await readme.getByRole('button', { name: 'Rendered' }).click();
       // A link to a file opens it in a panel, where JSON shows as a tree.
       await readme.getByRole('link', { name: 'the settings' }).click();
