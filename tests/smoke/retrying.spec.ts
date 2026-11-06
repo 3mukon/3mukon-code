@@ -118,6 +118,15 @@ for (const { provider, id, notice } of cases) {
         await window.getByRole('button', { name: 'New session' }).click();
         const main = window.getByRole('main');
         await main.getByRole('combobox', { name: 'Provider' }).selectOption(id);
+        // The provider's models, which the window asks for as it opens, so that the session starts
+        // after the window's own process of the provider: Codex sets its home up as the first
+        // app-server starts in it, and of app-servers that start at once in a home not yet set up,
+        // some fail (Codex 0.166.0).
+        await expect
+          .poll(() => main.getByRole('combobox', { name: 'Model' }).locator('option').count(), {
+            timeout: 30_000,
+          })
+          .toBeGreaterThan(1);
         const composer = main.getByRole('textbox', { name: 'Message' });
         await composer.fill('Say hello.');
         await composer.press('Enter');
