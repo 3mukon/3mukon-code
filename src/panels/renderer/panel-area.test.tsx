@@ -109,11 +109,24 @@ function release(clientX: number, clientY: number) {
   fireEvent.click(document.body);
 }
 
-// An item dragged from one of the app's lists to a point in the area, and let go there.
-function dragIn(item: DraggedItem, clientX = 500, clientY = 300) {
+// The frame that ends a drag, after which what the drag dropped opens or moves.
+const dropped = () =>
+  act(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          setTimeout(resolve);
+        });
+      }),
+  );
+
+// An item dragged from one of the app's lists to a point in the area, and let go there, until it has
+// opened.
+async function dragIn(item: DraggedItem, clientX = 500, clientY = 300) {
   pressItem(item);
   pointerTo(clientX, clientY);
   release(clientX, clientY);
+  await dropped();
 }
 const folder = (path: string): DraggedItem => ({ kind: 'folder', path });
 const file = (path: string): DraggedItem => ({ kind: 'file', path });
@@ -157,7 +170,7 @@ function shown<T>(element: T | null): T {
 const settle = () => act(() => Promise.resolve());
 
 describe('PanelArea', () => {
-  it('shows nothing until something opens, and fills the empty area with a folder dragged in from a list, with the pointer’s own events', () => {
+  it('shows nothing until something opens, and fills the empty area with a folder dragged in from a list, with the pointer’s own events', async () => {
     const capture = vi.spyOn(Element.prototype, 'setPointerCapture');
     const { root } = renderArea();
     expect(root.textContent).toBe('');
@@ -176,16 +189,20 @@ describe('PanelArea', () => {
     expect(ghost()).toBeNull();
     expect(layer()).toBeNull();
     expect(dropZone(root)).toBeNull();
+    // The drag ends at once, and the folder opens once the frame that ends it has been drawn, so that
+    // the cursor leaves the grabbing hand before the drop's work begins.
+    expect(screen.queryByRole('region')).toBeNull();
+    await dropped();
     // A folder opens as a session page, named by its folder, with the path as the tooltip.
     const page = panel('New session');
     expect(within(page).getByText('web').title).toBe('/Users/me/web');
     expect(page.getAttribute('aria-current')).toBe('true');
   });
 
-  it('splits a panel when a drop lands near its edge, and takes its place in its middle, as a panel of its own', () => {
+  it('splits a panel when a drop lands near its edge, and takes its place in its middle, as a panel of its own', async () => {
     renderArea();
-    dragIn(folder('/Users/me/web'));
-    dragIn(file('/Users/me/web/a.ts'), 990, 300);
+    await dragIn(folder('/Users/me/web'));
+    await dragIn(file('/Users/me/web/a.ts'), 990, 300);
     expect(names()).toEqual(['New session', 'a.ts']);
     expect(
       screen.getByRole('separator', { name: 'Resize panels' }).getAttribute('aria-orientation'),
@@ -193,7 +210,7 @@ describe('PanelArea', () => {
     expect(panel('a.ts').getAttribute('aria-current')).toBe('true');
     expect(panel('New session').getAttribute('aria-current')).toBeNull();
     const a = panel('a.ts');
-    dragIn(file('/Users/me/web/b.ts'), 750, 300);
+    await dragIn(file('/Users/me/web/b.ts'), 750, 300);
     expect(names()).toEqual(['New session', 'b.ts']);
     expect(a.isConnected).toBe(false);
   });
@@ -241,6 +258,7 @@ describe('PanelArea', () => {
     pointerTo(500, 300);
     expect(ghost()).toBeNull();
     release(500, 300);
+    await dropped();
     expect(screen.queryByRole('region')).toBeNull();
   });
 
@@ -261,26 +279,26 @@ describe('PanelArea', () => {
     expect(systemDrag('dragover', root, { types: ['text/plain'] })).toBe(true);
   });
 
-  it('opens a session from the Sessions list where it drops, also beside a panel that shows it already, as files do', () => {
+  it('opens a session from the Sessions list where it drops, also beside a panel that shows it already, as files do', async () => {
     renderArea([], false, sessionTitles);
-    dragIn(session('s1'));
-    dragIn(session('s1'), 990, 300);
+    await dragIn(session('s1'));
+    await dragIn(session('s1'), 990, 300);
     expect(names()).toEqual(['Session s1', 'Session s1']);
     const [first, second] = screen.getAllByRole('region', { name: 'Session s1' });
     expect(second?.getAttribute('aria-current')).toBe('true');
     // Dropped in the middle of a panel that shows it, it focuses that panel.
-    dragIn(session('s1'), 250, 300);
+    await dragIn(session('s1'), 250, 300);
     expect(screen.getAllByRole('region')).toHaveLength(2);
     expect(first?.getAttribute('aria-current')).toBe('true');
     // Another session in a panel's middle takes its place.
-    dragIn(session('s2'), 750, 300);
+    await dragIn(session('s2'), 750, 300);
     expect(names()).toEqual(['Session s1', 'Session s2']);
   });
 
-  it('closes a panel from its header, passing the focus to the panel that takes its space', () => {
+  it('closes a panel from its header, passing the focus to the panel that takes its space', async () => {
     renderArea();
-    dragIn(folder('/Users/me/web'));
-    dragIn(file('/Users/me/a.ts'), 500, 590);
+    await dragIn(folder('/Users/me/web'));
+    await dragIn(file('/Users/me/a.ts'), 500, 590);
     fireEvent.click(within(panel('a.ts')).getByRole('button', { name: 'Close panel' }));
     expect(screen.queryByRole('region', { name: 'a.ts' })).toBeNull();
     expect(panel('New session').getAttribute('aria-current')).toBe('true');
@@ -292,7 +310,7 @@ describe('PanelArea', () => {
     renderArea([], false, (shown) =>
       shown.content.kind === 'file' ? { unsaved: true, confirmClose } : {},
     );
-    dragIn(file('/Users/me/a.ts'));
+    await dragIn(file('/Users/me/a.ts'));
     within(panel('a.ts')).getByText('Unsaved changes');
     const close = within(panel('a.ts')).getByRole('button', { name: 'Close panel' });
     expect(close.querySelector('.rounded-full')).not.toBeNull();
@@ -302,14 +320,14 @@ describe('PanelArea', () => {
     await settle();
     fireEvent.keyDown(window, { key: 'w', metaKey: true });
     await settle();
-    dragIn(file('/Users/me/b.ts'));
+    await dragIn(file('/Users/me/b.ts'));
     await settle();
     expect(confirmClose).toHaveBeenCalledTimes(3);
     expect(names()).toEqual(['a.ts']);
 
     // Once it says yes, the drop takes its place, and the next close closes it.
     confirmClose.mockResolvedValue(true);
-    dragIn(file('/Users/me/b.ts'));
+    await dragIn(file('/Users/me/b.ts'));
     await settle();
     fireEvent.click(within(panel('b.ts')).getByRole('button', { name: 'Close panel' }));
     await settle();
@@ -319,10 +337,10 @@ describe('PanelArea', () => {
   it('gives the keyboard focus to the panel that takes the place of the one that had it, and focuses the panel that shows a dropped item already', async () => {
     const confirmClose = vi.fn<() => Promise<boolean>>(() => Promise.resolve(true));
     renderArea([], false, () => ({ confirmClose }));
-    dragIn(file('/Users/me/a.ts'));
-    dragIn(file('/Users/me/b.ts'), 990, 300);
+    await dragIn(file('/Users/me/a.ts'));
+    await dragIn(file('/Users/me/b.ts'), 990, 300);
     panel('a.ts').focus();
-    dragIn(file('/Users/me/c.ts'), 250, 300);
+    await dragIn(file('/Users/me/c.ts'), 250, 300);
     await settle();
     expect(document.activeElement).toBe(panel('c.ts'));
     expect(confirmClose).toHaveBeenCalledOnce();
@@ -330,16 +348,16 @@ describe('PanelArea', () => {
     // The same file dropped in the middle of its panel asks nothing, and focuses that panel.
     fireEvent.pointerDown(panel('b.ts'));
     expect(panel('b.ts').getAttribute('aria-current')).toBe('true');
-    dragIn(file('/Users/me/c.ts'), 250, 300);
+    await dragIn(file('/Users/me/c.ts'), 250, 300);
     await settle();
     expect(confirmClose).toHaveBeenCalledOnce();
     expect(panel('c.ts').getAttribute('aria-current')).toBe('true');
     expect(screen.getAllByRole('region')).toHaveLength(2);
   });
 
-  it('splits, focuses and closes panels from the keyboard, and the keyboard focus follows', () => {
+  it('splits, focuses and closes panels from the keyboard, and the keyboard focus follows', async () => {
     renderArea();
-    dragIn(file('/Users/me/web/a.ts'));
+    await dragIn(file('/Users/me/web/a.ts'));
     // ⌘D opens a session page in the focused panel's folder, to its right; ⇧⌘D below it.
     expect(fireEvent.keyDown(window, { key: 'd', metaKey: true })).toBe(false);
     expect(within(panel('New session')).getByText('web').title).toBe('/Users/me/web');
@@ -382,11 +400,11 @@ describe('PanelArea', () => {
     expect(screen.getByText('2 waiting').parentElement?.className).toContain('pl-[84px]');
   });
 
-  it('puts the headers of the panels at the top in the title bar, clearing the window buttons when asked', () => {
+  it('puts the headers of the panels at the top in the title bar, clearing the window buttons when asked', async () => {
     const { root } = renderArea([], true);
     // While no panel is open, an empty strip at the top moves the window.
     expect(root.querySelector('[class*="app-region:drag"]')).not.toBeNull();
-    dragIn(file('/Users/me/web/a.ts'));
+    await dragIn(file('/Users/me/web/a.ts'));
     fireEvent.keyDown(window, { key: 'd', metaKey: true });
     fireEvent.keyDown(window, { key: 'D', metaKey: true, shiftKey: true });
     const headers = screen
@@ -401,10 +419,10 @@ describe('PanelArea', () => {
     expect(headers.map((header) => header.includes('pl-[84px]'))).toEqual([true, false, false]);
   });
 
-  it('moves a panel pressed by its title beside another, or swaps the two in its middle, with the pointer’s own events', () => {
+  it('moves a panel pressed by its title beside another, or swaps the two in its middle, with the pointer’s own events', async () => {
     const { root } = renderArea();
-    dragIn(file('/Users/me/web/a.ts'));
-    dragIn(file('/Users/me/web/b.ts'), 990, 300);
+    await dragIn(file('/Users/me/web/a.ts'));
+    await dragIn(file('/Users/me/web/b.ts'), 990, 300);
     // a.ts on the left, b.ts on the right.
     expect([place('a.ts').left, place('b.ts').left]).toEqual(['0%', '50%']);
 
@@ -424,6 +442,7 @@ describe('PanelArea', () => {
     pointerTo(1200, 300);
     release(1200, 300);
     expect(ghost()).toBeNull();
+    await dropped();
     expect([place('a.ts').left, place('b.ts').left]).toEqual(['0%', '50%']);
 
     // Near b.ts's bottom edge, a.ts moves below it.
@@ -432,6 +451,7 @@ describe('PanelArea', () => {
     expect(dropZone(root)).not.toBeNull();
     release(750, 590);
     expect(dropZone(root)).toBeNull();
+    await dropped();
     expect([place('b.ts').top, place('a.ts').top]).toEqual(['0%', '50%']);
     expect(screen.getByRole('separator').getAttribute('aria-orientation')).toBe('horizontal');
     expect(panel('a.ts').getAttribute('aria-current')).toBe('true');
@@ -440,13 +460,34 @@ describe('PanelArea', () => {
     pressTitle('a.ts', 100, 320);
     pointerTo(500, 150);
     release(500, 150);
+    await dropped();
     expect([place('a.ts').top, place('b.ts').top]).toEqual(['0%', '50%']);
   });
 
-  it('focuses the next panel that way with ⌥⌘ and an arrow, and swaps with it with ⇧⌥⌘', () => {
+  it('leaves the panels’ bodies as they are while a drag goes over them and as it ends', async () => {
+    const renders = vi.fn();
+    function Body() {
+      renders();
+      return <p>Long session</p>;
+    }
+    renderArea([], false, () => ({ body: <Body /> }));
+    await dragIn(file('/Users/me/web/a.ts'));
+    await dragIn(file('/Users/me/web/b.ts'), 990, 300);
+    const before = renders.mock.calls.length;
+    // The drop zone moves from panel to panel, and the drag ends outside the area.
+    pressItem(file('/Users/me/web/c.ts'));
+    pointerTo(250, 300);
+    pointerTo(750, 300);
+    pointerTo(990, 300);
+    release(-200, 300);
+    await dropped();
+    expect(renders.mock.calls.length).toBe(before);
+  });
+
+  it('focuses the next panel that way with ⌥⌘ and an arrow, and swaps with it with ⇧⌥⌘', async () => {
     renderArea();
-    dragIn(file('/Users/me/web/a.ts'));
-    dragIn(file('/Users/me/web/b.ts'), 990, 300);
+    await dragIn(file('/Users/me/web/a.ts'));
+    await dragIn(file('/Users/me/web/b.ts'), 990, 300);
     fireEvent.keyDown(window, { key: 'ArrowLeft', metaKey: true, altKey: true });
     expect(panel('a.ts').getAttribute('aria-current')).toBe('true');
     expect(document.activeElement).toBe(panel('a.ts'));
@@ -455,9 +496,9 @@ describe('PanelArea', () => {
     expect(panel('a.ts').getAttribute('aria-current')).toBe('true');
   });
 
-  it('resizes the panels from a divider', () => {
+  it('resizes the panels from a divider', async () => {
     renderArea();
-    dragIn(folder('/Users/me/web'));
+    await dragIn(folder('/Users/me/web'));
     fireEvent.keyDown(window, { key: 'd', metaKey: true });
     const divider = screen.getByRole('separator', { name: 'Resize panels' });
     expect(divider.style.left).toBe('50%');

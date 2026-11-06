@@ -114,3 +114,66 @@ async function box(locator: Locator) {
   if (found === null) throw new Error('The element is not shown.');
   return found;
 }
+
+test('a drop takes the grabbing cursor off the pointer at once, even when what it opens keeps the page busy', async () => {
+  const data = dataFolder();
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), 'smoke-cursor-')));
+  mkdirSync(join(folder, 'src'));
+  try {
+    const app = await launch(data.path);
+    try {
+      const window = await app.firstWindow();
+      await pickFolder(app, folder);
+      await window.getByRole('button', { name: 'Add workspace' }).click();
+      await answerQuestion(window, 'Trust');
+      const workspace = window.getByRole('treeitem', { name: basename(folder), exact: true });
+      await workspace.focus();
+      await window.keyboard.press('ArrowRight');
+      const row = workspace.getByRole('treeitem', { name: 'src', exact: true }).locator('> div');
+      await expect(row).toBeVisible();
+      // The cursors Chromium gives the window, as it sets them.
+      await app.evaluate(({ BrowserWindow }) => {
+        const page = globalThis as unknown as { cursors: { at: number; type: string }[] };
+        page.cursors = [];
+        BrowserWindow.getAllWindows()[0]?.webContents.on('cursor-changed', (_event, type) => {
+          page.cursors.push({ at: Date.now(), type });
+        });
+      });
+      const cursors = () =>
+        app.evaluate(
+          () => (globalThis as unknown as { cursors: { at: number; type: string }[] }).cursors,
+        );
+      // The page that opens keeps the page busy for a second, as one that shows a long session can.
+      await window.evaluate(`(() => {
+        const main = document.querySelector('main');
+        const observer = new MutationObserver(() => {
+          if (main.querySelector('section') === null) return;
+          observer.disconnect();
+          const until = Date.now() + 1000;
+          while (Date.now() < until) {}
+        });
+        observer.observe(main, { childList: true, subtree: true });
+      })()`);
+      const from = await box(row);
+      const to = await box(window.getByRole('main'));
+      await window.mouse.move(from.x + 20, from.y + from.height / 2);
+      await window.mouse.down();
+      await window.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 10 });
+      await expect.poll(async () => (await cursors()).at(-1)?.type).toBe('grabbing');
+      const released = Date.now();
+      await window.mouse.up();
+      await expect(
+        window.getByRole('main').getByRole('region', { name: 'New session' }),
+      ).toBeVisible();
+      // The pointer left the grabbing hand within a few frames, long before the page was free again.
+      const after = (await cursors()).filter((cursor) => cursor.at >= released);
+      expect(after[0]?.type).not.toBe('grabbing');
+      expect((after[0]?.at ?? Infinity) - released).toBeLessThan(500);
+    } finally {
+      await app.close();
+    }
+  } finally {
+    data.remove();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});

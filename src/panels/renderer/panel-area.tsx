@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -296,8 +297,13 @@ export function PanelArea({
       setDrop(null);
       swallowClick();
       if (target === null) return;
-      if (carried.kind === 'item') latestOpenAt.current(target, [contentOf(carried.item)]);
-      else if (target.kind === 'panel') panels.move(carried.panelId, movingTo(target));
+      // The drop waits for the frame that ends the drag, in which the window takes the grabbing
+      // cursor off the pointer: the drop's own work, such as laying out panels that show long
+      // sessions, can keep the page busy for a while, and the cursor would stay until it ends.
+      afterNextFrame(() => {
+        if (carried.kind === 'item') latestOpenAt.current(target, [contentOf(carried.item)]);
+        else if (target.kind === 'panel') panels.move(carried.panelId, movingTo(target));
+      });
     };
     const release = (released: globalThis.PointerEvent) => {
       if (released.pointerId !== pointerId) return;
@@ -427,7 +433,7 @@ export function PanelArea({
               closeLabel={t('panels.close')}
               {...(shown.actions === undefined ? {} : { actions: shown.actions })}
             >
-              {shown.body}
+              <PanelBody panel={panel} view={view} />
             </Pane>
             {drop?.kind === 'panel' && drop.panelId === panel.id && <DropZone zone={drop.zone} />}
           </div>
@@ -481,6 +487,19 @@ export function PanelArea({
   );
 }
 
+// A panel's body, as the view gives it, which renders again only when the panel or the view does,
+// not with the area's own changes, such as each step of a drag and its end: a page that shows a long
+// session takes a while to render, and while it does the window shows no change, the cursor included.
+const PanelBody = memo(function PanelBody({
+  panel,
+  view,
+}: {
+  panel: Panel;
+  view: ((panel: Panel) => PanelView) | undefined;
+}) {
+  return view?.(panel).body;
+});
+
 // Puts the ghost of what is dragged just below and to the right of the pointer.
 function placeGhost(element: HTMLElement | null, at: { x: number; y: number }): void {
   if (element === null) return;
@@ -494,6 +513,14 @@ function holdPointer(element: HTMLElement | null, pointerId: number): void {
   } catch {
     // The pointer is no longer down; its release has been heard or will end the drag.
   }
+}
+
+// Runs once the next frame has been drawn, so that the frame comes before work that may keep the page
+// busy.
+function afterNextFrame(run: () => void): void {
+  requestAnimationFrame(() => {
+    setTimeout(run);
+  });
 }
 
 // Keeps the click that follows a drag's release from the element that was pressed, which would

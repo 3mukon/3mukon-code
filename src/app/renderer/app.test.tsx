@@ -113,6 +113,17 @@ async function renderApp(bridge = fakeBridge()) {
   });
 }
 
+// The frame that ends a drag, after which what it dropped opens.
+const dropped = () =>
+  act(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          setTimeout(resolve);
+        });
+      }),
+  );
+
 describe('App', () => {
   it('opens a terminal with ⌃` in the selected workspace’s folder, beside the focused panel in its folder, and ends one as its panel closes', async () => {
     const bridge = fakeBridge({
@@ -604,6 +615,7 @@ describe('App', () => {
       fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX, clientY: 300 });
       fireEvent.pointerUp(window, { pointerId: 1, clientX, clientY: 300 });
       fireEvent.click(row());
+      await dropped();
     }
     const [first, second] = within(screen.getByRole('main')).getAllByRole('region', {
       name: 'Fix the build',
@@ -689,12 +701,13 @@ describe('App', () => {
     const row = (name: RegExp) =>
       within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', { name });
     // A press on a row in the sidebar, dragged to a point in the main area and let go there, with the
-    // click the browser gives the release.
-    const dragIn = (name: RegExp, clientX: number, clientY: number) => {
+    // click the browser gives the release, until the session has opened.
+    const dragIn = async (name: RegExp, clientX: number, clientY: number) => {
       fireEvent.pointerDown(row(name), { pointerId: 1, button: 0, clientX: -100, clientY: 20 });
       fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX, clientY });
       fireEvent.pointerUp(window, { pointerId: 1, clientX, clientY });
       fireEvent.click(row(name));
+      await dropped();
     };
 
     // A press reads the history at once; a running session has none to read.
@@ -707,10 +720,10 @@ describe('App', () => {
     // Dragged to the empty area, a session fills it; near its panel's edge, it opens again beside it,
     // and the release's click does not show the first.
     expect(row(/Fix the build/).hasAttribute('draggable')).toBe(false);
-    dragIn(/Fix the build/, 500, 300);
+    await dragIn(/Fix the build/, 500, 300);
     const main = screen.getByRole('main');
     within(main).getByRole('region', { name: 'Fix the build' });
-    dragIn(/Fix the build/, 990, 300);
+    await dragIn(/Fix the build/, 990, 300);
     const panels = within(main).getAllByRole('region', { name: 'Fix the build' });
     expect(panels.map((panel) => panel.getAttribute('aria-current'))).toEqual([null, 'true']);
   });
