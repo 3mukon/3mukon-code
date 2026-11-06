@@ -2,7 +2,7 @@
 id: ADR-0020
 type: adr
 title: Follow each provider's own default for its task tools
-status: proposed
+status: accepted
 visibility: public
 date: 2026-11-05
 summary: The app turns on no provider's task tools and shows a session's task list wherever the provider's agent keeps one, since Claude Code now offers its task tools by default only to its older models and Codex keeps its plan tool off, and turning them on for every session would spend tool calls in every multi-step turn and move the agents off their makers' defaults; turning them on for every session and a setting of the app's own were rejected
