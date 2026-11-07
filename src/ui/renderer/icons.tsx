@@ -17,11 +17,13 @@ import {
   Plus as LucidePlus,
   Regex as LucideRegex,
   Replace as LucideReplace,
+  ReplaceAll as LucideReplaceAll,
   Search as LucideSearch,
   Settings as LucideSettings,
   ShieldCheck as LucideShieldCheck,
   ShieldOff as LucideShieldOff,
   Terminal as LucideTerminal,
+  TextSelect as LucideTextSelect,
   ToggleRight as LucideToggleRight,
   Trash as LucideTrash,
   WholeWord as LucideWholeWord,
@@ -68,3 +70,5 @@ export const CaseSensitive = decorative(LucideCaseSensitive);
 export const WholeWord = decorative(LucideWholeWord);
 export const Regex = decorative(LucideRegex);
 export const Replace = decorative(LucideReplace);
+export const ReplaceAll = decorative(LucideReplaceAll);
+export const TextSelect = decorative(LucideTextSelect);

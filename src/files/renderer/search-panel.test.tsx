@@ -9,6 +9,7 @@ import { editorSetup } from './editor-setup';
 const PHRASES = {
   Find: 'Find',
   Replace: 'Replace',
+  'Toggle Replace': 'Toggle Replace',
   next: 'Next match',
   previous: 'Previous match',
   all: 'Select All',
@@ -59,12 +60,16 @@ const type = (field: HTMLElement, value: string) => {
 const status = () => screen.queryByRole('status')?.textContent ?? null;
 const selected = (view: EditorView) =>
   view.state.selection.ranges.map((range) => view.state.sliceDoc(range.from, range.to));
+const toggleReplace = () => screen.getByRole('button', { name: 'Toggle Replace' });
+const replacement = () => screen.queryByRole('textbox', { name: 'Replace with' });
 
 describe('the editor’s search bar', () => {
-  it('opens at the top of the editor with the focus in its field, counts the matches and the one selected, and finds them with Return and Shift-Return', () => {
+  it('opens over the top of the editor with the focus in its field and the replacement folded, counts the matches and the one selected, and finds them with Return and Shift-Return', () => {
     const { view, parent, find } = open('one two one three one');
     expect(parent.querySelector('.cm-panels-top .cm-search')).not.toBeNull();
     expect(document.activeElement).toBe(find);
+    expect(toggleReplace().getAttribute('aria-expanded')).toBe('false');
+    expect(replacement()).toBeNull();
     expect(status()).toBeNull();
 
     type(find, 'one');
@@ -109,10 +114,15 @@ describe('the editor’s search bar', () => {
     expect(find.getAttribute('aria-invalid')).toBe('false');
   });
 
-  it('replaces the match selected and then every match, selects all of them, and closes with Escape', async () => {
+  it('unfolds the replacement, replaces the match selected and then every match, selects all of them, and closes with Escape', async () => {
     const { view, find } = open('one two one three one');
     type(find, 'one');
-    type(screen.getByRole('textbox', { name: 'Replace with' }), '1');
+    fireEvent.click(toggleReplace());
+    expect(toggleReplace().getAttribute('aria-expanded')).toBe('true');
+    const field = replacement();
+    if (field === null) throw new Error('The replacement is not unfolded.');
+    expect(document.activeElement).toBe(field);
+    type(field, '1');
     expect(getSearchQuery(view.state).replace).toBe('1');
     // The first Replace selects the next match, and the next replaces it.
     fireEvent.click(screen.getByRole('button', { name: 'Replace' }));
@@ -128,6 +138,25 @@ describe('the editor’s search bar', () => {
     expect(screen.queryByRole('textbox', { name: 'Find' })).toBeNull();
   });
 
+  it('folds the replacement away again with the focus back in the query, and opens folded each time', async () => {
+    const { view, find } = open('one two');
+    fireEvent.click(toggleReplace());
+    expect(document.activeElement).toBe(replacement());
+    fireEvent.click(toggleReplace());
+    expect(toggleReplace().getAttribute('aria-expanded')).toBe('false');
+    expect(replacement()).toBeNull();
+    expect(document.activeElement).toBe(find);
+
+    fireEvent.click(toggleReplace());
+    fireEvent.keyDown(find, { key: 'Escape' });
+    await act(() => Promise.resolve());
+    act(() => {
+      openSearchPanel(view);
+    });
+    expect(toggleReplace().getAttribute('aria-expanded')).toBe('false');
+    expect(replacement()).toBeNull();
+  });
+
   it('starts from the word selected as it opens, and leaves the replacement out of a file that cannot be edited', () => {
     const { find } = open('one two three', {
       readOnly: true,
@@ -135,7 +164,8 @@ describe('the editor’s search bar', () => {
     });
     expect((find as HTMLInputElement).value).toBe('two');
     expect(status()).toBe('1 of 1');
-    expect(screen.queryByRole('textbox', { name: 'Replace with' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Toggle Replace' })).toBeNull();
+    expect(replacement()).toBeNull();
     expect(screen.queryByRole('button', { name: 'Replace All' })).toBeNull();
   });
 });

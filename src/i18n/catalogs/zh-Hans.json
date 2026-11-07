@@ -254,6 +254,7 @@
       "close": "关闭",
       "find": "查找",
       "replace": "替换",
+      "toggleReplace": "展开或收起替换",
       "next": "下一个匹配",
       "previous": "上一个匹配",
       "all": "全选",

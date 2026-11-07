@@ -39,6 +39,7 @@ export const PHRASES = {
   close: 'close',
   Find: 'find',
   Replace: 'replace',
+  'Toggle Replace': 'toggleReplace',
   next: 'next',
   previous: 'previous',
   all: 'all',
@@ -110,6 +111,23 @@ const theme = EditorView.theme({
   '.cm-specialChar': { color: 'var(--del)' },
   '.cm-panels': { backgroundColor: 'transparent', color: 'var(--ink)' },
   '.cm-panels.cm-panels-top': { borderBottom: '1px dashed var(--line)' },
+  // The search bar floats over the top right of the text, as a sheet of the window's paper, instead of
+  // taking a row of its own above it; the scroll margin CodeMirror keeps for a top panel still scrolls a
+  // match it finds out from under the bar.
+  '.cm-panels.cm-panels-top:has(> .cm-search)': {
+    position: 'absolute',
+    top: '8px',
+    right: '14px',
+    left: 'auto',
+    width: 'min(28rem, calc(100% - 28px))',
+    backgroundColor: 'var(--frame)',
+    backgroundImage: 'var(--paper-grain)',
+    border: '1px dashed var(--menu-line)',
+    borderRadius: '8px',
+  },
+  // CodeMirror's own spacing for its search panel's controls, which the app's bar lays out itself.
+  '.cm-panel.cm-search': { padding: '0' },
+  '.cm-panel.cm-search input, .cm-panel.cm-search button': { margin: '0' },
   '.cm-panels.cm-panels-bottom': { borderTop: '1px dashed var(--line)' },
   '.cm-panel.cm-gotoLine': { padding: '6px 20px', fontSize: '11.5px' },
   '.cm-textfield': {

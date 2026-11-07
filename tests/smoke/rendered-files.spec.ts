@@ -89,11 +89,16 @@ test('files of common formats open rendered, with a toggle to their raw text, an
       await readme.getByRole('button', { name: 'Raw' }).click();
       await expect(readme.locator('.cm-editor')).toBeVisible();
       await expect(readme.getByRole('heading', { name: 'Guide' })).toHaveCount(0);
-      // ⌘F opens the editor's search bar at its top, which counts the matches, finds the next with
-      // Return and closes at Escape.
+      // ⌘F opens the editor's search bar, floating over the top of its text with the replacement
+      // folded, which counts the matches, finds the next with Return and closes at Escape.
       await window.keyboard.press('Meta+f');
       const find = readme.getByRole('textbox', { name: 'Find' });
       await expect(find).toBeFocused();
+      await expect(readme.locator('.cm-panels-top')).toHaveCSS('position', 'absolute');
+      await expect(readme.getByRole('button', { name: 'Toggle Replace' })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
       await window.keyboard.type('second line');
       const count = readme.locator('.cm-search').getByRole('status');
       await expect(count).toHaveText('3 found');

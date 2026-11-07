@@ -256,6 +256,7 @@
       "close": "Close",
       "find": "Find",
       "replace": "Replace",
+      "toggleReplace": "Toggle Replace",
       "next": "Next match",
       "previous": "Previous match",
       "all": "Select All",

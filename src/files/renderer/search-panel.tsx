@@ -11,16 +11,18 @@ import {
 } from '@codemirror/search';
 import type { EditorState } from '@codemirror/state';
 import { runScopeHandlers, type EditorView, type Panel } from '@codemirror/view';
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import {
   CaseSensitive,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Regex,
   Replace,
-  Search,
+  ReplaceAll,
+  TextSelect,
   WholeWord,
   X,
 } from '../../ui/renderer/icons';
@@ -29,11 +31,13 @@ import {
 // answers at once.
 const COUNTED = 1000;
 
-// The editor's search bar, which CodeMirror shows at the top of the editor in place of its own panel,
-// over its search state and commands, in the app's look and in the editor's phrases: the query, how
-// many matches there are and which of them is selected, the toggles for case, whole words and regular
-// expressions, the previous and the next match, Select All, and, while the file can be edited, the
-// replacement with Replace and Replace All.
+// The editor's search bar, which CodeMirror shows in place of its own panel and the editor's theme
+// floats over the top right of the text, as a sheet of the window's paper, the way a browser's find bar
+// floats over a page. It runs on CodeMirror's search state and commands, in the editor's phrases. Its
+// row holds the query, how many matches there are and which of them is selected, the toggles for case,
+// whole words and regular expressions, the previous and the next match, Select All and Close; while the
+// file can be edited, a toggle at its start unfolds a second row for the replacement, with Replace and
+// Replace All, which is folded each time the bar opens.
 export function searchPanel(view: EditorView): Panel {
   const dom = document.createElement('div');
   dom.className = 'cm-search';
@@ -113,6 +117,17 @@ function SearchBar({ view, state }: { view: EditorView; state: EditorState }) {
     setFields({ search: query.search, replace: query.replace });
   }
   const counted = useMemo(() => (query.valid ? countOf(state, query) : null), [state, query]);
+  // Whether the replacement is unfolded, which only a file that can be edited offers.
+  const [unfolded, setUnfolded] = useState(false);
+  const replacing = unfolded && !state.readOnly;
+  const findField = useRef<HTMLInputElement>(null);
+  const replaceField = useRef<HTMLInputElement>(null);
+  // Unfolding the replacement takes the focus to its field, once the field is there.
+  const focusReplacement = useRef(false);
+  useEffect(() => {
+    if (replacing && focusReplacement.current) replaceField.current?.focus();
+    focusReplacement.current = false;
+  }, [replacing]);
 
   // Sets the query, as the editor has it at the moment, with the change.
   const change = (changed: Change) => {
@@ -127,6 +142,17 @@ function SearchBar({ view, state }: { view: EditorView; state: EditorState }) {
       ...changed,
     });
     if (!next.eq(current)) view.dispatch({ effects: setSearchQuery.of(next) });
+  };
+
+  // Folds or unfolds the replacement; folding it while its field has the focus gives the focus back to
+  // the query.
+  const toggleReplacement = () => {
+    const field = replaceField.current;
+    if (replacing && field !== null && field.ownerDocument.activeElement === field) {
+      findField.current?.focus();
+    }
+    focusReplacement.current = !replacing;
+    setUnfolded(!replacing);
   };
 
   // The editor's search keys, such as Escape and ⌘G, work in the bar too; Return finds the next
@@ -151,11 +177,28 @@ function SearchBar({ view, state }: { view: EditorView; state: EditorState }) {
   return (
     <div
       onKeyDown={onKeyDown}
-      className="grid grid-cols-[minmax(0,26rem)_auto_minmax(0,1fr)_auto] items-center gap-x-1 gap-y-1.5 px-5 py-2 text-[12px] text-ink"
+      className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-1 gap-y-1 p-1.5 text-[12px] text-ink"
     >
+      {state.readOnly ? (
+        <span />
+      ) : (
+        <button
+          type="button"
+          aria-label={phrase('Toggle Replace')}
+          aria-expanded={replacing}
+          title={phrase('Toggle Replace')}
+          onMouseDown={keepFocus}
+          onClick={toggleReplacement}
+          className="grid h-7 w-5 shrink-0 place-items-center rounded-md text-muted hover:bg-hover hover:text-ink"
+        >
+          <ChevronRight
+            className={`size-3.5 transition-transform motion-reduce:transition-none ${replacing ? 'rotate-90' : ''}`}
+          />
+        </button>
+      )}
       <Field invalid={query.search !== '' && !query.valid}>
-        <Search className="size-3.5 shrink-0 text-faint" />
         <input
+          ref={findField}
           name="search"
           main-field="true"
           aria-label={phrase('Find')}
@@ -207,7 +250,7 @@ function SearchBar({ view, state }: { view: EditorView; state: EditorState }) {
           <Regex className="size-3.5" />
         </Toggle>
       </Field>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center">
         <IconButton
           label={phrase('previous')}
           onClick={() => {
@@ -224,7 +267,8 @@ function SearchBar({ view, state }: { view: EditorView; state: EditorState }) {
         >
           <ChevronDown className="size-4" />
         </IconButton>
-        <TextButton
+        <IconButton
+          label={phrase('all')}
           onClick={() => {
             // The matches become the editor's selections, which the keyboard then edits together: the
             // editor takes the focus first, so that its own selection does not replace them.
@@ -232,10 +276,8 @@ function SearchBar({ view, state }: { view: EditorView; state: EditorState }) {
             selectMatches(view);
           }}
         >
-          {phrase('all')}
-        </TextButton>
-      </div>
-      <div className="col-start-4">
+          <TextSelect className="size-4" />
+        </IconButton>
         <IconButton
           label={phrase('close')}
           onClick={() => {
@@ -245,11 +287,12 @@ function SearchBar({ view, state }: { view: EditorView; state: EditorState }) {
           <X className="size-4" />
         </IconButton>
       </div>
-      {!state.readOnly && (
+      {replacing && (
         <>
+          <span />
           <Field>
-            <Replace className="size-3.5 shrink-0 text-faint" />
             <input
+              ref={replaceField}
               name="replace"
               aria-label={phrase('Replace with')}
               placeholder={phrase('Replace')}
@@ -263,21 +306,23 @@ function SearchBar({ view, state }: { view: EditorView; state: EditorState }) {
               className={INPUT}
             />
           </Field>
-          <div className="flex items-center gap-1">
-            <TextButton
+          <div className="flex items-center">
+            <IconButton
+              label={phrase('replace')}
               onClick={() => {
                 replaceNext(view);
               }}
             >
-              {phrase('replace')}
-            </TextButton>
-            <TextButton
+              <Replace className="size-4" />
+            </IconButton>
+            <IconButton
+              label={phrase('replace all')}
               onClick={() => {
                 replaceAll(view);
               }}
             >
-              {phrase('replace all')}
-            </TextButton>
+              <ReplaceAll className="size-4" />
+            </IconButton>
           </div>
         </>
       )}
@@ -353,6 +398,7 @@ function Toggle({
   );
 }
 
+// A command of the bar, named in its tooltip and for VoiceOver.
 function IconButton({
   label,
   onClick,
@@ -370,20 +416,6 @@ function IconButton({
       onMouseDown={keepFocus}
       onClick={onClick}
       className="grid size-7 shrink-0 place-items-center rounded-md text-muted hover:bg-hover hover:text-ink"
-    >
-      {children}
-    </button>
-  );
-}
-
-// A command in words, as the app's other buttons beside a field are drawn.
-function TextButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onMouseDown={keepFocus}
-      onClick={onClick}
-      className="h-7 shrink-0 rounded-md border border-line px-2.5 text-[12px] whitespace-nowrap text-ink hover:bg-hover active:bg-selected"
     >
       {children}
     </button>
