@@ -22,9 +22,8 @@
   --idle: #b7b5ac;
   --add: #66800b;
   --del: #af3029;
-  /* Messages: the user's in a bubble filled with a darker paper, the agent's in one outlined in ink. */
+  /* Messages, the user's and the agent's alike, in bubbles filled with a darker paper. */
   --bubble: #dddbd3;
-  --bubble-line: rgb(16 15 15 / 0.18);
   /* Paper set apart, as a tool call's output and a diff are, under a dashed line. */
   --well: #e2e0d9;
   /* What an empty field shows in place of text, fainter than the labels around it. */
@@ -88,7 +87,6 @@
     --add: #879a39;
     --del: #d14d41;
     --bubble: #282726;
-    --bubble-line: rgb(206 205 195 / 0.16);
     --well: #1c1b1a;
     --placeholder: #4e4d4a;
     --scrim: rgb(0 0 0 / 0.7);
@@ -141,7 +139,6 @@
   --color-add: var(--add);
   --color-del: var(--del);
   --color-bubble: var(--bubble);
-  --color-bubble-line: var(--bubble-line);
   --color-well: var(--well);
   --color-placeholder: var(--placeholder);
   --color-scrim: var(--scrim);

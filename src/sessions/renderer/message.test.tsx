@@ -67,13 +67,12 @@ describe('Message', () => {
     const order = shown.compareDocumentPosition(screen.getByText('Look'));
     expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(agent?.querySelector('img')).not.toBeNull();
-    // A message without text has neither MD nor Copy, and its border never gives way.
+    // A message without text has neither MD nor Copy.
     expect(agent?.querySelector('button[aria-label="Copy message"]')).toBeNull();
-    expect(agent?.firstElementChild?.className).not.toContain('mask');
     expect(screen.getAllByRole('button', { name: 'Copy message' })).toHaveLength(1);
   });
 
-  it('lays MD or TXT and Copy over the top border, out of the flow, while hovered or focused', () => {
+  it('lays MD or TXT and Copy over the top edge, out of the flow, while hovered or focused', () => {
     const { container } = render(
       <>
         <Message role="user" text="Hi" agent="Codex CLI" />
@@ -93,11 +92,14 @@ describe('Message', () => {
     expect(
       screen.getAllByRole('button', { name: /^Show as / }).map((button) => button.textContent),
     ).toEqual(['TXT', 'MD']);
-    // The bubble's border and the line above thinking give way beneath them while they show.
+    // On a bubble they are a tab of its paper; above thinking they lie over its line, which gives way
+    // beneath them while they show, and is the only line drawn.
+    expect(tools[0]).toContain('paper-bubble');
+    expect(tools[1]).not.toContain('paper-bubble');
     const lines = [...container.querySelectorAll('span[aria-hidden="true"]')];
-    expect(lines).toHaveLength(2);
-    for (const line of lines) expect(line.className).toContain('group-hover:[mask-size');
-    expect(lines[1]?.className).toContain('border-dashed');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.className).toContain('border-dashed');
+    expect(lines[0]?.className).toContain('group-hover:[mask-size');
   });
 
   it('shows an image the agent’s Markdown carries, and one on the web as a link, unfetched', () => {

@@ -17,23 +17,21 @@ interface MessageProps {
   agent: string;
 }
 
-// A line that gives way, near its end, to MD or TXT and Copy while they show: its mask cuts out a notch
-// as wide as they are (--notch), which has no size until the message is hovered or holds the focus.
+// The line above thinking gives way, near its end, to MD or TXT and Copy while they show: its mask cuts
+// out a notch as wide as they are (--notch), which has no size until the thinking is hovered or holds
+// the focus, 6px from the line's right end.
 const notched =
-  '[mask-image:linear-gradient(#000,#000),linear-gradient(#000,#000)] [mask-repeat:no-repeat] [mask-composite:exclude] [mask-size:100%_100%,0_0] group-hover:[mask-size:100%_100%,var(--notch)_2px] group-focus-within:[mask-size:100%_100%,var(--notch)_2px]';
-// The notch and the tools 6px from the line's right end; or, for the agent's bubble, 6px from its left
-// end where the bubble is narrower than the tools, so that they reach out over the empty side.
-const atRight = '[mask-position:0_0,right_6px_top_0]';
-const atRightOrLeft = '[mask-position:0_0,max(6px,calc(100%_-_6px))_0]';
+  '[mask-image:linear-gradient(#000,#000),linear-gradient(#000,#000)] [mask-repeat:no-repeat] [mask-composite:exclude] [mask-size:100%_100%,0_0] group-hover:[mask-size:100%_100%,var(--notch)_2px] group-focus-within:[mask-size:100%_100%,var(--notch)_2px] [mask-position:0_0,right_6px_top_0]';
 
-// One message, as the reference's activity shows it: the user's at the right in a filled bubble with
-// its images above its text, the agent's at the left in an outlined one with its images below, each
-// at most 88% of the width and named for VoiceOver by its sender, and the agent's thinking quieter,
-// under a dashed line instead of in a bubble. A message shows as Markdown or as plain text, the agent's
-// and its thinking as Markdown at first and the user's as plain text. MD or TXT, which switches, and
-// Copy, which puts its text on the clipboard, show while the pointer or the focus is on the message,
-// laid over the bubble's top border near its end, as the context in use sits in the divider above the
-// composer; the border gives way beneath them. Out of the flow, they never widen a short bubble.
+// One message, as the reference's activity shows it: the user's at the right with its images above its
+// text and the agent's at the left with its images below, each in a bubble filled with the darker paper
+// and drawn without an outline, at most 88% of the width and named for VoiceOver by its sender; and the
+// agent's thinking quieter, under a dashed line instead of in a bubble. A message shows as Markdown or as
+// plain text, the agent's and its thinking as Markdown at first and the user's as plain text. MD or TXT,
+// which switches, and Copy, which puts its text on the clipboard, show while the pointer or the focus is
+// on the message, near its top end: on a bubble, as a tab of the bubble's paper over its top edge; above
+// thinking, over its line, which gives way beneath them, as the context in use sits in the divider above
+// the composer. Out of the flow, they never widen a short bubble.
 export function Message({ role, text, images = [], agent }: MessageProps) {
   const { t } = useTranslation();
   const [markdown, setMarkdown] = useState(role !== 'user');
@@ -60,7 +58,7 @@ export function Message({ role, text, images = [], agent }: MessageProps) {
       <div className="group relative my-3 min-w-0 pt-2 text-faint italic [--notch:3.5rem]">
         <span
           aria-hidden="true"
-          className={`pointer-events-none absolute inset-x-0 top-0 border-t border-dashed border-line ${notched} ${atRight}`}
+          className={`pointer-events-none absolute inset-x-0 top-0 border-t border-dashed border-line ${notched}`}
         />
         {tools('right-1.5')}
         {body}
@@ -74,18 +72,12 @@ export function Message({ role, text, images = [], agent }: MessageProps) {
       <span className="sr-only">
         {user ? t('sessions.page.fromUser') : t('sessions.page.fromAgent', { agent })}
       </span>
-      <div
-        className={`group relative flex max-w-[88%] min-w-0 flex-col gap-1.5 rounded-lg px-2.5 py-1.5 text-ink [--notch:3.5rem] ${
-          user ? 'paper-bubble' : ''
-        }`}
-      >
-        <span
-          aria-hidden="true"
-          className={`pointer-events-none absolute inset-0 rounded-[inherit] border border-bubble-line ${
-            text === '' ? '' : `${notched} ${user ? atRight : atRightOrLeft}`
-          }`}
-        />
-        {tools(user ? 'right-1.5' : 'left-[max(6px,calc(100%_-_var(--notch)_-_6px))]')}
+      <div className="group paper-bubble relative flex max-w-[88%] min-w-0 flex-col gap-1.5 rounded-lg px-2.5 py-1.5 text-ink [--notch:3.5rem]">
+        {/* The tools 6px from the bubble's right end; or, for the agent's bubble, 6px from its left end
+            where the bubble is narrower than they are, so that they reach out over the empty side. */}
+        {tools(
+          `paper-bubble rounded-md ${user ? 'right-1.5' : 'left-[max(6px,calc(100%_-_var(--notch)_-_6px))]'}`,
+        )}
         {user && shown}
         {body}
         {!user && shown}

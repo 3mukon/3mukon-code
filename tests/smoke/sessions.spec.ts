@@ -24,18 +24,21 @@ const summary: SessionSummary = {
 const state: SessionState = {
   ...initialSessionState(),
   title: 'Long session',
-  timeline: Array.from({ length: 40 }, (_, index): TimelineItem[] => [
-    { type: 'message', id: `u${String(index)}`, role: 'user', text: `Step ${String(index)}` },
-    {
-      type: 'tool',
-      id: `t${String(index)}`,
-      kind: 'execute',
-      title: `pnpm test ${String(index)}`,
-      status: 'completed',
-      output: 'ok',
-      changes: [],
-    },
-  ]).flat(),
+  timeline: [
+    ...Array.from({ length: 40 }, (_, index): TimelineItem[] => [
+      { type: 'message', id: `u${String(index)}`, role: 'user', text: `Step ${String(index)}` },
+      {
+        type: 'tool',
+        id: `t${String(index)}`,
+        kind: 'execute',
+        title: `pnpm test ${String(index)}`,
+        status: 'completed',
+        output: 'ok',
+        changes: [],
+      },
+    ]).flat(),
+    { type: 'message', id: 'a', role: 'agent', text: 'All 40 steps pass.' },
+  ],
 };
 
 test('a long session scrolls within its page, and the window’s page itself never scrolls', async () => {
@@ -60,15 +63,23 @@ test('a long session scrolls within its page, and the window’s page itself nev
     await window.getByRole('button', { name: /Long session/ }).click();
     const activity = window.getByRole('region', { name: 'Activity' });
     await expect(activity.getByText('Step 39', { exact: true })).toBeVisible();
-    // The user's filled bubble carries grain in both appearances, as the surrounding paper does.
-    const bubble = activity.getByText('Step 39', { exact: true }).locator('..');
+    // The bubbles of the user's and the agent's messages are filled alike and carry grain in both
+    // appearances, as the surrounding paper does.
+    const bubbles = [
+      activity.getByText('Step 39', { exact: true }).locator('..'),
+      activity
+        .getByText('All 40 steps pass.', { exact: true })
+        .locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]'),
+    ];
     for (const appearance of ['light', 'dark'] as const) {
       await window.emulateMedia({ colorScheme: appearance });
-      await expect(bubble).toHaveCSS(
-        'background-color',
-        appearance === 'light' ? 'rgb(221, 219, 211)' : 'rgb(40, 39, 38)',
-      );
-      await expect(bubble).toHaveCSS('background-image', /url\(/);
+      for (const bubble of bubbles) {
+        await expect(bubble).toHaveCSS(
+          'background-color',
+          appearance === 'light' ? 'rgb(221, 219, 211)' : 'rgb(40, 39, 38)',
+        );
+        await expect(bubble).toHaveCSS('background-image', /url\(/);
+      }
     }
     // How much taller than the window its page is, and how far the page has scrolled.
     const page = () =>
