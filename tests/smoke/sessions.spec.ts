@@ -64,7 +64,8 @@ test('a long session scrolls within its page, and the window’s page itself nev
     const activity = window.getByRole('region', { name: 'Activity' });
     await expect(activity.getByText('Step 39', { exact: true })).toBeVisible();
     // The bubbles of the user's and the agent's messages are filled alike and carry grain in both
-    // appearances, as the surrounding paper does.
+    // appearances, as the surrounding paper does, and the activity's scrollbar is a thumb in the menu
+    // line's ink on no track, so that macOS lays no light strip over it when hovered or dragged.
     const bubbles = [
       activity.getByText('Step 39', { exact: true }).locator('..'),
       activity
@@ -80,6 +81,12 @@ test('a long session scrolls within its page, and the window’s page itself nev
         );
         await expect(bubble).toHaveCSS('background-image', /url\(/);
       }
+      await expect(activity).toHaveCSS(
+        'scrollbar-color',
+        appearance === 'light'
+          ? 'rgba(16, 15, 15, 0.32) rgba(0, 0, 0, 0)'
+          : 'rgba(206, 205, 195, 0.28) rgba(0, 0, 0, 0)',
+      );
     }
     // How much taller than the window its page is, and how far the page has scrolled.
     const page = () =>

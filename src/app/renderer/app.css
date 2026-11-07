@@ -11,9 +11,13 @@
     height: 100%;
   }
 
-  /* The window's page never scrolls: its panes and lists scroll within themselves. */
+  /* The window's page never scrolls: its panes and lists scroll within themselves. Their scrollbars,
+     which every element inherits, are macOS's own in the paper's ink: a thumb in the menu line's ink
+     and no track, so that a hovered or dragged scrollbar shows the paper and its grain beneath rather
+     than the light strip macOS lays over it (L-0009). */
   html {
     overflow: hidden;
+    scrollbar-color: var(--color-menu-line) transparent;
   }
 
   body {

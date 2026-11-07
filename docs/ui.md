@@ -67,6 +67,7 @@ The main process's menus and questions show in the page, in the app's own look, 
 ## Look
 
 - An e-ink look after the Ink Paper theme on the Flexoki palette: ink on a warm grey paper in light appearance and pale ink on dark paper in dark, with a faint grain on the paper, sheets drawn as the paper itself under a dashed line and no shadows. Colour is kept for what it means: states, additions and deletions, warnings and the accent. (DOC-mod-ui)
+- Scrollbars are macOS's own, in the paper's ink: a thumb in the dashed line's ink with no strip beneath it, also while hovered or dragged. (DOC-mod-app)
 - The appearance follows the Appearance setting: System, which follows macOS, Light or Dark.
 - The system's fonts, SF Pro and SF Mono, and Lucide's icons (ADR-0007).
 - Messages and Markdown files render with the same renderer, with math and highlighted code (ADR-0010, ADR-0018).
