@@ -8,8 +8,8 @@ interface SettingsPanelProps {
 }
 
 // The settings, as a panel shows them on the window's paper: the window's language, System taking
-// macOS's preferred languages and each language named in itself, and its appearance, each a row of
-// choices with the chosen one in ink.
+// macOS's preferred languages and each language named in itself, its appearance, and whether its
+// controls show tooltips, off at first, each a row of choices with the chosen one in ink.
 export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
   const { t } = useTranslation();
   return (
@@ -40,6 +40,18 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
           ]}
           onChange={(appearance) => {
             onChange({ appearance: appearance as Appearance });
+          }}
+        />
+        <Segmented
+          label={t('settings.tooltips')}
+          detail={t('settings.tooltipsDetail')}
+          value={settings.tooltips ? 'on' : 'off'}
+          options={[
+            { value: 'off', label: t('settings.off') },
+            { value: 'on', label: t('settings.on') },
+          ]}
+          onChange={(tooltips) => {
+            onChange({ tooltips: tooltips === 'on' });
           }}
         />
       </div>

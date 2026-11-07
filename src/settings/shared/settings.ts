@@ -10,9 +10,15 @@ export type Appearance = 'system' | 'light' | 'dark';
 export interface AppSettings {
   language: LanguageChoice;
   appearance: Appearance;
+  // Whether the window draws its controls' tooltips (ADR-0021), off unless the user turns them on.
+  tooltips: boolean;
 }
 
-export const defaultSettings: AppSettings = { language: 'system', appearance: 'system' };
+export const defaultSettings: AppSettings = {
+  language: 'system',
+  appearance: 'system',
+  tooltips: false,
+};
 
 const languages: readonly LanguageChoice[] = ['system', 'en', 'zh-Hans'];
 const appearances: readonly Appearance[] = ['system', 'light', 'dark'];
@@ -34,10 +40,17 @@ export function settingsOf(value: unknown): AppSettings {
   const given = typeof value === 'object' && value !== null ? value : {};
   const language = 'language' in given ? given.language : undefined;
   const appearance = 'appearance' in given ? given.appearance : undefined;
+  const tooltips = 'tooltips' in given ? given.tooltips : undefined;
   return {
     language: languages.find((choice) => choice === language) ?? defaultSettings.language,
     appearance: appearances.find((choice) => choice === appearance) ?? defaultSettings.appearance,
+    tooltips: typeof tooltips === 'boolean' ? tooltips : defaultSettings.tooltips,
   };
+}
+
+// Whether two sets of settings choose the same in every setting.
+export function sameSettings(one: AppSettings, other: AppSettings): boolean {
+  return (Object.keys(one) as (keyof AppSettings)[]).every((key) => one[key] === other[key]);
 }
 
 // The preferred languages a choice of language stands for: macOS's, or the one chosen.

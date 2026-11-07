@@ -16,7 +16,7 @@ const dark = () =>
     '(prefers-color-scheme: dark)',
   ).matches;
 
-test('the settings open in a panel of their own, and their language and appearance apply at once and after a restart', async () => {
+test('the settings open in a panel of their own, and their language, appearance and tooltips apply at once and after a restart', async () => {
   const data = dataFolder();
   try {
     const app = await launch(data.path);
@@ -34,6 +34,17 @@ test('the settings open in a panel of their own, and their language and appearan
         .poll(() => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource))
         .toBe('dark');
       await expect.poll(() => window.evaluate(dark)).toBe(true);
+      // The tooltips start off: the gear's shows only once they are turned on (ADR-0021).
+      const gear = window.getByRole('button', { name: 'Settings' });
+      const tooltip = window.locator('[data-tooltip]');
+      await gear.hover();
+      await window.waitForTimeout(800);
+      await expect(tooltip).toHaveCount(0);
+      const tooltips = settings.getByRole('radiogroup', { name: 'Tooltips' });
+      await tooltips.getByRole('radio', { name: 'On' }).click();
+      await gear.hover();
+      await expect(tooltip).toHaveText('Settings');
+      await expect(tooltip).toBeVisible();
       // So does the language, the window's and the main process's.
       const language = settings.getByRole('radiogroup', { name: 'Language' });
       await language.getByRole('radio', { name: '简体中文' }).click();
@@ -52,6 +63,8 @@ test('the settings open in a panel of their own, and their language and appearan
       await expect(window.getByRole('heading', { name: '会话' })).toBeVisible();
       expect(await again.evaluate(({ nativeTheme }) => nativeTheme.themeSource)).toBe('dark');
       await expect.poll(() => window.evaluate(dark)).toBe(true);
+      await window.getByRole('button', { name: '设置' }).hover();
+      await expect(window.locator('[data-tooltip]')).toHaveText('设置');
     } finally {
       await again.close();
     }

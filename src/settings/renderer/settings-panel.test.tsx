@@ -10,11 +10,11 @@ beforeAll(() => {
 afterEach(cleanup);
 
 describe('SettingsPanel', () => {
-  it('chooses the language, each named in itself, and the appearance, each from System and two more', () => {
+  it('chooses the language, each named in itself, the appearance, each from System and two more, and whether tooltips show', () => {
     const onChange = vi.fn<(change: Partial<AppSettings>) => void>();
     render(
       <SettingsPanel
-        settings={{ language: 'zh-Hans', appearance: 'system' }}
+        settings={{ language: 'zh-Hans', appearance: 'system', tooltips: false }}
         onChange={onChange}
       />,
     );
@@ -27,8 +27,20 @@ describe('SettingsPanel', () => {
     within(language).getByRole('radio', { name: '简体中文', checked: true });
     const appearance = screen.getByRole('radiogroup', { name: 'Appearance' });
     within(appearance).getByRole('radio', { name: 'System', checked: true });
+    const tooltips = screen.getByRole('radiogroup', { name: 'Tooltips' });
+    expect(
+      within(tooltips)
+        .getAllByRole('radio')
+        .map((radio) => radio.textContent),
+    ).toEqual(['Off', 'On']);
+    within(tooltips).getByRole('radio', { name: 'Off', checked: true });
     fireEvent.click(within(language).getByRole('radio', { name: 'English' }));
     fireEvent.click(within(appearance).getByRole('radio', { name: 'Dark' }));
-    expect(onChange.mock.calls).toEqual([[{ language: 'en' }], [{ appearance: 'dark' }]]);
+    fireEvent.click(within(tooltips).getByRole('radio', { name: 'On' }));
+    expect(onChange.mock.calls).toEqual([
+      [{ language: 'en' }],
+      [{ appearance: 'dark' }],
+      [{ tooltips: true }],
+    ]);
   });
 });

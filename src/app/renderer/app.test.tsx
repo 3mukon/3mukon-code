@@ -79,8 +79,8 @@ function fakeBridge(
       answerQuestion: () => Promise.resolve(),
     },
     settings: {
-      initial: { language: 'system', appearance: 'system' },
-      get: () => Promise.resolve({ language: 'system', appearance: 'system' }),
+      initial: { language: 'system', appearance: 'system', tooltips: false },
+      get: () => Promise.resolve({ language: 'system', appearance: 'system', tooltips: false }),
       set: () => Promise.resolve(),
       onChange: () => () => undefined,
     },
@@ -365,7 +365,7 @@ describe('App', () => {
 
   it('opens the settings in a panel of their own with the gear or ⌘,, and the window takes the language they choose', async () => {
     const bridge = fakeBridge();
-    let current: AppSettings = { language: 'system', appearance: 'system' };
+    let current: AppSettings = { language: 'system', appearance: 'system', tooltips: false };
     const listeners = new Set<(settings: AppSettings) => void>();
     const set = vi.fn<Bridge['settings']['set']>((change) => {
       current = { ...current, ...change };

@@ -23,7 +23,7 @@ function fakeIpc() {
 }
 
 // The settings the window opened with.
-const opening: AppSettings = { language: 'zh-Hans', appearance: 'dark' };
+const opening: AppSettings = { language: 'zh-Hans', appearance: 'dark', tooltips: false };
 
 describe('createBridge', () => {
   it('invokes one channel for each call, with the call’s values, and returns the answer', async () => {

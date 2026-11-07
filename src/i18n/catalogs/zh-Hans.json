@@ -209,6 +209,10 @@
     "system": "跟随系统",
     "light": "浅色",
     "dark": "深色",
+    "tooltips": "工具提示",
+    "tooltipsDetail": "指针停留在控件上或用键盘选中控件时，显示它的名称。",
+    "off": "关",
+    "on": "开",
     "languages": {
       "en": "English",
       "zhHans": "简体中文"

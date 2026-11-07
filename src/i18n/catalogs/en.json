@@ -211,6 +211,10 @@
     "system": "System",
     "light": "Light",
     "dark": "Dark",
+    "tooltips": "Tooltips",
+    "tooltipsDetail": "Name a control when the pointer rests on it or the keyboard reaches it.",
+    "off": "Off",
+    "on": "On",
     "languages": {
       "en": "English",
       "zhHans": "简体中文"

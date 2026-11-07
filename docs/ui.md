@@ -33,7 +33,7 @@ Each panel is a pane with a header, which can lie in the title bar, holding its 
 | Terminal | The user's login shell in a folder, or a provider's sign-in command (ADR-0015, ADR-0016) | DOC-mod-terminal |
 | Archived sessions | The archived sessions, searchable, each unarchived or removed from its row | DOC-mod-sessions |
 | Accounts | Each provider's sign-in and its subscription's usage limits (ADR-0017) | DOC-mod-accounts |
-| Settings | The language and the appearance | DOC-mod-settings |
+| Settings | The language, the appearance and whether tooltips show | DOC-mod-settings |
 
 - **Opening**: a click on a session shows it; New session opens a session page in the selected workspace's folder; a row of a tree or list dragged into the area opens there, filling it, beside a panel near its edge, or in its place in its middle, as do files and folders dragged from the Finder. The archived sessions', accounts' and settings' panels show once each; opening one again focuses it.
 - **Arranging**: a panel's title drags it beside another or swaps the two; the dividers between panels drag, or take focus and move with the arrow keys. The app's own drags use the pointer's own events, never a drag of the system's (L-0003).
@@ -68,6 +68,7 @@ The main process's menus and questions show in the page, in the app's own look, 
 
 - An e-ink look after the Ink Paper theme on the Flexoki palette: ink on a warm grey paper in light appearance and pale ink on dark paper in dark, with a faint grain on the paper, sheets drawn as the paper itself under a dashed line and no shadows. Colour is kept for what it means: states, additions and deletions, warnings and the accent. (DOC-mod-ui)
 - Scrollbars are macOS's own, in the paper's ink: a thumb in the dashed line's ink with no strip beneath it, also while hovered or dragged. (DOC-mod-app)
+- Tooltips are off at first and turn on in the settings: then they are the app's own, drawn in the page as a sheet of the paper under a dashed line, after the pointer rests half a second on a control or as the keyboard focuses it (ADR-0021). (DOC-mod-ui, DOC-mod-settings)
 - The appearance follows the Appearance setting: System, which follows macOS, Light or Dark.
 - The system's fonts, SF Pro and SF Mono, and Lucide's icons (ADR-0007).
 - Messages and Markdown files render with the same renderer, with math and highlighted code (ADR-0010, ADR-0018).

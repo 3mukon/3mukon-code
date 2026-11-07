@@ -31,6 +31,7 @@ import { useSettings } from '../../settings/renderer/use-settings';
 import { TerminalPanel } from '../../terminal/renderer/terminal-panel';
 import { TerminalViews } from '../../terminal/renderer/terminal-views';
 import { Gear } from '../../ui/renderer/icons';
+import { TooltipHost } from '../../ui/renderer/tooltip';
 import { useWorkspaces } from '../../workspaces/renderer/use-workspaces';
 import type { TreeItem } from '../../workspaces/renderer/workspace-tree';
 import { WorkspacesSection } from '../../workspaces/renderer/workspaces-section';
@@ -465,6 +466,7 @@ export function App({ bridge }: { bridge: Bridge }) {
         />
       </main>
       <PromptHost bridge={bridge.prompts} />
+      <TooltipHost enabled={settings.settings.tooltips} />
     </div>
   );
 }

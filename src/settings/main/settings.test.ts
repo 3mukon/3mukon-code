@@ -16,7 +16,9 @@ function folder(): string {
   return made;
 }
 
-function memory(start: AppSettings = { language: 'system', appearance: 'system' }) {
+function memory(
+  start: AppSettings = { language: 'system', appearance: 'system', tooltips: false },
+) {
   const saved: AppSettings[] = [];
   const storage: SettingsStorage = {
     load: () => start,
@@ -33,25 +35,41 @@ describe('Settings', () => {
     const stop = settings.onChange((current) => heard.push(current));
     settings.set({ appearance: 'dark' });
     settings.set({ appearance: 'dark' });
-    expect(settings.get()).toEqual({ language: 'system', appearance: 'dark' });
-    expect(saved).toEqual([{ language: 'system', appearance: 'dark' }]);
+    expect(settings.get()).toEqual({ language: 'system', appearance: 'dark', tooltips: false });
+    expect(saved).toEqual([{ language: 'system', appearance: 'dark', tooltips: false }]);
     expect(heard).toEqual(saved);
+    // The tooltips change too, though language and appearance stay as they are.
+    settings.set({ tooltips: true });
+    expect(heard.at(-1)).toEqual({ language: 'system', appearance: 'dark', tooltips: true });
     stop();
     settings.set({ language: 'zh-Hans' });
-    expect(heard).toHaveLength(1);
-    expect(saved.at(-1)).toEqual({ language: 'zh-Hans', appearance: 'dark' });
+    expect(heard).toHaveLength(2);
+    expect(saved.at(-1)).toEqual({ language: 'zh-Hans', appearance: 'dark', tooltips: true });
   });
 
   it('keeps the settings in settings.json, readable by the user alone, and starts from the defaults', () => {
     const data = folder();
-    expect(settingsStorage(data).load()).toEqual({ language: 'system', appearance: 'system' });
-    new Settings(settingsStorage(data)).set({ language: 'en', appearance: 'light' });
+    expect(settingsStorage(data).load()).toEqual({
+      language: 'system',
+      appearance: 'system',
+      tooltips: false,
+    });
+    new Settings(settingsStorage(data)).set({
+      language: 'en',
+      appearance: 'light',
+      tooltips: true,
+    });
     const file = join(data, 'settings.json');
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ language: 'en', appearance: 'light' });
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({
+      language: 'en',
+      appearance: 'light',
+      tooltips: true,
+    });
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(new Settings(settingsStorage(data)).get()).toEqual({
       language: 'en',
       appearance: 'light',
+      tooltips: true,
     });
   });
 
@@ -59,8 +77,16 @@ describe('Settings', () => {
     const data = folder();
     const file = join(data, 'settings.json');
     writeFileSync(file, JSON.stringify({ language: 'fr', appearance: 'dark' }));
-    expect(settingsStorage(data).load()).toEqual({ language: 'system', appearance: 'dark' });
+    expect(settingsStorage(data).load()).toEqual({
+      language: 'system',
+      appearance: 'dark',
+      tooltips: false,
+    });
     writeFileSync(file, 'not json');
-    expect(settingsStorage(data).load()).toEqual({ language: 'system', appearance: 'system' });
+    expect(settingsStorage(data).load()).toEqual({
+      language: 'system',
+      appearance: 'system',
+      tooltips: false,
+    });
   });
 });

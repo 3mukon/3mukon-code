@@ -1,5 +1,5 @@
 import ElectronStore from 'electron-store';
-import { settingsOf, type AppSettings } from '../shared/settings';
+import { sameSettings, settingsOf, type AppSettings } from '../shared/settings';
 
 export interface SettingsStorage {
   load(): AppSettings;
@@ -39,9 +39,7 @@ export class Settings {
   // Changes some of the settings, and saves them; a change to what they are already changes nothing.
   set(change: Partial<AppSettings>): void {
     const next = settingsOf({ ...this.current, ...change });
-    if (next.language === this.current.language && next.appearance === this.current.appearance) {
-      return;
-    }
+    if (sameSettings(next, this.current)) return;
     this.current = next;
     this.storage.save(next);
     for (const listener of this.listeners) listener(next);
