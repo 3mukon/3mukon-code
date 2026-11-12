@@ -1,15 +1,64 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n, switchLanguage } from '../../i18n/renderer/i18n';
-import { initialSessionState, type SessionState } from '../shared/session-state';
+import { initialSessionState, type SessionState, type TimelineItem } from '../shared/session-state';
+import * as diffs from './diff-view';
 import { Timeline } from './timeline';
 
 beforeAll(() => {
   initI18n(['en-US']);
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe('Timeline', () => {
+  it('keeps unchanged file entries while a reply streams, and updates a file when its diff changes', () => {
+    const counts = vi.spyOn(diffs, 'linesChanged');
+    const history: TimelineItem[] = Array.from({ length: 50 }, (_, index) => ({
+      type: 'file-change',
+      change: {
+        id: `f${String(index)}`,
+        path: `src/file-${String(index)}.ts`,
+        kind: 'update',
+        diff: '--- a/file\n+++ b/file\n@@ -1 +1 @@\n-old\n+new\n',
+      },
+    }));
+    const state = (text: string, items = history): SessionState => ({
+      ...initialSessionState(),
+      timeline: [...items, { type: 'message', id: 'reply', role: 'agent', text }],
+    });
+    const { rerender } = render(<Timeline state={state('Reading')} agent="Codex" />);
+    expect(counts).toHaveBeenCalledTimes(50);
+    rerender(<Timeline state={state('Reading the files')} agent="Codex" />);
+    expect(screen.getByText('Reading the files')).toBeDefined();
+    expect(counts).toHaveBeenCalledTimes(50);
+    // A request renderer made afresh, as the app makes one each time it renders the page, renders no
+    // entry but the requests again.
+    for (let pass = 0; pass < 2; pass += 1) {
+      rerender(
+        <Timeline state={state('Reading the files')} agent="Codex" renderRequest={() => null} />,
+      );
+    }
+    expect(counts).toHaveBeenCalledTimes(50);
+
+    const changed: TimelineItem = {
+      type: 'file-change',
+      change: {
+        id: 'f0',
+        path: 'src/file-0.ts',
+        kind: 'update',
+        diff: '--- a/file\n+++ b/file\n@@ -1 +1,2 @@\n-old\n+new\n+more\n',
+      },
+    };
+    rerender(
+      <Timeline state={state('Reading the files', [changed, ...history.slice(1)])} agent="Codex" />,
+    );
+    expect(counts).toHaveBeenCalledTimes(51);
+    expect(screen.getByRole('button', { name: /src\/file-0\.ts/ }).textContent).toContain('+2−1');
+  });
+
   it('shows the prompt, the agent’s Markdown, tool calls and changes as entries, requests, errors and tasks', () => {
     const state: SessionState = {
       ...initialSessionState(),

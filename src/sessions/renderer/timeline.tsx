@@ -1,6 +1,6 @@
+import { memo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StatusDot, type Status } from '../../ui/renderer/status-dot';
-import type { ReactNode } from 'react';
 import type { MessageImage, Task } from '../shared/events';
 import {
   openRequests,
@@ -116,18 +116,30 @@ const taskLook: Record<Task['status'], string> = {
   completed: 'text-faint line-through decoration-line',
 };
 
-function Item({
-  item,
-  agent,
-  oldestWaiting,
-  renderRequest,
-}: {
+interface ItemProps {
   item: TimelineItem;
   agent: string;
   // The id of the session's oldest waiting request, if any.
   oldestWaiting: string | undefined;
   renderRequest?: RenderRequest;
-}) {
+}
+
+// Whether an entry renders as it did: its item, which streamed events keep as the same object while
+// another entry changes, and its agent are the same, and for a request also its renderer and whether
+// it is the oldest waiting. The renderer and the oldest waiting reach only requests, so a renderer
+// made afresh by whoever renders the page, or a request answered, renders no other entry again; a
+// change of language reaches every entry all the same, through its translation.
+function rendersAsBefore(before: ItemProps, after: ItemProps): boolean {
+  if (before.item !== after.item || before.agent !== after.agent) return false;
+  if (after.item.type !== 'approval' && after.item.type !== 'question') return true;
+  return (
+    before.renderRequest === after.renderRequest &&
+    (before.oldestWaiting === after.item.request.id) ===
+      (after.oldestWaiting === after.item.request.id)
+  );
+}
+
+const Item = memo(function Item({ item, agent, oldestWaiting, renderRequest }: ItemProps) {
   const { t } = useTranslation();
   switch (item.type) {
     case 'message':
@@ -146,7 +158,7 @@ function Item({
         </p>
       );
   }
-}
+}, rendersAsBefore);
 
 function keyOf(item: TimelineItem, index: number): string {
   switch (item.type) {
