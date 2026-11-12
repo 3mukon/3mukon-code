@@ -16,6 +16,7 @@ interface QuestionDialogProps {
 export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const answered = useRef(false);
+  const active = useRef(false);
   const message = useId();
   const detail = useId();
 
@@ -28,9 +29,11 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
   useLayoutEffect(() => {
     const element = dialog.current;
     if (element === null) return;
+    active.current = true;
     element.showModal();
     element.querySelector<HTMLElement>('[data-default]')?.focus();
     return () => {
+      active.current = false;
       element.close();
     };
   }, []);
@@ -47,7 +50,10 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
         event.preventDefault();
         answer(question.cancelId);
       }}
-      onClose={() => {
+      onClose={(event) => {
+        // StrictMode closes and reopens the dialog while replaying its effect. The browser queues
+        // close, so cleanup's event can arrive after it is open again; that is not a user answer.
+        if (!active.current || event.currentTarget.open) return;
         answer(question.cancelId);
       }}
       className="mx-auto mt-12 w-90 max-w-[calc(100vw-32px)] rounded-md border border-dashed border-menu-line paper p-4 text-ink backdrop:bg-scrim/40"

@@ -1,9 +1,14 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Question } from '../shared/prompts';
 import { QuestionDialog } from './question';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 const close: Question = {
   message: 'Do you want to save the changes you made to “notes.ts”?',
@@ -47,6 +52,61 @@ describe('QuestionDialog', () => {
     expect(onAnswer.mock.calls).toEqual([['discard']]);
   });
 
+  it('keeps a reopened question waiting when StrictMode cleanup’s queued close event arrives', () => {
+    vi.useFakeTimers();
+    // Chromium queues close as a task; happy-dom dispatches it synchronously. Match the browser's
+    // ordering so StrictMode can reopen the same element before cleanup's close event arrives.
+    vi.spyOn(HTMLDialogElement.prototype, 'close').mockImplementation(function (
+      this: HTMLDialogElement,
+    ) {
+      if (!this.open) return;
+      this.removeAttribute('open');
+      setTimeout(() => {
+        this.dispatchEvent(new Event('close'));
+      });
+    });
+    const onAnswer = vi.fn();
+    const { rerender } = render(
+      <StrictMode>
+        <QuestionDialog question={close} onAnswer={onAnswer} />
+      </StrictMode>,
+    );
+    const dialog = screen.getByRole<HTMLDialogElement>('alertdialog');
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(dialog.open).toBe(true);
+    expect(onAnswer).not.toHaveBeenCalled();
+
+    // An unrelated update while a program is running must not answer the question either.
+    rerender(
+      <StrictMode>
+        <QuestionDialog
+          question={close}
+          onAnswer={(id) => {
+            onAnswer(id);
+          }}
+        />
+      </StrictMode>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Don’t Save' }));
+    expect(onAnswer.mock.calls).toEqual([['discard']]);
+  });
+
+  it('keeps effect cleanup distinct from a user answer when close is synchronous', () => {
+    const onAnswer = vi.fn();
+    render(
+      <StrictMode>
+        <QuestionDialog question={close} onAnswer={onAnswer} />
+      </StrictMode>,
+    );
+    expect(onAnswer).not.toHaveBeenCalled();
+    act(() => {
+      screen.getByRole<HTMLDialogElement>('alertdialog').close();
+    });
+    expect(onAnswer.mock.calls).toEqual([['cancel']]);
+  });
+
   it('gives the cancel answer with Escape, and when the dialog closes without an answer', () => {
     const escaped = vi.fn();
     const { unmount } = render(<QuestionDialog question={close} onAnswer={escaped} />);
@@ -58,7 +118,9 @@ describe('QuestionDialog', () => {
 
     const closed = vi.fn();
     render(<QuestionDialog question={close} onAnswer={closed} />);
-    fireEvent(screen.getByRole('alertdialog'), new Event('close'));
+    act(() => {
+      screen.getByRole<HTMLDialogElement>('alertdialog').close();
+    });
     expect(closed.mock.calls).toEqual([['cancel']]);
   });
 });

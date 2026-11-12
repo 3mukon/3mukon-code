@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import { initialSessionState } from '../../sessions/shared/session-state';
@@ -112,6 +113,37 @@ async function renderApp(bridge = fakeBridge()) {
     await Promise.resolve();
   });
 }
+
+it('keeps one terminal subscription through StrictMode replay and releases it when the shell unmounts', async () => {
+  const bridge = fakeBridge();
+  const outputs = new Set<Parameters<Bridge['terminal']['onOutput']>[0]>();
+  const exits = new Set<Parameters<Bridge['terminal']['onExit']>[0]>();
+  bridge.terminal.onOutput = (listener) => {
+    outputs.add(listener);
+    return () => {
+      outputs.delete(listener);
+    };
+  };
+  bridge.terminal.onExit = (listener) => {
+    exits.add(listener);
+    return () => {
+      exits.delete(listener);
+    };
+  };
+  await act(async () => {
+    render(
+      <StrictMode>
+        <App bridge={bridge} />
+      </StrictMode>,
+    );
+    await Promise.resolve();
+  });
+  expect(outputs.size).toBe(1);
+  expect(exits.size).toBe(1);
+  cleanup();
+  expect(outputs.size).toBe(0);
+  expect(exits.size).toBe(0);
+});
 
 // The frame that ends a drag, after which what it dropped opens.
 const dropped = () =>

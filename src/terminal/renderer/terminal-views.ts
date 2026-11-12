@@ -37,21 +37,38 @@ export class TerminalViews {
   constructor(
     private readonly bridge: TerminalBridge,
     private readonly exitNote: ExitNote,
-  ) {
-    bridge.onOutput((id, data) => {
+  ) {}
+
+  // Listen only while the owning shell's effect is connected. Construction is pure: React can
+  // discard a state initializer's instance, which must not remain subscribed and buffer output.
+  connect(): () => void {
+    const stopOutput = this.bridge.onOutput((id, data) => {
       const view = this.views.get(id);
       if (view !== undefined) write(view, data);
-      else this.early.set(id, [...(this.early.get(id) ?? []), data]);
+      else {
+        const waiting = this.early.get(id);
+        if (waiting === undefined) this.early.set(id, [data]);
+        else waiting.push(data);
+      }
     });
-    bridge.onExit((id, code) => {
+    const stopExit = this.bridge.onExit((id, code) => {
       const view = this.views.get(id);
       if (view !== undefined) this.writeExit(view, code);
       else this.exits.set(id, code);
     });
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    const appearance = matchMedia('(prefers-color-scheme: dark)');
+    const updateTheme = () => {
+      if (this.views.size === 0) return;
       const theme = themeFromTokens();
       for (const view of this.views.values()) view.terminal.options.theme = theme;
-    });
+    };
+    appearance.addEventListener('change', updateTheme);
+    updateTheme();
+    return () => {
+      stopOutput();
+      stopExit();
+      appearance.removeEventListener('change', updateTheme);
+    };
   }
 
   // Shows the terminal in the host element, the emulator drawing in it from now on; returns a function

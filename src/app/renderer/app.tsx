@@ -79,6 +79,7 @@ export function App({ bridge }: { bridge: Bridge }) {
   const [terminalViews] = useState(
     () => new TerminalViews(bridge.terminal, (code) => i18n.t('terminal.exited', { code })),
   );
+  useEffect(() => terminalViews.connect(), [terminalViews]);
   const panels = usePanels();
   const area = useRef<PanelAreaHandle>(null);
   // The file editors, whose rendered Markdown opens the files it links to in panels.
