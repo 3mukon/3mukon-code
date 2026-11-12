@@ -587,29 +587,31 @@ function withDefault(options: SelectOption[], defaultLabel: string): SelectOptio
 }
 
 // How much of the model's context window the conversation takes, near the end of the divider above
-// the composer: the tokens in use against the window's size, with their share of it, such as
-// 25,000 / 200,000 (12.5%), where the provider gives the size, and the tokens alone otherwise; the
-// tooltip says what they are.
+// the composer: the tokens in use against the window's size, each in whole thousands, with their share
+// of it, such as 25k / 200k (12.5%), where the provider gives the size, and the tokens alone
+// otherwise; the tooltip says what they are, in exact numbers.
 function ContextUsage({ used, size }: { used: number; size: number | null }) {
   const { t, i18n } = useTranslation();
   const count = new Intl.NumberFormat(i18n.language);
+  const thousands = (tokens: number) => `${count.format(Math.round(tokens / 1000))}k`;
   const percent = new Intl.NumberFormat(i18n.language, {
     style: 'percent',
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
   });
-  const counts =
-    size === null || size === 0
-      ? null
-      : { used: count.format(used), size: count.format(size), share: percent.format(used / size) };
+  const share = size === null || size === 0 ? null : percent.format(used / size);
   const label =
-    counts === null
-      ? t('sessions.page.contextTokens', { tokens: count.format(used) })
-      : t('sessions.page.context', counts);
+    size === null || share === null
+      ? t('sessions.page.contextTokens', { tokens: thousands(used) })
+      : t('sessions.page.context', { used: thousands(used), size: thousands(size), share });
   const detail =
-    counts === null
+    size === null || share === null
       ? t('sessions.page.contextTokens', { tokens: count.format(used) })
-      : t('sessions.page.contextDetail', counts);
+      : t('sessions.page.contextDetail', {
+          used: count.format(used),
+          size: count.format(size),
+          share,
+        });
   return (
     <span title={detail} aria-label={detail} className="shrink-0 text-[11px] leading-4 text-faint">
       {label}

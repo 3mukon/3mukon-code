@@ -150,7 +150,7 @@ describe('SessionPage', () => {
     await settle();
     emit(2, { type: 'context', used: 30_000, size: 200_000 });
     // The notice comes just before the context in use, near the divider's end.
-    const context = screen.getByText('30,000 / 200,000 (15.0%)');
+    const context = screen.getByText('30k / 200k (15.0%)');
     expect(screen.getByText('Nearly used up').nextElementSibling).toBe(context);
   });
 
@@ -814,12 +814,15 @@ describe('SessionPage', () => {
     ]);
     // How much of the context the conversation takes shows at the composer's end.
     emit(2, { type: 'context', used: 30_000, size: 200_000 });
-    expect(screen.getByText('30,000 / 200,000 (15.0%)').title).toBe(
+    // In whole thousands, with the exact numbers in its tooltip.
+    expect(screen.getByText('30k / 200k (15.0%)').title).toBe(
       '30,000 of 200,000 tokens of the context window in use (15.0%)',
     );
+    emit(3, { type: 'context', used: 1_234_400, size: null });
+    expect(screen.getByText('1,234k tokens of context').title).toBe('1,234,400 tokens of context');
     // The turn ends; the next message goes to the session.
-    emit(3, { type: 'message', id: 'm2', role: 'agent', text: 'Done: **all green**.' });
-    emit(4, { type: 'turn-ended', outcome: 'completed' });
+    emit(4, { type: 'message', id: 'm2', role: 'agent', text: 'Done: **all green**.' });
+    emit(5, { type: 'turn-ended', outcome: 'completed' });
     expect(screen.getByText('all green').tagName).toBe('STRONG');
     expect(screen.queryByText('Working')).toBeNull();
     fireEvent.change(composer(), { target: { value: 'Thanks' } });
