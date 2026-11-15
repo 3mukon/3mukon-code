@@ -2,14 +2,14 @@
 id: ADR-0012
 type: adr
 title: Let Codex ask through its own question tool, and keep serving the app's MCP toolset, without tools, for the tools to come
-status: accepted
+status: superseded
 visibility: public
 date: 2026-10-31
 summary: Codex 0.164.0 offers its async question tool in its default mode, so the toolset's question tool goes and Codex asks through its own; the toolset keeps its design, a stateless streamable HTTP server in the main process on the loopback interface with a credential per session, and Codex's sessions keep connecting to it, now listing no tools
 scope: ["src/toolset/**", "src/sessions/main/provider.ts", "src/providers/codex/**"]
 tags: []
 supersedes: [ADR-0009]
-superseded_by:
+superseded_by: ADR-0023
 ---
 
 ## Context

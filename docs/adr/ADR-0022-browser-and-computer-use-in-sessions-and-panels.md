@@ -2,14 +2,14 @@
 id: ADR-0022
 type: adr
 title: Show agents' browser and computer use in their sessions and in panels, and ask once for each operation beyond a session's reach
-status: accepted
+status: superseded
 visibility: public
 date: 2026-11-12
 summary: What agents do in browsers and other applications shows in their session's activity and in a line above its composer, a page or another application's window opens as a panel beside the session only when presented and without the focus, foreground control shows a small floating control with Stop, and each operation beyond what a session reaches unasked asks once in place with the approvals' own answers, because the user often works in the same window or on the same Mac and must see, grant and stop what acts as them; a window of its own for automation, a menu bar indicator, approvals for each action or for a whole task, and marks on presented panels were rejected
 scope: ["src/sessions/renderer/**", "src/approvals/renderer/**", "src/panels/renderer/**", "src/browser/renderer/**", "src/computer/renderer/**", "src/settings/renderer/**", "src/app/renderer/**", "src/ui/renderer/**", "src/i18n/catalogs/**"]
 tags: []
 supersedes: []
-superseded_by:
+superseded_by: ADR-0027
 ---
 
 ## Context
