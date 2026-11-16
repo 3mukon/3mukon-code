@@ -154,7 +154,7 @@ export type PresentationRefusal =
   // The presentation belongs to another session.
   | 'wrong-owner'
   // A command other than a present, for a presentation the page does not have: it never showed it, or
-  // forgot it as one of the oldest with no panel open.
+  // forgot it, with no panel open, as one of those that changed longest ago.
   | 'presentation-unknown'
   // The command's version is not the presentation's: the presentation changed after its agent last saw
   // it. The refusal's state is where it stands now, for the agent to try again from.

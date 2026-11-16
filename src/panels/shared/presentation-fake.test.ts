@@ -126,6 +126,18 @@ const opened = (answer: PresentationAnswer) =>
 
 const refusal = (answer: PresentationAnswer) => (answer.kind === 'refused' ? answer.code : null);
 
+// As many presentations as a page keeps.
+const KEPT_PRESENTATIONS = 512;
+
+// Brings a page that has the presentations given to as many as it keeps, by opening and closing
+// others, filler-1 first: the next presentation to open makes it forget one.
+function fillPage({ send, present, close }: ReturnType<typeof setUp>, has: number): void {
+  for (let index = 1; index <= KEPT_PRESENTATIONS - has; index += 1) {
+    send(present(`filler-${String(index)}`));
+    send(close(`filler-${String(index)}`));
+  }
+}
+
 describe('the fake presentation window, which answers as the window does', () => {
   it("starts a page with a snapshot of its epoch and the sessions' panels, having no presentation, and sends another as those panels change", () => {
     const { window, sent } = setUp();
@@ -437,6 +449,73 @@ describe('the fake presentation window, which answers as the window does', () =>
     });
     expect(refusal(answerTo(older.commandId))).toBe('presentation-changed');
     expect(opened(send(update('presentation-1', [markdown, page])))).toEqual([false, false]);
+  });
+
+  it('keeps a presentation that another takes the place of during the drop, at the limit of what the page keeps, until a present for it that waited behind is refused', () => {
+    const test = setUp();
+    const { window, answerTo, send, present, update } = test;
+    send(present('presentation-1', [markdown, table]));
+    fillPage(test, 1);
+    window.setRoom(owner, false);
+    const replacing = present('presentation-2', [page]);
+    const older = present('presentation-1', [markdown, table]);
+    window.startDrag();
+    window.receive(replacing);
+    window.receive(older);
+    window.close('presentation-1', [1]);
+    window.endDrag();
+    expect(opened(answerTo(replacing.commandId))).toEqual([true]);
+    expect(answerTo(older.commandId)).toMatchObject({
+      kind: 'refused',
+      code: 'presentation-changed',
+      state: { presentationId: 'presentation-1', version: 3, boxes: [null, null] },
+    });
+    expect(applied(send(update('presentation-1', [markdown, page]))).state).toMatchObject({
+      version: 4,
+      boxes: [null, null],
+    });
+    expect(refusal(send(update('filler-1')))).toBe('presentation-unknown');
+  });
+
+  it('keeps a presentation a command waiting for the drop is for until the window takes that command, though it changed longest ago of those the page keeps', () => {
+    const test = setUp();
+    const { window, answerTo, send, present, update } = test;
+    send(present('presentation-1', [markdown, table]));
+    fillPage(test, 1);
+    const opening = present('presentation-2');
+    const older = present('presentation-1', [markdown, table]);
+    window.startDrag();
+    window.receive(opening);
+    window.receive(older);
+    window.close('presentation-1');
+    for (let index = 1; index < KEPT_PRESENTATIONS; index += 1) {
+      send(update(`filler-${String(index)}`));
+    }
+    window.endDrag();
+    expect(opened(answerTo(opening.commandId))).toEqual([true]);
+    expect(answerTo(older.commandId)).toMatchObject({
+      kind: 'refused',
+      code: 'presentation-changed',
+      state: { presentationId: 'presentation-1', version: 2, boxes: [null, null] },
+    });
+    expect(refusal(send(update('filler-1')))).toBe('presentation-unknown');
+  });
+
+  it('forgets first the presentations that changed longest ago, so one the user has just closed is still there to refuse a present sent before the close', () => {
+    const test = setUp();
+    const { window, send, present, update } = test;
+    send(present('presentation-1', [markdown, table]));
+    fillPage(test, 1);
+    const opening = present('presentation-2');
+    const older = present('presentation-1', [markdown, table]);
+    window.close('presentation-1');
+    expect(opened(send(opening))).toEqual([true]);
+    expect(send(older)).toMatchObject({
+      kind: 'refused',
+      code: 'presentation-changed',
+      state: { presentationId: 'presentation-1', version: 2, boxes: [null, null] },
+    });
+    expect(refusal(send(update('filler-1')))).toBe('presentation-unknown');
   });
 
   it("starts a new page on a reload, which refuses the old page's commands and counts versions on from main's", () => {

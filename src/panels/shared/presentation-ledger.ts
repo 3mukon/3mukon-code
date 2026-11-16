@@ -55,9 +55,10 @@ export type Step =
   | { kind: 'wait' };
 
 // A presentation the page has, from the first command that shows it on this page until the page
-// forgets it as one of the oldest with no panel open: whose it is, its title and version, and what
-// each of its panels shows and whether it is open. Its agent's close, or another presentation taking
-// its place, closes its panels as the user's close does, so the page goes on taking its commands.
+// forgets it, with no panel open, as one of those that changed longest ago: whose it is, its title
+// and version, and what each of its panels shows and whether it is open. Its agent's close, or
+// another presentation taking its place, closes its panels as the user's close does, so the page
+// goes on taking its commands.
 export interface Presented {
   owner: string;
   title: string;
@@ -67,16 +68,19 @@ export interface Presented {
 
 type Item = Presented['items'][number];
 
-// How many answers the page keeps for repeated command IDs, and how many presentations with no open
-// panel it keeps, the oldest going first, never one a command waiting for the drop is for. Main sends
-// one command for a presentation at a time and waits seconds for each answer, so neither runs out
-// while it matters.
+// How many answers the page keeps for repeated command IDs, and how many presentations it keeps,
+// forgetting first, of those with no panel open, the ones that changed longest ago, and never one a
+// command waiting for the drop is for. Main sends one command for a presentation at a time and waits
+// seconds for each answer, so neither runs out while it matters: a presentation that changed while a
+// command for it was on its way is among the last the page would forget.
 const KEPT_ANSWERS = 256;
 const KEPT_PRESENTATIONS = 512;
 
 export class PresentationLedger {
   // In the order they were presented, the latest last.
   private readonly kept = new Map<string, Presented>();
+  // The same, in the order they last changed, the latest last.
+  private readonly changes = new Set<string>();
   private readonly answers = new Map<string, { command: string; answer: PresentationAnswer }>();
   private held: { command: PresentationCommand; text: string; at: number }[] = [];
 
@@ -117,7 +121,8 @@ export class PresentationLedger {
   // else cancels the command, which it stays. During a drag a command that would place panels waits
   // for the drop, a repeat of it waiting with it, and the same ID with other content is refused at
   // once; an update, which places none, goes ahead. The rules check any other command, refusing it at
-  // once or giving the plan for the layout.
+  // once or giving the plan for the layout, and so a command that waited, as it comes again once the
+  // drag is over.
   receive(message: PresentationHostMessage, area: AreaFacts, now: number): Step {
     if (message.kind === 'cancel') return { kind: 'answer', answer: this.cancel(message) };
     const text = json(message);
@@ -131,12 +136,12 @@ export class PresentationLedger {
     }
     const held = this.held.find(({ command }) => command.commandId === message.commandId);
     if (held !== undefined) {
-      return held.text === text
-        ? { kind: 'wait' }
-        : {
-            kind: 'answer',
-            answer: this.refusal(message, 'command-conflict'),
-          };
+      if (held.text !== text) {
+        return { kind: 'answer', answer: this.refusal(message, 'command-conflict') };
+      }
+      if (area.dragging) return { kind: 'wait' };
+      this.held = this.held.filter((waiting) => waiting !== held);
+      return this.check(message, area);
     }
     if (area.dragging && message.kind !== 'update') {
       this.held.push({ command: message, text, at: now });
@@ -145,12 +150,11 @@ export class PresentationLedger {
     return this.check(message, area);
   }
 
-  // The drop: the commands that waited for it, in the order they came, which the window receives
-  // again, one by one, once the drag is over.
+  // The drop: the commands waiting for it, in the order they came, which the window receives again,
+  // one by one, as the drag ends. Each waits until the window takes it, so the page keeps its
+  // presentation while the commands before it apply.
   release(): PresentationCommand[] {
-    const held = this.held.map(({ command }) => command);
-    this.held = [];
-    return held;
+    return this.held.map(({ command }) => command);
   }
 
   // Time passes: the commands that have waited as long as the window holds one are refused as busy.
@@ -176,8 +180,7 @@ export class PresentationLedger {
     };
     // A present makes it its session's latest presentation; other commands leave its turn.
     if (command.kind === 'present') this.kept.delete(id);
-    this.kept.set(id, after);
-    this.forgetOldPresentations();
+    this.keep(id, after);
     const answer: PresentationAnswer = {
       kind: 'applied',
       commandId: command.commandId,
@@ -279,9 +282,17 @@ export class PresentationLedger {
   // report main must hear: the presentation's latest state.
   private change(id: string, changed: Presented): PresentationReport {
     const after = { ...changed, version: changed.version + 1 };
-    this.kept.set(id, after);
-    this.forgetOldPresentations();
+    this.keep(id, after);
     return { kind: 'changed', epoch: this.epoch, state: this.stateOf(id, after) };
+  }
+
+  // Keeps a presentation's state after a change, its latest, then forgets those past what the page
+  // keeps.
+  private keep(id: string, presented: Presented): void {
+    this.kept.set(id, presented);
+    this.changes.delete(id);
+    this.changes.add(id);
+    this.forgetOldPresentations();
   }
 
   private stateOf(id: string, kept: Presented): PresentationState {
@@ -348,9 +359,13 @@ export class PresentationLedger {
 
   private forgetOldPresentations(): void {
     const waiting = new Set(this.held.map(({ command }) => command.presentationId));
-    for (const [id, kept] of this.kept) {
+    for (const id of this.changes) {
       if (this.kept.size <= KEPT_PRESENTATIONS) return;
-      if (openItems(kept).length === 0 && !waiting.has(id)) this.kept.delete(id);
+      const kept = this.kept.get(id);
+      if (kept !== undefined && openItems(kept).length === 0 && !waiting.has(id)) {
+        this.kept.delete(id);
+        this.changes.delete(id);
+      }
     }
   }
 }
