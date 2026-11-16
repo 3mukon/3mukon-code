@@ -47,12 +47,30 @@ export function isolatedEnvironment(folder: string): Record<string, string> {
 }
 
 // Launches the built app on the given data folder in the isolated environment, with any further
-// switches, such as the language's.
+// switches, such as the language's. Every smoke test launches the app through this function or
+// `launchWith`, which lay a shield over its windows, even a test that only clicks, since a click of the
+// Mac's own would otherwise reach it too; the lint refuses Playwright's launcher anywhere else in the
+// smoke tests (L-0004).
 export function launch(data: string, ...args: string[]): Promise<ElectronApplication> {
+  return launchWith(data, { args });
+}
+
+// What a test can add to a launch: further switches; variables added to the isolated environment,
+// such as those that send a provider's requests to a test's own service; and `colorScheme: null`, for
+// a page that follows macOS's appearance as the app sets it, which Playwright otherwise holds at light.
+export interface LaunchOptions {
+  args?: readonly string[];
+  env?: Readonly<Record<string, string>>;
+  colorScheme?: null;
+}
+
+// Launches the built app as `launch` does, with the given options.
+export function launchWith(data: string, options: LaunchOptions): Promise<ElectronApplication> {
   return shielded(
     electron.launch({
-      args: ['.', `--user-data-dir=${data}`, ...args],
-      env: isolatedEnvironment(data),
+      args: ['.', `--user-data-dir=${data}`, ...(options.args ?? [])],
+      env: { ...isolatedEnvironment(data), ...options.env },
+      ...(options.colorScheme === null ? { colorScheme: null } : {}),
     }),
   );
 }

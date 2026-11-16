@@ -4,11 +4,12 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { _electron as electron, expect, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import {
   answerQuestion,
   dataFolder,
   isolatedEnvironment,
+  launchWith,
   pickFolder,
   providerProcesses,
 } from './app';
@@ -80,11 +81,9 @@ const TOKEN = 'placeholder-gateway-token';
 // Codex gateway file, local.toml, whose provider sends Codex's requests to the given service with the
 // file's token. Codex's own settings turn its plugins off, for which it otherwise reaches chatgpt.com
 // and GitHub as it starts, and NO_PROXY keeps its requests to the service off any proxy the Mac sets,
-// which it otherwise sends even requests to 127.0.0.1 through. The test only clicks and types, so it
-// launches the app itself, as the settings' smoke test does (L-0004).
+// which it otherwise sends even requests to 127.0.0.1 through.
 function launchWithGateway(data: string, service: string) {
-  const env = isolatedEnvironment(data);
-  const codexHome = env.CODEX_HOME;
+  const codexHome = isolatedEnvironment(data).CODEX_HOME;
   if (codexHome === undefined) throw new Error('The isolated environment has no CODEX_HOME.');
   writeFileSync(join(codexHome, 'config.toml'), '[features]\nplugins = false\n');
   mkdirSync(join(codexHome, 'gateways'));
@@ -98,10 +97,7 @@ base_url = "${service}/v1"
 experimental_bearer_token = "${TOKEN}"
 `,
   );
-  return electron.launch({
-    args: ['.', `--user-data-dir=${data}`, '--lang=en-US'],
-    env: { ...env, NO_PROXY: '127.0.0.1' },
-  });
+  return launchWith(data, { args: ['--lang=en-US'], env: { NO_PROXY: '127.0.0.1' } });
 }
 
 test('a Codex session through a gateway gets its answers from the gateway’s service, with the gateway’s token, and stays on it, saying why, when switched to no gateway', async () => {

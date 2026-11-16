@@ -3,8 +3,8 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { _electron as electron, expect, test } from '@playwright/test';
-import { answerQuestion, dataFolder, isolatedEnvironment, pickFolder } from './app';
+import { expect, test } from '@playwright/test';
+import { answerQuestion, dataFolder, isolatedEnvironment, launchWith, pickFolder } from './app';
 
 // A model's service that fails every request to the model with an error 500, which the providers
 // retry, Claude Code's to /v1/messages and Codex's to /v1/responses, and answers anything else with a
@@ -64,17 +64,14 @@ plugins = false
 // their requests to the given service. Claude Code makes at most three retries, and sends nothing
 // without a key; this one is a placeholder that no service takes. Codex takes its provider from its
 // settings, and reaches the service directly: it otherwise sends even requests to 127.0.0.1 through
-// the Mac's proxy, where one is set, and retries without end while that proxy is down. The test only
-// clicks and types, so it launches the app itself, as the settings' smoke test does (L-0004).
+// the Mac's proxy, where one is set, and retries without end while that proxy is down.
 function launchAgainst(data: string, service: string) {
-  const env = isolatedEnvironment(data);
-  const codexHome = env.CODEX_HOME;
+  const codexHome = isolatedEnvironment(data).CODEX_HOME;
   if (codexHome === undefined) throw new Error('The isolated environment has no CODEX_HOME.');
   writeFileSync(join(codexHome, 'config.toml'), codexSettings(service));
-  return electron.launch({
-    args: ['.', `--user-data-dir=${data}`, '--lang=en-US'],
+  return launchWith(data, {
+    args: ['--lang=en-US'],
     env: {
-      ...env,
       ANTHROPIC_BASE_URL: service,
       ANTHROPIC_API_KEY: 'placeholder',
       CLAUDE_CODE_MAX_RETRIES: '3',

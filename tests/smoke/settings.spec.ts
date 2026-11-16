@@ -1,14 +1,9 @@
-import { _electron as electron, expect, test } from '@playwright/test';
-import { dataFolder, isolatedEnvironment } from './app';
+import { expect, test } from '@playwright/test';
+import { dataFolder, launchWith } from './app';
 
-// Launches the built app on the data folder in English in the isolated environment, its page
-// following macOS's appearance as the app sets it, which Playwright otherwise holds at light.
-const launch = (data: string) =>
-  electron.launch({
-    args: ['.', `--user-data-dir=${data}`, '--lang=en-US'],
-    env: isolatedEnvironment(data),
-    colorScheme: null,
-  });
+// Launches the built app on the data folder in English, its page following macOS's appearance as the
+// app sets it, which Playwright otherwise holds at light.
+const launch = (data: string) => launchWith(data, { args: ['--lang=en-US'], colorScheme: null });
 
 // Whether the window's page takes the dark appearance.
 const dark = () =>

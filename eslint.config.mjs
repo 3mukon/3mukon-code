@@ -42,6 +42,26 @@ export default defineConfig(
     },
   },
   {
+    // A smoke test launches the app only through tests/smoke/app.ts, whose launchers lay a shield
+    // over its windows that takes the Mac's own cursor, which would otherwise reach the page's
+    // pointer while someone uses the Mac (docs/lessons/L-0004).
+    files: ['tests/smoke/**/*.ts'],
+    ignores: ['tests/smoke/app.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['@playwright/test', 'playwright', 'playwright-core'].map((name) => ({
+            name,
+            importNames: ['_electron'],
+            message:
+              'Launch the app with launch() or launchWith() from tests/smoke/app.ts, which shield its windows from the Mac’s own cursor (L-0004).',
+          })),
+        },
+      ],
+    },
+  },
+  {
     // Plain JavaScript files, such as this one, belong to no TypeScript project.
     files: ['**/*.{js,mjs,cjs}'],
     extends: [tseslint.configs.disableTypeChecked],
