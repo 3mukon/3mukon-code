@@ -139,7 +139,7 @@ process.on('exit', () => {
   for (const folder of probeFolders) rmSync(folder, { recursive: true, force: true });
 });
 
-// The app-server's settings for the app's toolset (ADR-0012): its address, the variable that holds the
+// The app-server's settings for the app's toolset (ADR-0023): its address, the variable that holds the
 // session's credential, and its tools allowed without asking. Codex starts no thread while it cannot
 // reach the toolset.
 function toolsetLaunch(name: string, access: ToolsetAccess): Launch {
@@ -157,9 +157,9 @@ function toolsetLaunch(name: string, access: ToolsetAccess): Launch {
 }
 
 export interface CodexProviderOptions {
-  // The app's toolset, which every session connects to, so that the tools it gains reach Codex
-  // (ADR-0012).
-  toolset: Toolset;
+  // An already-bound fallback for direct adapter composition/tests. Hosted sessions receive their
+  // own bound factory in StartOptions.toolset (ADR-0023).
+  toolset?: Toolset;
   // The folder of gateway files; the gateways folder in Codex's home when left out.
   gatewaysDir?: string;
   // Starts an app-server; tests put a fake in place of the bundled Codex.
@@ -241,12 +241,16 @@ export function createCodexProvider({
   return {
     id: 'codex',
     start(options, onEvent) {
+      const bound = options.toolset ?? toolset;
+      if (!bound) return Promise.reject(new Error('A session needs its bound toolset.'));
       const settings = sessionSettings(options, gatewaysDir);
-      return CodexSession.open(settings, null, connect, toolset, link, onEvent);
+      return CodexSession.open(settings, null, connect, bound, link, onEvent);
     },
     resume(options, onEvent) {
+      const bound = options.toolset ?? toolset;
+      if (!bound) return Promise.reject(new Error('A session needs its bound toolset.'));
       const settings = sessionSettings(options, gatewaysDir);
-      return CodexSession.open(settings, options.sessionId, connect, toolset, link, onEvent);
+      return CodexSession.open(settings, options.sessionId, connect, bound, link, onEvent);
     },
     // Read through a short-lived app-server, which lists the thread's turns and reads its name without
     // loading it, the name being the title Codex keeps for the session, as a running session reports it.

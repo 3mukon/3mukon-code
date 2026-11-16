@@ -10,6 +10,12 @@ import type {
   SandboxLevel,
   SessionEvent,
 } from '../shared/events';
+import type {
+  AutomationPolicy,
+  EndReason,
+  PresentationNotice,
+  ProviderToolLink,
+} from '../shared/automation';
 
 // Receives a session's events in the order they happen.
 export type SessionEventListener = (event: SessionEvent) => void;
@@ -27,6 +33,8 @@ export interface StartOptions {
   effort?: ReasoningEffort;
   // workspace-write when left out.
   sandbox?: SandboxLevel;
+  // Already bound by the host before startup, independently of the provider's native session ID.
+  toolset?: Toolset;
 }
 
 export interface ResumeOptions extends StartOptions {
@@ -66,11 +74,13 @@ export interface Provider {
 export interface ProviderSession {
   // The provider's id for the session.
   readonly id: string;
+  // Set only by an adapter that sends host context to the model separately from the user's text.
+  readonly supportsHostContext?: true;
   // Sends the user's message and its images, and resolves once the provider has accepted it; the
   // message is reported at once. While no turn runs it starts one, whose progress and end arrive as
   // events; during a turn it goes to the running turn, or, where the provider cannot add it there, to a
   // turn of its own that follows, as the provider takes it.
-  send(text: string, images?: MessageImage[]): Promise<void>;
+  send(text: string, images?: MessageImage[], context?: HostTurnContext): Promise<void>;
   // Stops the running turn. Approvals and questions still open resolve as cancelled.
   interrupt(): Promise<void>;
   answerApproval(requestId: string, answer: ApprovalAnswer): Promise<void>;
@@ -92,9 +102,9 @@ export interface ProviderSession {
   close(): Promise<void>;
 }
 
-// The app's own MCP toolset, named 3mukon-code (ADR-0012). The app starts it once and hands it to the
-// adapters that give it to their sessions; an adapter opens it for each session it runs and gives the
-// session's provider process the address and the credential.
+// A factory already bound to one app session (ADR-0023). The host supplies it before the provider
+// has a native ID. Opening it rotates that owner's transport access; an adapter never chooses an
+// owner through model arguments or a provider-native session ID.
 export interface Toolset {
   // The name providers list it under.
   readonly name: string;
@@ -108,8 +118,30 @@ export interface ToolsetAccess {
   // The session's own credential, which the provider sends as a bearer credential. It is the app's,
   // opens only the toolset and only for this session, and is never a provider credential.
   readonly credential: string;
+  readonly generation?: number;
   // Ends the session's access.
   close(): void;
+}
+
+// App composition supplies the implementation; sessions imports no automation backend.
+export interface SessionAutomationHost {
+  bind(options: AutomationPolicy & { id: string; cwd: string }): Promise<SessionAutomation>;
+}
+export interface SessionAutomation {
+  readonly toolset: Toolset;
+  turnStarted(): void;
+  turnEnded(): void;
+  stop(reason?: EndReason): void;
+  setPolicy(policy: AutomationPolicy): void;
+  disconnect(): void;
+  close(remove?: boolean): Promise<void>;
+  // Accepted means a capable provider accepted the context with the turn, not that the renderer
+  // queued it. Old adapters and failed sends leave notices pending. User text stays unchanged.
+  prepareSend(): { context: HostTurnContext; accepted(): void; failed(): void };
+  linkResult(link: ProviderToolLink): void;
+}
+export interface HostTurnContext {
+  presentationNotices: readonly PresentationNotice[];
 }
 
 // A process a provider starts outside its sessions, such as one that lists its models or reads its

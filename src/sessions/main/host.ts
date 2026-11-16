@@ -28,7 +28,14 @@ import type {
   SessionSnapshot,
   SessionSummary,
 } from '../shared/sessions';
-import type { Provider, ProviderSession, SessionEventListener, StartOptions } from './provider';
+import type {
+  Provider,
+  ProviderSession,
+  SessionAutomation,
+  SessionAutomationHost,
+  SessionEventListener,
+  StartOptions,
+} from './provider';
 import type { SessionRecord, SessionRecords } from './records';
 import { searchWords } from '../shared/search';
 import { matchOf, memoryTextStorage, textOf, type TextStorage } from './texts';
@@ -87,6 +94,7 @@ interface Hosted {
   runs: number;
   // The provider's session, from the session's latest start or resume.
   session?: ProviderSession;
+  automation?: SessionAutomation;
   // The read of a session of an earlier run from its provider's history, once it has begun.
   reading?: Promise<void>;
   // The window has asked for the session's snapshot in this run, so that the lists give the session
@@ -131,6 +139,7 @@ export class SessionHost {
     providers: readonly Provider[],
     records: SessionRecords,
     texts: TextStorage = memoryTextStorage(),
+    private readonly automation?: SessionAutomationHost,
   ) {
     this.providers = new Map(providers.map((provider) => [provider.id, provider]));
     this.records = records;
@@ -177,6 +186,7 @@ export class SessionHost {
   // Starts a session in a folder and resolves with the app's id for it once the provider has started
   // it. It rejects when the folder is not one, or the provider is not available or refuses.
   async start(providerId: ProviderId, options: StartOptions): Promise<string> {
+    if (this.isClosing()) throw new Error('The app is closing.');
     const provider = this.provider(providerId);
     if (!(await stat(options.cwd)).isDirectory()) {
       throw new Error('A session works in a folder.');
@@ -201,8 +211,23 @@ export class SessionHost {
     };
     this.sessions.set(hosted.id, hosted);
     try {
-      hosted.session = await provider.start(options, this.listener(hosted, false));
+      hosted.automation = await this.automation?.bind({
+        id: hosted.id,
+        cwd: hosted.cwd,
+        mode: hosted.chosen.mode,
+        sandbox: hosted.chosen.sandbox,
+      });
+      if (this.isClosing()) throw new Error('The app is closing.');
+      hosted.session = await provider.start(
+        { ...options, ...(hosted.automation ? { toolset: hosted.automation.toolset } : {}) },
+        this.listener(hosted, false),
+      );
+      if (this.isClosing()) {
+        await hosted.session.close();
+        throw new Error('The app is closing.');
+      }
     } catch (error) {
+      await hosted.automation?.close(true);
       this.sessions.delete(hosted.id);
       throw error;
     }
@@ -239,7 +264,23 @@ export class SessionHost {
   // Passes the user's message to the session's provider. Once the provider takes it, the session moves
   // up the list, and an archived one returns to the Sessions list.
   async send(id: string, text: string, images: MessageImage[] = []): Promise<void> {
-    await this.session(id).send(text, images);
+    const session = this.session(id);
+    const hostedBefore = this.sessions.get(id);
+    const wasRunning = hostedBefore?.state.turnRunning === true;
+    const prepared = hostedBefore?.automation?.prepareSend();
+    try {
+      if (prepared && session.supportsHostContext === true) {
+        await session.send(text, images, prepared.context);
+        prepared.accepted();
+      } else {
+        await session.send(text, images);
+        prepared?.failed();
+      }
+    } catch (error) {
+      prepared?.failed();
+      if (!wasRunning) hostedBefore?.automation?.turnEnded();
+      throw error;
+    }
     const hosted = this.sessions.get(id);
     if (hosted === undefined) return;
     hosted.activeAt = Date.now();
@@ -249,6 +290,7 @@ export class SessionHost {
   }
 
   interrupt(id: string): Promise<void> {
+    this.sessions.get(id)?.automation?.stop();
     return this.session(id).interrupt();
   }
 
@@ -264,8 +306,16 @@ export class SessionHost {
     this.recordAnswer(id, requestId, answer);
   }
 
-  setMode(id: string, mode: PermissionMode): Promise<void> {
-    return this.session(id).setMode(mode);
+  async setMode(id: string, mode: PermissionMode): Promise<void> {
+    const hosted = this.sessions.get(id);
+    const before = hosted && this.policy(hosted);
+    if (hosted && before) hosted.automation?.setPolicy({ ...before, mode });
+    try {
+      await this.session(id).setMode(mode);
+    } catch (error) {
+      if (hosted && before) hosted.automation?.setPolicy(before);
+      throw error;
+    }
   }
 
   setGateway(id: string, gateway: string | null): Promise<void> {
@@ -280,8 +330,16 @@ export class SessionHost {
     return this.session(id).setEffort(effort);
   }
 
-  setSandbox(id: string, sandbox: SandboxLevel): Promise<void> {
-    return this.session(id).setSandbox(sandbox);
+  async setSandbox(id: string, sandbox: SandboxLevel): Promise<void> {
+    const hosted = this.sessions.get(id);
+    const before = hosted && this.policy(hosted);
+    if (hosted && before) hosted.automation?.setPolicy({ ...before, sandbox });
+    try {
+      await this.session(id).setSandbox(sandbox);
+    } catch (error) {
+      if (hosted && before) hosted.automation?.setPolicy(before);
+      throw error;
+    }
   }
 
   // The session's state so far, or null for a session the host does not have. For a session of an
@@ -359,6 +417,7 @@ export class SessionHost {
     this.forgetText(id);
     this.notify();
     await this.close(hosted);
+    await hosted.automation?.close(true);
   }
 
   // Offers the session's menu, and does what the user chooses once they confirm where it asks:
@@ -414,6 +473,11 @@ export class SessionHost {
   // half-written.
   async closeAll(): Promise<void> {
     this.closing = true;
+    await Promise.allSettled(
+      [...this.sessions.values()].flatMap((hosted) =>
+        hosted.automation ? [hosted.automation.close()] : [],
+      ),
+    );
     const open = [...this.sessions.values()].filter(
       (hosted) => hosted.session !== undefined && !hosted.state.closed,
     );
@@ -500,6 +564,7 @@ export class SessionHost {
   }
 
   private async close(hosted: Hosted): Promise<void> {
+    await hosted.automation?.close();
     if (hosted.session !== undefined && !hosted.state.closed) await hosted.session.close();
   }
 
@@ -534,20 +599,38 @@ export class SessionHost {
       : settings;
     const { mode, gateway, model, effort, sandbox } = chosen;
     hosted.runs += 1;
-    const session = await provider.resume(
-      {
-        sessionId,
-        cwd: hosted.cwd,
-        mode,
-        sandbox,
-        ...(gateway === null ? {} : { gateway }),
-        ...(model === null ? {} : { model }),
-        ...(effort === null ? {} : { effort }),
-      },
-      this.listener(hosted, true),
-    );
+    hosted.automation = await this.automation?.bind({
+      id: hosted.id,
+      cwd: hosted.cwd,
+      mode,
+      sandbox,
+    });
+    if (this.closing || this.sessions.get(hosted.id) !== hosted) {
+      await hosted.automation?.close(true);
+      throw new Error('The session is no longer open.');
+    }
+    let session: ProviderSession;
+    try {
+      session = await provider.resume(
+        {
+          sessionId,
+          cwd: hosted.cwd,
+          mode,
+          sandbox,
+          ...(hosted.automation ? { toolset: hosted.automation.toolset } : {}),
+          ...(gateway === null ? {} : { gateway }),
+          ...(model === null ? {} : { model }),
+          ...(effort === null ? {} : { effort }),
+        },
+        this.listener(hosted, true),
+      );
+    } catch (error) {
+      hosted.automation?.disconnect();
+      throw error;
+    }
     // A session removed from the list while it resumed is closed again.
     if (this.sessions.get(hosted.id) !== hosted) {
+      await hosted.automation?.close(true);
       void session.close();
       throw new Error('The session is no longer on the list.');
     }
@@ -617,6 +700,11 @@ export class SessionHost {
   // A session moves up the list as a turn of it ends.
   private apply(hosted: Hosted, event: SessionEvent): void {
     hosted.state = applyEvent(hosted.state, event);
+    if (event.type === 'turn-started') hosted.automation?.turnStarted();
+    if (event.type === 'turn-ended') hosted.automation?.turnEnded();
+    if (event.type === 'mode' || event.type === 'settings')
+      hosted.automation?.setPolicy(this.policy(hosted));
+    if (event.type === 'closed') hosted.automation?.disconnect();
     hosted.seq += 1;
     if (event.type === 'turn-ended') hosted.activeAt = Date.now();
     for (const listener of this.eventListeners) listener(hosted.id, hosted.seq, event);
@@ -627,6 +715,17 @@ export class SessionHost {
       this.ending.get(hosted.id)?.();
       this.ending.delete(hosted.id);
     }
+  }
+
+  private isClosing(): boolean {
+    return this.closing;
+  }
+
+  private policy(hosted: Hosted): { mode: PermissionMode; sandbox: SandboxLevel } {
+    return {
+      mode: hosted.state.mode ?? hosted.chosen.mode,
+      sandbox: hosted.state.sandbox ?? hosted.chosen.sandbox,
+    };
   }
 
   // Keeps the text of the session's messages as they are now, once the provider has started it and

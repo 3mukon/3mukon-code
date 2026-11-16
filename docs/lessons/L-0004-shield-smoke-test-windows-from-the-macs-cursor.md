@@ -35,6 +35,13 @@ Playwright drives the page through the DevTools protocol and keeps it focused wi
 
 `launch()` in `tests/smoke/app.ts`, and so `withApp()`, lays a shield over each window of the app it starts: a transparent `BaseWindow`, a child of the window, without a page and taking no focus, which takes the cursor and its clicks while Playwright's input still reaches the page. It shows as the window becomes ready to show, just before the app shows the window, so that the window never appears bare under a cursor at rest, and follows the window as it moves and resizes. It is a `BaseWindow` because a `BrowserWindow` would add a page that `firstWindow()` can return and a window to `BrowserWindow.getAllWindows()`. A test that hovers or drags launches the app through these functions; `tests/smoke/settings.spec.ts` launches it itself and only clicks.
 
+The shield's lifecycle also ends when either native window closes. During quit, the child may close
+first while the parent still emits a queued show/move/resize event. The launcher detaches those
+listeners and checks both native objects before accessing them; `tests/smoke/shield.spec.ts` exercises
+that order without weakening pointer isolation while the test runs. Otherwise an exception in a
+late callback opens Electron's modal error box and makes a successful UI assertion time out in
+cleanup.
+
 ## Occurrences
 
 - 2026-11-04: the Sessions list's read ahead and drags in `tests/smoke/sessions.spec.ts`, which also failed the check command now and then.

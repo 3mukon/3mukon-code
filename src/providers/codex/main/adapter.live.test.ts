@@ -83,7 +83,13 @@ function lastAgentText(state: SessionState): string {
 }
 
 it('runs turns in auto, writes a file, asks with Codex’s own question tool, switches mode, model, gateway and sandbox, and resumes', async () => {
-  const provider = createCodexProvider({ toolset, gatewaysDir });
+  const automation = await toolset.sessions.bind({
+    id: 'live-session',
+    cwd,
+    mode: 'auto',
+    sandbox: 'workspace-write',
+  });
+  const provider = createCodexProvider({ toolset: automation.toolset, gatewaysDir });
   expect(await provider.listGateways()).toEqual(['plain']);
   const models = await provider.listModels(null);
   // Small models keep the test cheap.

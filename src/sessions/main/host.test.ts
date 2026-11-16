@@ -60,6 +60,7 @@ function fakeProvider(id: ProviderId, fail = false) {
     sessions.push(calls);
     return Promise.resolve({
       id: sessionId,
+      supportsHostContext: true,
       ...calls,
       close: () => {
         closed.push(sessionId);
@@ -1063,4 +1064,142 @@ describe('SessionHost search', () => {
     expect(ui.sessionMenu).not.toHaveBeenCalled();
     expect(await host.act('gone', 'remove', ui)).toBeNull();
   });
+});
+
+function automationFixture() {
+  const accepted = vi.fn();
+  const failed = vi.fn();
+  const session = {
+    toolset: {
+      name: 'fixture',
+      open: () => ({ url: 'http://127.0.0.1/fixture', credential: 'synthetic', close: vi.fn() }),
+    },
+    turnStarted: vi.fn(),
+    turnEnded: vi.fn(),
+    stop: vi.fn(),
+    setPolicy: vi.fn(),
+    disconnect: vi.fn(),
+    close: vi.fn<import('./provider').SessionAutomation['close']>(() => Promise.resolve()),
+    prepareSend: vi.fn(() => ({ context: { presentationNotices: [] }, accepted, failed })),
+    linkResult: vi.fn(),
+  } satisfies import('./provider').SessionAutomation;
+  const bind = vi.fn<import('./provider').SessionAutomationHost['bind']>(() =>
+    Promise.resolve(session),
+  );
+  return { session, bind, accepted, failed };
+}
+
+describe('session automation lifecycle', () => {
+  it('binds the app owner before startup, preserving it across a different native ID and resume', async () => {
+    const fake = fakeProvider('codex');
+    const automation = automationFixture();
+    const originalStart = fake.provider.start.bind(fake.provider);
+    const start = vi.spyOn(fake.provider, 'start').mockImplementation((options, listener) => {
+      expect(automation.bind).toHaveBeenCalledTimes(1);
+      expect(options.toolset).toBe(automation.session.toolset);
+      return originalStart(options, listener);
+    });
+    const host = new SessionHost(
+      [fake.provider],
+      memoryRecords().records,
+      memoryTextStorage(),
+      automation,
+    );
+    const id = await host.start('codex', { cwd: folder('web') });
+    expect(automation.bind.mock.calls[0]?.[0]).toMatchObject({
+      id,
+      cwd: folder('web'),
+      mode: 'auto',
+      sandbox: 'workspace-write',
+    });
+    expect(host.list().sessions[0]?.sessionId).not.toBe(id);
+    expect(start).toHaveBeenCalledTimes(1);
+    fake.listeners[0]?.({ type: 'turn-started' });
+    fake.listeners[0]?.({ type: 'turn-ended', outcome: 'completed' });
+    expect(automation.session.turnStarted).toHaveBeenCalledTimes(1);
+    expect(automation.session.turnEnded).toHaveBeenCalledTimes(1);
+    fake.listeners[0]?.({ type: 'closed' });
+    expect(automation.session.disconnect).toHaveBeenCalledTimes(1);
+    await host.resume(id, {
+      ...keptSettings,
+      mode: 'auto',
+      sandbox: 'workspace-write',
+      gateway: null,
+    });
+    expect(automation.bind.mock.calls[1]?.[0].id).toBe(id);
+    expect(fake.resumed[0]?.toolset).toBe(automation.session.toolset);
+    await host.closeAll();
+  });
+  it('acknowledges notice delivery only after the provider accepts the send', async () => {
+    const fake = fakeProvider('codex');
+    const automation = automationFixture();
+    const host = new SessionHost(
+      [fake.provider],
+      memoryRecords().records,
+      memoryTextStorage(),
+      automation,
+    );
+    const id = await host.start('codex', { cwd: folder('web') });
+    await host.send(id, 'Hello');
+    expect(fake.sessions[0]?.send).toHaveBeenCalledWith('Hello', [], { presentationNotices: [] });
+    expect(automation.accepted).toHaveBeenCalledTimes(1);
+    fake.sessions[0]?.send.mockRejectedValueOnce(new Error('Send failed.'));
+    await expect(host.send(id, 'Retry')).rejects.toThrow('Send failed.');
+    expect(automation.accepted).toHaveBeenCalledTimes(1);
+    expect(automation.failed).toHaveBeenCalledTimes(1);
+    await host.interrupt(id);
+    expect(automation.session.stop).toHaveBeenCalled();
+    await host.remove(id);
+    expect(automation.session.close).toHaveBeenCalledWith(true);
+  });
+  it('releases a binding after failed startup and restores policy when a provider refuses a change', async () => {
+    const failed = fakeProvider('codex', true);
+    const automation = automationFixture();
+    const host = new SessionHost(
+      [failed.provider],
+      memoryRecords().records,
+      memoryTextStorage(),
+      automation,
+    );
+    await expect(host.start('codex', { cwd: folder('web') })).rejects.toThrow('Not signed in.');
+    expect(automation.session.close).toHaveBeenCalledWith(true);
+    const fake = fakeProvider('codex');
+    const active = new SessionHost(
+      [fake.provider],
+      memoryRecords().records,
+      memoryTextStorage(),
+      automation,
+    );
+    const id = await active.start('codex', { cwd: folder('web') });
+    fake.sessions[0]?.setSandbox.mockRejectedValueOnce(new Error('Refused.'));
+    await expect(active.setSandbox(id, 'read-only')).rejects.toThrow('Refused.');
+    expect(automation.session.setPolicy).toHaveBeenLastCalledWith({
+      mode: 'auto',
+      sandbox: 'workspace-write',
+    });
+    await active.archive(id);
+    expect(automation.session.close).toHaveBeenCalled();
+  });
+});
+
+it('does not retire host notices when a legacy adapter cannot accept separate turn context', async () => {
+  const fake = fakeProvider('codex');
+  const automation = automationFixture();
+  const original = fake.provider.start.bind(fake.provider);
+  vi.spyOn(fake.provider, 'start').mockImplementation(async (options, listener) => ({
+    ...(await original(options, listener)),
+    supportsHostContext: undefined,
+  }));
+  const host = new SessionHost(
+    [fake.provider],
+    memoryRecords().records,
+    memoryTextStorage(),
+    automation,
+  );
+  const id = await host.start('codex', { cwd: folder('web') });
+  await host.send(id, 'User text');
+  expect(fake.sessions[0]?.send).toHaveBeenCalledWith('User text', []);
+  expect(automation.accepted).not.toHaveBeenCalled();
+  expect(automation.failed).toHaveBeenCalledTimes(1);
+  await host.closeAll();
 });

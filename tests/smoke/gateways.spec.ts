@@ -152,9 +152,15 @@ test('a Codex session through a gateway gets its answers from the gateway’s se
       expect(new Set(service.authorizations)).toEqual(new Set([`Bearer ${TOKEN}`]));
       // The session's app-server names the gateway's provider on its command line, and nothing else
       // of the file: neither its token nor its service.
-      const commandLines = providerProcesses(app).map((pid) =>
-        execFileSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' }),
-      );
+      // A model/account probe can finish after its PID was listed. Take one snapshot of the listed
+      // children so an exited probe does not abort inspection of the still-running session.
+      const commandLines = execFileSync(
+        'ps',
+        ['-o', 'args=', '-p', providerProcesses(app).join(',')],
+        { encoding: 'utf8' },
+      )
+        .split('\n')
+        .filter(Boolean);
       expect(
         commandLines.some((line) => line.includes('app-server') && line.includes('local-gateway')),
       ).toBe(true);

@@ -1,7 +1,9 @@
 import { request as httpRequest } from 'node:http';
+import { z } from 'zod';
+import type { AutomationTool, ExecutionResult } from './execution';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ToolsetAccess } from '../../sessions/main/provider';
 import { startToolset, TOOLSET_NAME, type RunningToolset } from './server';
 
@@ -14,6 +16,17 @@ afterEach(async () => {
   for (const client of clients.splice(0)) await client.close();
   await toolset.close();
 });
+
+let ownerSerial = 0;
+async function open(): Promise<ToolsetAccess> {
+  const owner = await toolset.sessions.bind({
+    id: `fixture-${String(++ownerSerial)}`,
+    cwd: process.cwd(),
+    mode: 'auto',
+    sandbox: 'workspace-write',
+  });
+  return owner.toolset.open();
+}
 
 async function connect(access: ToolsetAccess): Promise<Client> {
   const client = new Client({ name: 'test', version: '0' });
@@ -67,16 +80,23 @@ function post(
 }
 
 describe('the toolset', () => {
-  it('introduces itself and lists no tools, which Codex needs to start a thread', async () => {
-    const client = await connect(toolset.open());
+  it('introduces itself and offers cached capability discovery without a backend', async () => {
+    const client = await connect(await open());
     expect(client.getServerVersion()).toMatchObject({ name: TOOLSET_NAME, version: '1.2.3' });
     expect(client.getServerCapabilities()?.tools).toBeDefined();
-    expect((await client.listTools()).tools).toEqual([]);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      'automation_capabilities',
+    ]);
+    const result = await client.callTool({ name: 'automation_capabilities' });
+    expect(result.structuredContent).toMatchObject({
+      policy: { mode: 'auto', sandbox: 'workspace-write' },
+      tools: [],
+    });
   });
 
   it('gives each session a credential of its own, which ends with its access', async () => {
-    const first = toolset.open();
-    const second = toolset.open();
+    const first = await open();
+    const second = await open();
     expect(first.credential).not.toBe(second.credential);
     first.close();
     expect((await post(first.url, { Authorization: `Bearer ${first.credential}` })).status).toBe(
@@ -88,7 +108,7 @@ describe('the toolset', () => {
   });
 
   it('refuses requests without a session’s credential, from a web page or by another name', async () => {
-    const access = toolset.open();
+    const access = await open();
     const { host } = new URL(access.url);
     const valid = { Authorization: `Bearer ${access.credential}` };
     expect((await post(access.url, {})).status).toBe(401);
@@ -103,7 +123,7 @@ describe('the toolset', () => {
   });
 
   it('ends every access when it stops', async () => {
-    const access = toolset.open();
+    const access = await open();
     const client = await connect(access);
     await toolset.close();
     await client.close();
@@ -114,4 +134,115 @@ describe('the toolset', () => {
     ).toBe('refused');
     toolset = await startToolset({ version: '1.2.3' });
   });
+});
+
+it('invalidates old bound factories as well as credentials without letting their cleanup affect the replacement', async () => {
+  const options = {
+    id: 'durable-owner',
+    cwd: process.cwd(),
+    mode: 'auto' as const,
+    sandbox: 'workspace-write' as const,
+  };
+  const first = await toolset.sessions.bind(options);
+  const old = first.toolset.open();
+  first.turnStarted();
+  const replacement = await toolset.sessions.bind(options);
+  const current = replacement.toolset.open();
+  expect(() => first.toolset.open()).toThrow('access-revoked');
+  await first.close(true);
+  expect((await post(old.url, { Authorization: `Bearer ${old.credential}` })).status).toBe(401);
+  expect((await post(current.url, { Authorization: `Bearer ${current.credential}` })).status).toBe(
+    200,
+  );
+});
+
+it('records invalid arguments and shares cancellation across separate MCP POST instances', async () => {
+  await toolset.close();
+  let resolve: (result: ExecutionResult) => void = () => {
+    throw new Error('Not started.');
+  };
+  const completion = new Promise<ExecutionResult>((done) => {
+    resolve = done;
+  });
+  let signal: AbortSignal | undefined;
+  const execute = vi.fn<AutomationTool['execute']>((_args, context) => {
+    signal = context.signal;
+    return completion;
+  });
+  toolset = await startToolset({
+    version: 'fixture',
+    tools: [
+      {
+        name: 'fixture_wait',
+        description: 'Synthetic cancellation fixture.',
+        family: 'panel',
+        inputSchema: z.object({ value: z.number() }),
+        availability: { tools: 'ready', images: 'unknown' },
+        plan: () => ({
+          operation: null,
+          effect: 'present',
+          delivery: 'background',
+          mayActivate: false,
+        }),
+        execute,
+      },
+    ],
+  });
+  const owner = await toolset.sessions.bind({
+    id: 'fixture-cancellation',
+    cwd: process.cwd(),
+    mode: 'auto',
+    sandbox: 'workspace-write',
+  });
+  owner.turnStarted();
+  const access = owner.toolset.open();
+  const client = await connect(access);
+  const invalid = await client.callTool({
+    name: 'fixture_wait',
+    arguments: { actionId: 'invalid', value: 'invalid' },
+  });
+  expect(invalid.isError).toBe(true);
+  expect(
+    toolset.broker.snapshot('fixture-cancellation').value.recentCalls[0]?.outcome,
+  ).toMatchObject({ code: 'invalid-request' });
+  expect(execute).not.toHaveBeenCalled();
+  const headers = {
+    Authorization: `Bearer ${access.credential}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream',
+  };
+  const waiting = fetch(access.url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 41,
+      method: 'tools/call',
+      params: { name: 'fixture_wait', arguments: { actionId: 'waiting', value: 1 } },
+    }),
+  }).then((response) => response.text());
+  try {
+    await vi.waitFor(() => {
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+    await fetch(access.url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/cancelled',
+        params: { requestId: 41 },
+      }),
+    });
+    await vi.waitFor(() => {
+      expect(signal?.aborted).toBe(true);
+    });
+    expect(await waiting).toContain('cancelled-after-dispatch');
+    expect(
+      toolset.broker.snapshot('fixture-cancellation').value.recentCalls.at(-1)?.outcome?.status,
+    ).toBe('indeterminate');
+  } finally {
+    resolve({ outcome: { status: 'verified', value: null } });
+    await waiting;
+  }
 });

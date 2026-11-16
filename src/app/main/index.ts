@@ -79,6 +79,7 @@ void app
       adapters,
       new SessionRecords(recordStorage(data)),
       textStorage(join(data, 'session-texts')),
+      toolset?.sessions,
     );
     // The providers' sign-ins and usage limits, the usage kept in the app's data (ADR-0017).
     const accounts = new Accounts(adapters, usageStorage(data));
@@ -149,7 +150,7 @@ app.on('window-all-closed', () => {
   // Without this handler Electron quits; a macOS app keeps running until the user quits it.
 });
 
-// The app's toolset (ADR-0012), which every Codex session connects to; without it, the app offers no
+// The app's toolset (ADR-0023), which every Codex session connects to; without it, the app offers no
 // Codex sessions, since Codex starts no thread while it cannot reach the toolset.
 async function startToolsetIfPossible(version: string): Promise<RunningToolset | undefined> {
   try {
@@ -169,7 +170,7 @@ function providers(
 ): (Provider & AccountSource)[] {
   return [
     createClaudeCodeProvider(),
-    ...(toolset === undefined ? [] : [createCodexProvider({ toolset, clientVersion: version })]),
+    ...(toolset === undefined ? [] : [createCodexProvider({ clientVersion: version })]),
     createGrokBuildProvider({ binaryFolder: join(data, 'grok-build'), clientVersion: version }),
   ];
 }

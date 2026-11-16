@@ -85,19 +85,34 @@ async function shielded(launching: Promise<ElectronApplication>): Promise<Electr
       });
       // Its clicks too, which a transparent window lets through to the window under it.
       cover.setIgnoreMouseEvents(false);
+      let active = true;
+      const live = () => active && !window.isDestroyed() && !cover.isDestroyed();
       const follow = () => {
+        if (!live()) return;
         cover.setBounds(window.getBounds());
       };
       const show = () => {
+        if (!live()) return;
         follow();
         if (!cover.isVisible()) cover.showInactive();
+      };
+      const detach = () => {
+        active = false;
+        window.removeListener('ready-to-show', show);
+        window.removeListener('show', show);
+        window.removeListener('move', follow);
+        window.removeListener('resize', follow);
       };
       if (window.isVisible()) show();
       window.once('ready-to-show', show);
       window.once('show', show);
       window.on('move', follow);
       window.on('resize', follow);
+      // Quitting can close the child first and still deliver a parent's queued show event. Such a
+      // callback must not touch the destroyed native child and open Electron's modal error box.
+      cover.once('closed', detach);
       window.once('closed', () => {
+        detach();
         if (!cover.isDestroyed()) cover.destroy();
       });
     };
