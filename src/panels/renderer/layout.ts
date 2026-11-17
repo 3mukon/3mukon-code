@@ -1,4 +1,5 @@
 import type { DroppedItem, PanelContent } from '../shared/panels';
+import type { Placement, PresentedContent } from '../shared/presentation';
 
 // The main area's layout: a tree whose leaves are panels and whose other nodes split their space in
 // two, side by side or stacked, so that panels nest in either direction.
@@ -8,6 +9,17 @@ export interface Panel {
   type: 'panel';
   id: string;
   content: PanelContent;
+  // Set on a panel that shows one of an agent's presentations (shared/presentation.ts).
+  presented?: PresentedPlace;
+}
+
+// Which presentation a panel shows, which of its items, by its place, the session it comes from and
+// the presentation's title.
+export interface PresentedPlace {
+  presentationId: string;
+  item: number;
+  owner: string;
+  title: string;
 }
 
 export interface Split {
@@ -50,7 +62,38 @@ export type PanelsAction =
   | { type: 'close'; panelId: string }
   | { type: 'focus'; panelId: string }
   | { type: 'resize'; splitId: string; ratio: number }
-  | { type: 'move'; panelId: string; to: Move };
+  | { type: 'move'; panelId: string; to: Move }
+  | { type: 'present'; presentationId: string; change: PresentChange };
+
+// What an agent's presentation asks of the layout (shared/presentation.ts). None of these gives a
+// presentation's panel the focus.
+// - open shows the items, each in a panel of its own, side by side in a row or stacked in a column: on
+//   the placement's side of the session's first panel, at that side of the area while the session has
+//   none, or, given one, in place of another presentation's panels, which close.
+// - change shows the items in the presentation's panels, each by its place, under the title given: a
+//   panel whose item is another gives its place to a panel of its own, an open item without a panel
+//   opens one beside the presentation's last panel in the direction given, and the panels of closed
+//   items, or past the items, close.
+// - arrange places the presentation's panels again, as open does, keeping them.
+// - close closes them.
+export type PresentChange =
+  | {
+      kind: 'open';
+      owner: string;
+      title: string;
+      items: readonly PresentedContent[];
+      placement: Placement;
+      replacing: string | null;
+    }
+  | {
+      kind: 'change';
+      owner: string;
+      title: string;
+      items: readonly { content: PresentedContent; open: boolean }[];
+      direction: Placement['direction'];
+    }
+  | { kind: 'arrange'; owner: string; placement: Placement }
+  | { kind: 'close' };
 
 export const emptyPanels: PanelsState = { layout: null, focusedId: null, next: 1 };
 
@@ -89,6 +132,8 @@ export function reducePanels(state: PanelsState, action: PanelsAction): PanelsSt
           };
     case 'move':
       return move(state, action.panelId, action.to);
+    case 'present':
+      return present(state, action.presentationId, action.change);
   }
 }
 
@@ -110,7 +155,7 @@ export function contentOf(item: DraggedItem): PanelContent {
 }
 
 // Whether two contents show the same: a session page for the same folder, the same session, the same
-// file, the archived sessions or the settings.
+// file, terminal, artifact, tab or computer target, the archived sessions or the settings.
 export function sameContent(a: PanelContent, b: PanelContent): boolean {
   switch (a.kind) {
     case 'session-page':
@@ -121,6 +166,12 @@ export function sameContent(a: PanelContent, b: PanelContent): boolean {
       return b.kind === 'file' && b.path === a.path;
     case 'terminal':
       return b.kind === 'terminal' && b.id === a.id;
+    case 'artifact':
+      return b.kind === 'artifact' && b.artifactId === a.artifactId;
+    case 'browser':
+      return b.kind === 'browser' && b.tabId === a.tabId;
+    case 'computer':
+      return b.kind === 'computer' && b.targetId === a.targetId;
     case 'archived':
     case 'accounts':
     case 'settings':
@@ -129,7 +180,7 @@ export function sameContent(a: PanelContent, b: PanelContent): boolean {
 }
 
 // The folder a panel's content is in, where a session page or a terminal opened from it starts; none
-// for the archived sessions, the accounts or the settings.
+// for the archived sessions, the accounts, the settings or what an agent presents besides files.
 export function folderOf(content: PanelContent): string | null {
   switch (content.kind) {
     case 'session-page':
@@ -144,6 +195,9 @@ export function folderOf(content: PanelContent): string | null {
     case 'archived':
     case 'accounts':
     case 'settings':
+    case 'artifact':
+    case 'browser':
+    case 'computer':
       return null;
   }
 }
@@ -157,6 +211,11 @@ export function panelsOf(layout: Layout | null): Panel[] {
 
 export function findPanel(layout: Layout, id: string): Panel | undefined {
   return panelsOf(layout).find((panel) => panel.id === id);
+}
+
+// The panels that show a presentation, in reading order.
+export function presentedPanels(layout: Layout | null, presentationId: string): Panel[] {
+  return panelsOf(layout).filter((panel) => panel.presented?.presentationId === presentationId);
 }
 
 // The panels in the order they were opened, which a split or a close never changes.
@@ -213,12 +272,12 @@ function defaultTarget(state: PanelsState): Target {
     : { kind: 'beside', panelId: state.focusedId, side: 'right' };
 }
 
-// The layout with the panel split in two: the new panel on the given side, the old one on the other.
+// The layout with the panel split in two: the new part on the given side, the old panel on the other.
 function besidePanel(
   layout: Layout,
   id: string,
   side: Side,
-  panel: Panel,
+  panel: Layout,
   splitId: string,
 ): Layout {
   return mapPanel(layout, id, (old) => {
@@ -250,6 +309,186 @@ function move(state: PanelsState, id: string, to: Move): PanelsState {
     focusedId: id,
     next: state.next + 1,
   };
+}
+
+// Carries out what a presentation asks of the layout, the focus staying where it is unless a panel
+// that had it closes.
+function present(state: PanelsState, presentationId: string, change: PresentChange): PanelsState {
+  switch (change.kind) {
+    case 'open':
+      return presentOpen(state, presentationId, change);
+    case 'change':
+      return presentChange(state, presentationId, change);
+    case 'arrange':
+      return presentArrange(state, presentationId, change);
+    case 'close':
+      return closeAll(
+        state,
+        presentedPanels(state.layout, presentationId).map((panel) => panel.id),
+      );
+  }
+}
+
+function presentOpen(
+  state: PanelsState,
+  presentationId: string,
+  change: Extract<PresentChange, { kind: 'open' }>,
+): PanelsState {
+  let { next } = state;
+  const opened = change.items.map((content, item): Panel => ({
+    type: 'panel',
+    id: `panel-${String(next++)}`,
+    content,
+    presented: { presentationId, item, owner: change.owner, title: change.title },
+  }));
+  const placed = inLine(opened, change.placement.direction, () => `split-${String(next++)}`);
+  const [first, ...others] =
+    change.replacing === null ? [] : presentedPanels(state.layout, change.replacing);
+  if (first !== undefined) {
+    // The other presentation's first panel gives its place, and its others close; a focus one of them
+    // had goes back to the session's panel.
+    const rest = closeAll({ ...state, next }, [first, ...others].map((panel) => panel.id).slice(1));
+    const displaced = [first, ...others].some((panel) => panel.id === state.focusedId);
+    return {
+      layout: rest.layout === null ? placed : mapPanel(rest.layout, first.id, () => placed),
+      focusedId: displaced ? (sessionPanel(rest.layout, change.owner)?.id ?? null) : rest.focusedId,
+      next,
+    };
+  }
+  const splitId = `split-${String(next++)}`;
+  return {
+    layout: besideSession(state.layout, change.owner, change.placement.side, placed, splitId),
+    focusedId: state.focusedId,
+    next,
+  };
+}
+
+function presentChange(
+  state: PanelsState,
+  presentationId: string,
+  change: Extract<PresentChange, { kind: 'change' }>,
+): PanelsState {
+  let { layout, focusedId, next } = state;
+  const shown = new Map(
+    presentedPanels(layout, presentationId).map((panel) => [panel.presented?.item, panel]),
+  );
+  const presented = (item: number) => ({
+    presentationId,
+    item,
+    owner: change.owner,
+    title: change.title,
+  });
+  const panelFor = (content: PresentedContent, item: number): Panel => ({
+    type: 'panel',
+    id: `panel-${String(next++)}`,
+    content,
+    presented: presented(item),
+  });
+  const side = change.direction === 'row' ? 'right' : 'bottom';
+  change.items.forEach(({ content, open }, item) => {
+    const panel = shown.get(item);
+    if (!open || layout === null) return;
+    if (panel === undefined) {
+      // Beside the presentation's last panel, which there is, since a change follows an open.
+      const last = presentedPanels(layout, presentationId).at(-1);
+      if (last === undefined) return;
+      layout = besidePanel(
+        layout,
+        last.id,
+        side,
+        panelFor(content, item),
+        `split-${String(next++)}`,
+      );
+    } else if (!sameContent(panel.content, content)) {
+      // A panel of its own, so that nothing the old one showed goes on in it.
+      const replacement = panelFor(content, item);
+      layout = mapPanel(layout, panel.id, () => replacement);
+      if (focusedId === panel.id) focusedId = replacement.id;
+    } else if (panel.presented?.title !== change.title) {
+      layout = mapPanel(layout, panel.id, (kept) => ({ ...kept, presented: presented(item) }));
+    }
+  });
+  const closing = [...shown]
+    .filter(([item]) => item === undefined || change.items[item]?.open !== true)
+    .map(([, panel]) => panel.id);
+  return closeAll({ layout, focusedId, next }, closing);
+}
+
+function presentArrange(
+  state: PanelsState,
+  presentationId: string,
+  change: Extract<PresentChange, { kind: 'arrange' }>,
+): PanelsState {
+  const shown = presentedPanels(state.layout, presentationId).sort(
+    (a, b) => (a.presented?.item ?? 0) - (b.presented?.item ?? 0),
+  );
+  if (shown.length === 0) return state;
+  let rest: Layout | null = state.layout;
+  for (const panel of shown) {
+    const removal = rest === null ? undefined : remove(rest, panel.id);
+    if (removal !== undefined) rest = removal.layout;
+  }
+  let { next } = state;
+  const placed = inLine(shown, change.placement.direction, () => `split-${String(next++)}`);
+  const splitId = `split-${String(next++)}`;
+  return {
+    layout: besideSession(rest, change.owner, change.placement.side, placed, splitId),
+    focusedId: state.focusedId,
+    next,
+  };
+}
+
+// Panels side by side in a row, or stacked in a column, each with an equal share of the space.
+function inLine(
+  panels: readonly Panel[],
+  direction: Placement['direction'],
+  splitId: () => string,
+): Layout {
+  const [first, ...rest] = panels;
+  if (first === undefined) throw new Error('A presentation has at least one item.');
+  if (rest.length === 0) return first;
+  return {
+    type: 'split',
+    id: splitId(),
+    direction,
+    ratio: 1 / panels.length,
+    first,
+    second: inLine(rest, direction, splitId),
+  };
+}
+
+// The session's first panel in reading order.
+function sessionPanel(layout: Layout | null, owner: string): Panel | undefined {
+  return panelsOf(layout).find(
+    (panel) => panel.content.kind === 'session' && panel.content.id === owner,
+  );
+}
+
+// The layout with a part on a side of the session's first panel, or of the whole area while the
+// session has none.
+function besideSession(
+  layout: Layout | null,
+  owner: string,
+  side: Side,
+  part: Layout,
+  splitId: string,
+): Layout {
+  if (layout === null) return part;
+  const session = sessionPanel(layout, owner);
+  if (session !== undefined) return besidePanel(layout, session.id, side, part, splitId);
+  const before = side === 'left' || side === 'top';
+  return {
+    type: 'split',
+    id: splitId,
+    direction: side === 'left' || side === 'right' ? 'row' : 'column',
+    ratio: 0.5,
+    first: before ? part : layout,
+    second: before ? layout : part,
+  };
+}
+
+function closeAll(state: PanelsState, ids: readonly string[]): PanelsState {
+  return ids.reduce(close, state);
 }
 
 function swap(layout: Layout, a: Panel, b: Panel): Layout {

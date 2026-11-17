@@ -9,7 +9,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'node',
-          include: ['src/**/*.test.ts'],
+          include: ['src/**/*.test.ts', 'tests/contracts/**/*.test.ts'],
           // Live tests run only through vitest.live.config.ts.
           exclude: [...configDefaults.exclude, 'src/**/*.live.test.ts'],
           environment: 'node',

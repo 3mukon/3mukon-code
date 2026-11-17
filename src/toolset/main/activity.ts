@@ -15,7 +15,10 @@ import type {
   ToolsetResult,
 } from '../../sessions/shared/automation';
 import type { ApprovalAnswer } from '../../sessions/shared/events';
-import { AUTOMATION_ACTIVITY_LIMITS } from '../../sessions/shared/automation';
+import {
+  AUTOMATION_ACTIVITY_LIMITS,
+  AUTOMATION_RESULT_LIMITS,
+} from '../../sessions/shared/automation';
 import { isJson, requestKey } from './execution';
 import { referencedIconIds } from '../../sessions/shared/automation-state';
 
@@ -232,14 +235,36 @@ export class Activity {
     return { status: 'verified', value: null };
   }
   prepareTurn(): { id: string; notices: PresentationNotice[] } {
-    if (this.turns.size >= 32) throw new Error('Too many sends await provider acceptance.');
     const id = randomUUID();
-    const notices = this.pendingNotices();
-    this.turns.set(id, notices.map(deliveryOf));
+    const notices = this.deliveryNotices(AUTOMATION_RESULT_LIMITS.jsonBytes - 1024);
+    if (notices.length) {
+      // A missing provider acknowledgement must not block the user's next message. Forget the
+      // oldest delivery token as failed, keeping its presentation notices pending.
+      const oldest = this.turns.keys().next().value;
+      if (this.turns.size >= 32 && oldest) this.turns.delete(oldest);
+      this.turns.set(id, notices.map(deliveryOf));
+    }
     return { id, notices };
   }
-  finishTurnDelivery(id: string, accepted: boolean): void {
-    if (accepted) this.retire(this.turns.get(id) ?? []);
+  finishTurnDelivery(
+    id: string,
+    accepted: boolean,
+    delivered?: readonly PresentationNotice[],
+  ): void {
+    const batch = this.turns.get(id) ?? [];
+    if (accepted)
+      this.retire(
+        delivered === undefined
+          ? batch
+          : batch.filter((item) =>
+              delivered.some(
+                (notice) =>
+                  notice.owner === this.owner &&
+                  notice.presentation.id === item.id &&
+                  notice.presentation.version >= item.version,
+              ),
+            ),
+      );
     this.turns.delete(id);
   }
   link(link: ProviderToolLink): Outcome<null> {
@@ -270,14 +295,33 @@ export class Activity {
   }
   private result(record: AutomationCallRecord): ToolsetResult {
     if (!record.outcome) throw new Error('The call has no outcome.');
-    const notices = this.pendingNotices();
+    const frames = this.images.get(record.callId) ?? [];
+    const metadata = frames.map(({ image, ...frame }) => ({
+      ...frame,
+      mediaType: image.mediaType,
+    }));
+    const available =
+      AUTOMATION_RESULT_LIMITS.jsonBytes -
+      Buffer.byteLength(JSON.stringify({ outcome: record.outcome, frames: metadata })) -
+      1024;
+    const notices = this.deliveryNotices(available);
     this.deliveries.set(record.callId, notices.map(deliveryOf));
     return structuredClone({
       automation: { schemaVersion: 1, callId: record.callId },
       outcome: record.outcome,
-      frames: this.images.get(record.callId) ?? [],
+      frames,
       presentationNotices: notices,
     });
+  }
+  private deliveryNotices(budget: number): PresentationNotice[] {
+    const notices: PresentationNotice[] = [];
+    for (const notice of this.notices.values()) {
+      const size = Buffer.byteLength(JSON.stringify(notice)) + 1;
+      if (size > budget) continue;
+      budget -= size;
+      notices.push(notice);
+    }
+    return structuredClone(notices);
   }
   private retire(deliveries: readonly NoticeDelivery[]): void {
     let changed = false;

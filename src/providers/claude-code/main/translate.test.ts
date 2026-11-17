@@ -4,6 +4,28 @@ import { Translator } from './translate';
 
 const cwd = '/work/app';
 
+it('keeps original user text when native history also carries a host context document', () => {
+  expect(
+    new Translator(cwd).history({
+      type: 'user',
+      uuid: 'user',
+      session_id: 's',
+      parent_tool_use_id: null,
+      parent_agent_id: null,
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'document',
+            source: { type: 'text', media_type: 'text/plain', data: 'Host state' },
+          },
+          { type: 'text', text: 'User text' },
+        ],
+      },
+    }),
+  ).toEqual([{ type: 'message', id: 'user', role: 'user', text: 'User text' }]);
+});
+
 function assistant(
   uuid: string,
   content: unknown[],

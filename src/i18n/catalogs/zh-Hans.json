@@ -198,7 +198,22 @@
     "sessionPage": "新建会话",
     "close": "关闭面板",
     "resize": "调整面板大小",
-    "unsaved": "未存储的更改"
+    "unsaved": "未存储的更改",
+    "presented": "“{{session}}”在旁边展示了 {{title}}",
+    "someSession": "某个会话",
+    "result": "结果",
+    "resultLoading": "正在加载结果…",
+    "resultGone": "此结果已不再可用。",
+    "resultInvalid": "无法显示此结果。",
+    "notYet": "暂时无法在此显示。",
+    "showed": "已在此会话旁展示 {{title}}",
+    "show": "显示",
+    "showOutcome": {
+      "expired": "它已不再可用。",
+      "unsaved-changes": "它的一个面板有未存储的更改。",
+      "busy": "它正在变化，请重试。",
+      "unavailable": "现在无法显示它。"
+    }
   },
   "settings": {
     "title": "设置",

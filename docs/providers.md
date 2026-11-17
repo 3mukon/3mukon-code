@@ -45,7 +45,7 @@ The app drives three providers. Each has an adapter module that implements the s
 | Task list | Claude Code's task tools, which it offers by default only to its older models, and to the others when its settings turn them on | The turn plan, from the plan tool, which Codex's settings turn on | The plan Grok sends |
 | History and resume | The SDK's transcripts and session info | `thread/list`, `thread/turns/list`, `thread/read` and `thread/resume` | `session/list` and `session/load` |
 | Usage limits | The SDK's experimental usage call and the turns' rate-limit events | `account/rateLimits/read` and its updates; a reset spends a reset credit | `x.ai/billing`, the plan's current period; no reset |
-| The app's toolset | Not given | Given to every session (ADR-0012) | Not given |
+| The app's toolset | Bound HTTP MCP through SDK configuration | Bound HTTP MCP through app-server configuration | Bound HTTP MCP on new/load/resume when advertised; otherwise explicitly unavailable |
 
 ## Where things are
 

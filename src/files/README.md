@@ -34,6 +34,7 @@ tags: []
 
 ## Interface
 
+- `FileService.presentationPath` checks an agent-directed presentation against existing editor permissions, resolves links, rechecks the canonical destination and requires an existing file, without granting a new path or reading its contents.
 - For the app module: `FileService` from `main/files.ts`, `windowFilesUi` and `keepUnsavedChanges` from `main/native.ts`, and `useFileEditors`, `FileEditorsOptions` and `FilePanel` from `renderer/use-file-editors.tsx`.
 - For both processes: the types, `MAX_EDITABLE_BYTES`, `MAX_IMAGE_BYTES` and `FilesBridge` in `shared/files.ts`.
 

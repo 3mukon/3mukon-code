@@ -23,12 +23,23 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import {
   Probes,
+  toolsetErrorMessage,
+  toolsetError,
   type ProbeProcess,
   type Provider,
   type ProviderSession,
   type SessionEventListener,
   type StartOptions,
+  type Toolset,
+  type ToolsetAccess,
+  type HostTurnContext,
+  type HostContextDelivery,
 } from '../../../sessions/main/provider';
+import { registeredTool, toolsetReceipt } from '../../../sessions/shared/toolset-result';
+import {
+  presentationContext,
+  selectPresentationNotices,
+} from '../../../sessions/shared/host-context';
 import type {
   ApprovalAnswer,
   MessageImage,
@@ -303,6 +314,7 @@ async function sessionSettings(
     effort: effortLevel(options.effort ?? null),
     sandbox: options.sandbox ?? 'workspace-write',
     folders: await sandboxFolders(options.cwd),
+    ...(options.toolset ? { toolset: options.toolset } : {}),
   };
 }
 
@@ -390,6 +402,7 @@ function errorMessage(error: unknown): string {
 }
 
 interface SessionSettings {
+  toolset?: Toolset;
   cwd: string;
   mode: PermissionMode;
   sessionId: string;
@@ -405,6 +418,9 @@ interface SessionSettings {
 
 // One Claude Code process serving the session; a gateway switch replaces it.
 interface Connection {
+  readonly deliveries: Map<string, HostContextDelivery>;
+  readonly access?: ToolsetAccess;
+  readonly toolNames: Map<string, string>;
   readonly input: InputQueue;
   readonly query: Query;
   // Settles once the process's messages have ended.
@@ -412,6 +428,7 @@ interface Connection {
 }
 
 class ClaudeCodeSession implements ProviderSession {
+  readonly supportsHostContext = true;
   readonly id: string;
   private connection: Connection;
   // Connections that a gateway switch replaced; their end does not end the session.
@@ -447,8 +464,9 @@ class ClaudeCodeSession implements ProviderSession {
     try {
       await session.initialize();
     } catch (error) {
+      session.connection.access?.close();
       session.connection.query.close();
-      throw error;
+      throw toolsetError(error, session.connection.access);
     }
     link.sessions.add(session);
     return session;
@@ -472,7 +490,12 @@ class ClaudeCodeSession implements ProviderSession {
     this.connection = this.connect();
   }
 
-  async send(text: string, images: MessageImage[] = []): Promise<void> {
+  async send(
+    text: string,
+    images: MessageImage[] = [],
+    context?: HostTurnContext,
+    delivery?: HostContextDelivery,
+  ): Promise<void> {
     if (this.switching !== null) await this.switching;
     if (this.closed) throw new Error('The session is closed.');
     // During a turn, Claude Code takes the message into it between tool calls, or else runs it as the
@@ -490,14 +513,44 @@ class ClaudeCodeSession implements ProviderSession {
       text,
       ...(images.length === 0 ? {} : { images }),
     });
+    const notices = selectPresentationNotices(context?.presentationNotices ?? []);
+    const host = presentationContext(notices);
+    const uuid = randomUUID();
+    if (delivery && host)
+      this.connection.deliveries.set(uuid, {
+        accepted: () => {
+          delivery.accepted(notices);
+        },
+        failed: () => {
+          delivery.failed();
+        },
+      });
+    else delivery?.accepted([]);
     this.connection.input.push({
       type: 'user',
-      message: { role: 'user', content: images.length === 0 ? text : withImages(text, images) },
+      uuid,
+      message: {
+        role: 'user',
+        content: host
+          ? [
+              {
+                type: 'document',
+                source: { type: 'text', media_type: 'text/plain', data: host },
+                title: 'App presentation state',
+              },
+              ...withImages(text, images),
+            ]
+          : images.length === 0
+            ? text
+            : withImages(text, images),
+      },
       parent_tool_use_id: null,
     });
   }
 
   async interrupt(): Promise<void> {
+    for (const delivery of this.connection.deliveries.values()) delivery.failed();
+    this.connection.deliveries.clear();
     if (!this.turnRunning) return;
     this.interrupting = true;
     await this.connection.query.interrupt();
@@ -577,6 +630,7 @@ class ClaudeCodeSession implements ProviderSession {
 
   close(): Promise<void> {
     this.closing = true;
+    this.connection.access?.close();
     this.connection.input.end();
     this.connection.query.close();
     return Promise.resolve();
@@ -586,8 +640,12 @@ class ClaudeCodeSession implements ProviderSession {
   private connect(): Connection {
     const { settings } = this;
     const input = new InputQueue();
+    const access = settings.toolset?.open();
     const connection: Connection = {
       input,
+      access,
+      toolNames: new Map(),
+      deliveries: new Map(),
       query: query({
         prompt: input,
         options: {
@@ -605,6 +663,21 @@ class ClaudeCodeSession implements ProviderSession {
           // they do there.
           systemPrompt: { type: 'preset', preset: 'claude_code' },
           canUseTool: this.canUseTool,
+          ...(access && settings.toolset
+            ? {
+                mcpServers: {
+                  [settings.toolset.name]: {
+                    type: 'http',
+                    url: access.url,
+                    headers: { Authorization: `Bearer ${access.credential}` },
+                    alwaysLoad: true,
+                  },
+                },
+                allowedTools: access.tools?.map(
+                  (name) => `mcp__${settings.toolset?.name ?? ''}__${name}`,
+                ),
+              }
+            : {}),
           // A gateway is a settings file that Claude Code reads itself; the app never opens it.
           ...(settings.gateway === null
             ? {}
@@ -652,6 +725,17 @@ class ClaudeCodeSession implements ProviderSession {
     await this.connection.query.applyFlagSettings(
       sandboxSettings(this.settings.sandbox, this.settings.folders, false),
     );
+    if (this.connection.access) {
+      const status = await this.connection.query.mcpServerStatus().catch(() => []);
+      this.connection.access.availability?.({
+        tools: status.some(
+          (entry) => entry.name === this.settings.toolset?.name && entry.status === 'connected',
+        )
+          ? 'ready'
+          : 'unknown',
+        images: 'unknown',
+      });
+    }
     const usage = await countContext(this.connection.query);
     this.onEvent({ type: 'models', models: modelOptions(init.models, usage?.model) });
     if (usage !== undefined) {
@@ -709,6 +793,9 @@ class ClaudeCodeSession implements ProviderSession {
       'Claude Code did not answer the switches sent before the gateway switch in time.',
     ).catch(() => undefined);
     previous.input.end();
+    for (const delivery of previous.deliveries.values()) delivery.failed();
+    previous.deliveries.clear();
+    previous.access?.close();
     previous.query.close();
     await previous.done;
     // A close asked for before or during the switch ends the session here, as the retired process's
@@ -723,13 +810,24 @@ class ClaudeCodeSession implements ProviderSession {
       await this.initialize();
     } catch (error) {
       this.connection.query.close();
-      throw error;
+      this.connection.access?.close();
+      throw toolsetError(error, this.connection.access);
     }
     this.onEvent({ type: 'settings', gateway });
   }
 
   // Every canUseTool call waits here for the user's answer, or for the SDK to give up on it.
   private readonly canUseTool: CanUseTool = (toolName, input, options) => {
+    if (
+      this.settings.toolset &&
+      registeredTool(
+        toolName,
+        `mcp__${this.settings.toolset.name}__`,
+        this.connection.access?.tools,
+      )
+    ) {
+      return Promise.resolve({ behavior: 'allow', updatedInput: input });
+    }
     const request = toRequest(toolName, input, options, {
       cwd: this.settings.cwd,
       now: Date.now(),
@@ -764,12 +862,50 @@ class ClaudeCodeSession implements ProviderSession {
     let error: string | undefined;
     try {
       for await (const message of connection.query) {
+        if (message.type === 'user' && message.uuid) {
+          connection.deliveries.get(message.uuid)?.accepted();
+          connection.deliveries.delete(message.uuid);
+        }
+        if (connection !== this.connection && this.retired.has(connection)) continue;
+        if (message.type === 'assistant' && message.parent_tool_use_id === null) {
+          for (const block of message.message.content) {
+            if (block.type !== 'tool_use' || !this.settings.toolset) continue;
+            const name = registeredTool(
+              block.name,
+              `mcp__${this.settings.toolset.name}__`,
+              connection.access?.tools,
+            );
+            if (name) {
+              if (connection.toolNames.size >= 256)
+                connection.toolNames.delete(connection.toolNames.keys().next().value ?? '');
+              connection.toolNames.set(block.id, name);
+            }
+          }
+        }
+        if (
+          message.type === 'user' &&
+          message.parent_tool_use_id === null &&
+          Array.isArray(message.message.content)
+        ) {
+          const results = message.message.content.filter((block) => block.type === 'tool_result');
+          for (const block of results) {
+            if (block.type !== 'tool_result') continue;
+            const name = connection.toolNames.get(block.tool_use_id);
+            connection.toolNames.delete(block.tool_use_id);
+            if (!name) continue;
+            const receipt = toolsetReceipt(
+              results.length === 1 ? message.tool_use_result : undefined,
+              block.content,
+            );
+            if (receipt) connection.access?.result?.(name, block.tool_use_id, receipt);
+          }
+        }
         if (message.type === 'result') this.followUp = (message.queued_turn_count ?? 0) > 0;
         this.hearAccount(message);
         for (const event of this.translator.live(message)) this.emit(event);
       }
     } catch (caught) {
-      error = errorMessage(caught);
+      error = toolsetErrorMessage(caught, connection.access);
     }
     if (!this.retired.has(connection)) this.finish(error);
   }
@@ -790,6 +926,9 @@ class ClaudeCodeSession implements ProviderSession {
   private finish(error: string | undefined): void {
     if (this.closed) return;
     this.closed = true;
+    this.connection.access?.close();
+    for (const delivery of this.connection.deliveries.values()) delivery.failed();
+    this.connection.deliveries.clear();
     this.link.sessions.delete(this);
     for (const [requestId, pending] of this.pending) {
       pending.resolve({ behavior: 'deny', message: 'The session ended.' });

@@ -16,6 +16,68 @@ const notice = (version: number): PresentationNotice => ({
 const verified = { status: 'verified', value: null } as const;
 
 describe('retained activity and latest presentation delivery', () => {
+  it('retires the oldest unanswered delivery as failed and acknowledges only selected prepared versions', () => {
+    const activity = new Activity(
+      'session',
+      () => undefined,
+      () => 1,
+    );
+    activity.presentationChanged(notice(1));
+    const oldest = activity.prepareTurn();
+    for (let n = 0; n < 32; n++) activity.prepareTurn();
+    activity.finishTurnDelivery(oldest.id, true);
+    expect(activity.pendingNotices()).toEqual([notice(1)]);
+    const current = activity.prepareTurn();
+    activity.finishTurnDelivery(current.id, true, []);
+    expect(activity.pendingNotices()).toEqual([notice(1)]);
+    const older = activity.prepareTurn();
+    activity.presentationChanged(notice(2));
+    activity.finishTurnDelivery(older.id, true, [notice(2)]);
+    // An acknowledged merged block cannot expand an old token's authority to the newer version.
+    expect(activity.pendingNotices()).toEqual([notice(2)]);
+    const latest = activity.prepareTurn();
+    activity.finishTurnDelivery(latest.id, true, [notice(2)]);
+    expect(activity.pendingNotices()).toEqual([]);
+  });
+  it('batches large notice sets within the JSON budget and retires only the delivered batch', () => {
+    const activity = new Activity(
+      'session',
+      () => undefined,
+      () => 1,
+    );
+    for (let n = 0; n < 80; n++) {
+      const next = notice(1);
+      next.noticeId = `n${String(n)}`;
+      next.reuseKey = next.noticeId;
+      next.presentation.id = next.noticeId;
+      next.presentation.items = [
+        { content: { kind: 'file', path: `/${'x'.repeat(3000)}` }, box: null },
+      ];
+      expect(activity.presentationChanged(next).status).toBe('verified');
+    }
+    const delivery = activity.prepareTurn();
+    expect(Buffer.byteLength(JSON.stringify(delivery.notices))).toBeLessThan(64 * 1024);
+    expect(delivery.notices.length).toBeLessThan(80);
+    activity.finishTurnDelivery(delivery.id, true);
+    expect(activity.pendingNotices()).toHaveLength(80 - delivery.notices.length);
+    const call = activity.start(1, 'turn', 'panel_list', 'panel');
+    const result = activity.settle(call.callId, {
+      status: 'verified',
+      value: 'x'.repeat(32 * 1024),
+    });
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(64 * 1024);
+    expect(result.presentationNotices.length).toBeGreaterThan(0);
+    const remaining = activity.pendingNotices().length;
+    activity.link({
+      callId: call.callId,
+      sessionId: 'session',
+      turnId: 'turn',
+      accessGeneration: 1,
+      toolName: 'panel_list',
+      providerToolId: 'native',
+    });
+    expect(activity.pendingNotices()).toHaveLength(remaining - result.presentationNotices.length);
+  });
   it('keeps accepting notices beyond the receipt bound, evicting least recently changed delivered states only', () => {
     const activity = new Activity(
       'session',

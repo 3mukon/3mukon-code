@@ -12,7 +12,7 @@ import type {
 import type { RememberedChoice, SessionsBridge, SessionSummary } from '../shared/sessions';
 import { Attachments, useAttachments } from './attachments';
 import { SessionSettings, type Setting } from './session-settings';
-import { Timeline, type RenderRequest } from './timeline';
+import { Timeline, type RenderRequest, type RenderToolExtra } from './timeline';
 import { TimelineActionsContext, timelineActions } from './timeline-actions';
 import { rememberChoice, useOffers, useRemembered } from './use-offers';
 import { useSession } from './use-session';
@@ -79,6 +79,8 @@ interface SessionPageProps {
   onStarted: (id: string) => void;
   // Shows the session's approvals and questions in its activity, with what answers them.
   renderRequest?: RenderRequest;
+  // Shows, under a tool call in its activity, what the app knows of it, such as a presentation.
+  renderToolExtra?: RenderToolExtra;
   // The providers' sign-ins and usage limits.
   accounts?: AccountViews;
 }
@@ -106,6 +108,7 @@ export function SessionPage({
   summary,
   onStarted,
   renderRequest,
+  renderToolExtra,
   accounts,
 }: SessionPageProps) {
   const { t } = useTranslation();
@@ -498,6 +501,7 @@ export function SessionPage({
               agent={providerName}
               {...(pending === null ? {} : { pending })}
               {...(renderRequest === undefined ? {} : { renderRequest })}
+              {...(renderToolExtra === undefined ? {} : { renderToolExtra })}
             />
             {startFailed && <p className="my-3 text-del">{t('sessions.page.startFailed')}</p>}
             {resumeFailed && <p className="my-3 text-del">{t('sessions.page.resumeFailed')}</p>}

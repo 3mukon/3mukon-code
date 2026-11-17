@@ -7,6 +7,8 @@ import type {
   AutomationLiveState,
   AutomationPolicy,
   AutomationSnapshot,
+  Availability,
+  AutomationCallReceipt,
   EndReason,
   Envelope,
   FailureCode,
@@ -41,6 +43,7 @@ import { Resources, type Resource, type ResourceSpec } from './resources';
 import { Scheduler } from './scheduler';
 import { Icons } from './icons';
 import { referencedIconIds } from '../../sessions/shared/automation-state';
+import { isAutomationReceipt } from '../../sessions/shared/toolset-result';
 
 const CALL_TIMEOUT = 60_000;
 const OPERATION_TIMEOUT = 10 * 60_000;
@@ -94,18 +97,19 @@ interface Owner {
   sequence: number;
   activity: Activity;
   imageInput: 'supported' | 'unsupported' | 'unknown';
+  providerAvailability: Availability;
   operations: Map<string, PendingOperation>;
   grants: Map<string, Grant>;
   ends: GrantEndRecord[];
-  actions: Map<string, { hash: string; callId: string }>;
+  actions: Map<string, { hash: string; callId: string; evictable: boolean }>;
   calls: Set<Work>;
   paused: Set<string>;
-  listeners: Set<(event: Envelope<AutomationEvent>) => void>;
 }
 
 export class AutomationBroker {
   private readonly epoch = randomUUID();
   private readonly owners = new Map<string, Owner>();
+  private readonly listeners = new Map<string, Set<(event: Envelope<AutomationEvent>) => void>>();
   private readonly accesses = new WeakMap<BrokerAccess, BoundAccess>();
   private readonly resources = new Resources();
   private readonly icons = new Icons();
@@ -132,6 +136,12 @@ export class AutomationBroker {
   }
   definitions(): readonly AutomationTool[] {
     return [...this.tools.values()];
+  }
+  hasOwner(id: string): boolean {
+    return this.owners.has(id);
+  }
+  resource(owner: string, id: string): TargetSummary | undefined {
+    return this.resources.list(owner).find((target) => target.ref.id === id);
   }
   async bind(
     id: string,
@@ -160,6 +170,7 @@ export class AutomationBroker {
       turn: null,
       sequence: 0,
       imageInput: 'unknown',
+      providerAvailability: { tools: 'unknown', images: 'unknown', reason: { code: 'not-probed' } },
       activity: new Activity(
         id,
         (event) => {
@@ -173,9 +184,9 @@ export class AutomationBroker {
       actions: new Map(),
       calls: new Set(),
       paused: new Set(),
-      listeners: new Set(),
     };
     this.owners.set(id, owner);
+    this.state(owner);
   }
   openAccess(id: string): BrokerAccess {
     const owner = this.owner(id);
@@ -199,6 +210,14 @@ export class AutomationBroker {
     const bound = this.accesses.get(access);
     if (!bound?.active) return;
     bound.active = false;
+    if (bound.owner.generation === bound.generation) {
+      bound.owner.providerAvailability = {
+        tools: 'unavailable',
+        images: 'unknown',
+        reason: { code: 'not-probed' },
+      };
+      this.state(bound.owner);
+    }
     for (const work of bound.owner.calls)
       if (work.generation === bound.generation) work.controller.abort('access-revoked');
     for (const op of [...bound.owner.operations.values()])
@@ -208,6 +227,12 @@ export class AutomationBroker {
   disconnect(id: string): void {
     const owner = this.owner(id);
     owner.generation += 1;
+    owner.providerAvailability = {
+      tools: 'unknown',
+      images: 'unknown',
+      reason: { code: 'not-probed' },
+    };
+    owner.imageInput = 'unknown';
     this.stop(id, 'access-revoked');
   }
   beginTurn(id: string): string {
@@ -383,6 +408,36 @@ export class AutomationBroker {
     this.owner(id).imageInput = images;
     this.state(this.owner(id));
   }
+  providerAvailability(access: BrokerAccess, value: Availability): void {
+    if (!this.active(access)) return;
+    const owner = this.caller(access);
+    owner.providerAvailability = structuredClone(value);
+    owner.imageInput = value.images;
+    this.state(owner);
+  }
+  discovered(access: BrokerAccess): void {
+    const owner = this.caller(access);
+    owner.providerAvailability = { tools: 'ready', images: owner.imageInput };
+    this.state(owner);
+  }
+  providerResult(
+    access: BrokerAccess,
+    toolName: string,
+    providerToolId: string,
+    receipt: AutomationCallReceipt,
+  ): void {
+    if (!this.active(access) || !isAutomationReceipt(receipt) || !this.tools.has(toolName)) return;
+    if (!providerToolId || providerToolId.length > 4096) return;
+    const owner = this.caller(access);
+    owner.activity.link({
+      callId: receipt.callId,
+      sessionId: owner.id,
+      turnId: owner.turn,
+      accessGeneration: access.generation,
+      toolName,
+      providerToolId,
+    });
+  }
   capabilitiesFor(access: BrokerAccess): AutomationCapabilities {
     return this.capabilities(this.caller(access).id);
   }
@@ -429,14 +484,18 @@ export class AutomationBroker {
         op.approval ? [structuredClone(op.approval)] : [],
       ),
       foregroundOwner: this.foreground,
-      availability: { tools: 'ready', images: owner.imageInput },
+      availability: { ...owner.providerAvailability, images: owner.imageInput },
     };
   }
   subscribe(id: string, listener: (event: Envelope<AutomationEvent>) => void): () => void {
-    const owner = this.owner(id);
-    owner.listeners.add(listener);
+    // The app UI may already show a known historical session before it resumes and binds. Its
+    // membership is checked by the app bridge; binding then emits state so the UI can resnapshot.
+    const listeners = this.listeners.get(id) ?? new Set();
+    this.listeners.set(id, listeners);
+    listeners.add(listener);
     return () => {
-      owner.listeners.delete(listener);
+      listeners.delete(listener);
+      if (!listeners.size && this.listeners.get(id) === listeners) this.listeners.delete(id);
     };
   }
   record(id: string, callId: string) {
@@ -474,8 +533,13 @@ export class AutomationBroker {
   prepareNotices(id: string) {
     return this.owner(id).activity.prepareTurn();
   }
-  noticesDelivered(id: string, deliveryId: string, accepted: boolean): void {
-    this.owner(id).activity.finishTurnDelivery(deliveryId, accepted);
+  noticesDelivered(
+    id: string,
+    deliveryId: string,
+    accepted: boolean,
+    delivered?: readonly PresentationNotice[],
+  ): void {
+    this.owner(id).activity.finishTurnDelivery(deliveryId, accepted, delivered);
   }
 
   async dispatch(
@@ -529,8 +593,13 @@ export class AutomationBroker {
         known.family === 'panel' ? known.presentations : [],
       );
     }
-    if (owner.actions.size >= 4096) return finish(refuse('limit-exceeded'));
-    owner.actions.set(options.actionId, { hash, callId: record.callId });
+    if (owner.actions.size >= 4096) {
+      const oldest = [...owner.actions].find(([, action]) => action.evictable);
+      if (!oldest) return finish(refuse('limit-exceeded'));
+      owner.actions.delete(oldest[0]);
+    }
+    const action = { hash, callId: record.callId, evictable: false };
+    owner.actions.set(options.actionId, action);
     const controller = new AbortController();
     const work: Work = {
       callId: record.callId,
@@ -554,6 +623,12 @@ export class AutomationBroker {
     timer.unref();
     try {
       const result = await this.perform(owner, access, tool, args, plan, work);
+      // Recent settled requests are a rolling replay window. Running and uncertain effects stay
+      // pinned even if their activity record expires; reconnecting must not repeat those effects.
+      action.evictable =
+        result.outcome.status === 'verified' ||
+        result.outcome.status === 'refused' ||
+        result.outcome.status === 'cancelled-before-dispatch';
       return owner.activity.settle(
         record.callId,
         result.outcome,
@@ -682,6 +757,7 @@ export class AutomationBroker {
     let running: Promise<ExecutionResult>;
     try {
       running = tool.execute(args, {
+        callId: work.callId,
         signal: work.controller.signal,
         owner: owner.id,
         turnId: work.turn,
@@ -931,7 +1007,7 @@ export class AutomationBroker {
       this.resources.list(id).map((target) => this.targetEnded(id, target.ref, 'backend-lost')),
     );
     if (remove) {
-      owner.listeners.clear();
+      this.listeners.delete(id);
       this.owners.delete(id);
       this.icons.release(id);
     }
@@ -940,6 +1016,7 @@ export class AutomationBroker {
     this.closed = true;
     await Promise.all([...this.owners.keys()].map((id) => this.closeOwner(id)));
     for (const id of this.owners.keys()) this.icons.release(id);
+    this.listeners.clear();
   }
   private caller(access: BrokerAccess): Owner {
     const bound = this.accesses.get(access);
@@ -955,7 +1032,8 @@ export class AutomationBroker {
     return owner;
   }
   private state(owner: Owner): void {
-    if (owner.listeners.size) this.emit(owner.id, { kind: 'state', state: this.liveState(owner) });
+    if (this.listeners.get(owner.id)?.size)
+      this.emit(owner.id, { kind: 'state', state: this.liveState(owner) });
   }
   private emit(id: string, event: AutomationEvent): void {
     const owner = this.owners.get(id);
@@ -966,7 +1044,7 @@ export class AutomationBroker {
       sessionId: id,
       value: structuredClone(event),
     };
-    for (const listener of owner.listeners) {
+    for (const listener of this.listeners.get(id) ?? []) {
       try {
         listener(structuredClone(envelope));
       } catch {

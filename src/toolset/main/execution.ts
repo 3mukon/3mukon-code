@@ -37,6 +37,7 @@ export type IncidentReport =
   | { kind: 'dialog-dismissed'; dialog: 'alert' | 'confirm' | 'prompt' }
   | { kind: 'secure-input'; enabled: boolean };
 export interface ExecutionContext {
+  callId: string;
   signal: AbortSignal;
   owner: string;
   turnId: string;

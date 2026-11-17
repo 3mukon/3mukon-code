@@ -537,22 +537,38 @@ describe('the fake presentation window, which answers as the window does', () =>
     expect(sent.at(-1)).toMatchObject({ kind: 'changed', state: { version: 3 } });
   });
 
-  it("passes on the user's request to see a presentation again, or a tab or application the session uses that no presentation shows", () => {
+  it("passes on the user's request to see a presentation again, or a tab or application the session uses that no presentation shows, and keeps main's answer for this page", () => {
     const { window, sent } = setUp();
-    window.requestShow(owner, 'presentation-1');
+    const again = window.requestShow(owner, 'presentation-1');
     expect(sent.at(-1)).toEqual({
       kind: 'show',
       epoch: window.epoch,
+      requestId: again,
       owner,
       presentationId: 'presentation-1',
     });
-    window.requestShowContent(owner, { kind: 'computer', targetId: 'target-1' });
+    const used = window.requestShowContent(owner, { kind: 'computer', targetId: 'target-1' });
+    expect(used).not.toBe(again);
     expect(sent.at(-1)).toEqual({
       kind: 'show',
       epoch: window.epoch,
+      requestId: used,
       owner,
       content: { kind: 'computer', targetId: 'target-1' },
     });
+    window.receive({
+      kind: 'show-answer',
+      epoch: window.epoch,
+      requestId: again,
+      outcome: 'expired',
+    });
+    window.receive({
+      kind: 'show-answer',
+      epoch: 'another-page',
+      requestId: used,
+      outcome: 'shown',
+    });
+    expect([...window.showOutcomes]).toEqual([[again, 'expired']]);
   });
 
   it("refuses another session's command for a presentation, without describing it, and a malformed one", () => {

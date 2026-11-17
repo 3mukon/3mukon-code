@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,6 +36,19 @@ afterEach(() => {
 const outside = { kind: 'notice', notice: 'outside' };
 
 describe('FileService', () => {
+  it('resolves presentation paths without granting outside files or escaping through links', async () => {
+    const allowed = join(workspace, 'src', 'a.ts');
+    symlinkSync(allowed, join(workspace, 'inside'));
+    symlinkSync(join(elsewhere, 'b.ts'), join(workspace, 'outside'));
+    expect(await files.presentationPath(join(workspace, 'inside'))).toBe(allowed);
+    expect(await files.presentationPath(join(workspace, 'outside'))).toBeNull();
+    expect(await files.presentationPath(join(workspace, 'missing'))).toBeNull();
+    expect(await files.presentationPath(workspace)).toBeNull();
+    const dropped = join(elsewhere, 'b.ts');
+    expect(await files.presentationPath(dropped)).toBeNull();
+    files.grant([dropped]);
+    expect(await files.presentationPath(dropped)).toBe(dropped);
+  });
   it('opens and saves files inside a workspace, and no others', async () => {
     expect(await files.open(join(workspace, 'src', 'a.ts'))).toEqual({
       kind: 'text',

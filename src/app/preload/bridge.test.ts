@@ -26,6 +26,89 @@ function fakeIpc() {
 const opening: AppSettings = { language: 'zh-Hans', appearance: 'dark', tooltips: false };
 
 describe('createBridge', () => {
+  it('scopes automation events to the subscription and owner, including cleanup before acceptance', async () => {
+    const { ipc, send } = fakeIpc();
+    let resolve!: () => void;
+    ipc.invoke.mockImplementationOnce(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
+    const bridge = createBridge(ipc, () => '', opening);
+    const listener = vi.fn();
+    const stop = bridge.automation.subscribe('a', listener);
+    const subscriptionId = ipc.invoke.mock.calls[0]?.[2];
+    const event = {
+      epoch: 'epoch',
+      sequence: 1,
+      sessionId: 'a',
+      value: { kind: 'presentation-notices', notices: [] },
+    };
+    send('automation:event', { subscriptionId: 'other', event });
+    send('automation:event', { subscriptionId, event: { ...event, sessionId: 'b' } });
+    expect(listener).not.toHaveBeenCalled();
+    send('automation:event', { subscriptionId, event });
+    expect(listener).toHaveBeenCalledExactlyOnceWith(event);
+    stop();
+    stop();
+    send('automation:event', { subscriptionId, event });
+    expect(listener).toHaveBeenCalledOnce();
+    resolve();
+    await vi.waitFor(() => {
+      expect(ipc.invoke).toHaveBeenCalledWith('automation:unsubscribe', subscriptionId);
+    });
+    expect(
+      ipc.invoke.mock.calls.filter(([name]) => name === 'automation:unsubscribe'),
+    ).toHaveLength(1);
+    await bridge.automation.snapshot('a');
+    await bridge.automation.capabilities('a');
+    await bridge.automation.callRecord('a', 'call');
+    await bridge.automation.callFrames('a', 'call');
+    await bridge.automation.icon('a', 'icon');
+    await bridge.automation.answer('a', 'request', { decision: 'allow-once' });
+    await bridge.automation.stop('a');
+    await bridge.automation.endOperation('a', 'operation');
+    await bridge.automation.endGrant('a', 'grant');
+    expect(ipc.invoke.mock.calls.slice(2)).toEqual([
+      ['automation:snapshot', 'a'],
+      ['automation:capabilities', 'a'],
+      ['automation:call-record', 'a', 'call'],
+      ['automation:call-frames', 'a', 'call'],
+      ['automation:icon', 'a', 'icon'],
+      ['automation:answer', 'a', 'request', { decision: 'allow-once' }],
+      ['automation:stop', 'a'],
+      ['automation:end-operation', 'a', 'operation'],
+      ['automation:end-grant', 'a', 'grant'],
+    ]);
+  });
+  it('carries presentation commands without Electron objects and removes its subscription', async () => {
+    const { ipc, send } = fakeIpc();
+    const bridge = createBridge(ipc, () => '', opening);
+    const listener = vi.fn();
+    const stop = bridge.presentations.onMessage(listener);
+    const command = {
+      kind: 'close',
+      commandId: 'c',
+      epoch: 'e',
+      owner: 'a',
+      presentationId: 'p',
+      version: 1,
+    };
+    send('presentations:message', command);
+    expect(listener).toHaveBeenCalledExactlyOnceWith(command);
+    stop();
+    send('presentations:message', command);
+    expect(listener).toHaveBeenCalledOnce();
+    bridge.presentations.send({ kind: 'cancelled', epoch: 'e', commandId: 'c' });
+    await bridge.presentations.artifact('artifact');
+    expect(ipc.invoke).toHaveBeenCalledWith('presentations:report', {
+      kind: 'cancelled',
+      epoch: 'e',
+      commandId: 'c',
+    });
+    expect(ipc.invoke).toHaveBeenCalledWith('presentations:artifact', 'artifact');
+  });
   it('invokes one channel for each call, with the call’s values, and returns the answer', async () => {
     const { ipc } = fakeIpc();
     const bridge = createBridge(ipc, () => '', opening);

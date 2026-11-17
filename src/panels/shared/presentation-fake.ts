@@ -5,6 +5,7 @@ import {
   type PresentationHostMessage,
   type PresentationRendererMessage,
   type PresentationReport,
+  type ShowOutcome,
   type UsedContent,
 } from './presentation';
 import {
@@ -22,11 +23,15 @@ export const FAKE_SESSION_BOX: PanelBox = { x: 0, y: 0, width: 0.5, height: 1 };
 // sessions' panels take its left half, and each presentation's open panels lie side by side across
 // its right half, unless the test has placed them. A test can act as the user, who opens and closes
 // sessions' panels, leaves no room beside one, edits files, drags, moves, resizes and closes panels and
-// asks to see presentations again; change the layout around a presentation; or reload, which starts a
-// new page that has nothing. Time stands still until the test advances it.
+// asks to see presentations again, whose outcomes it keeps by request; change the layout around a
+// presentation; or reload, which starts a new page that has nothing. Time stands still until the test
+// advances it.
 export class FakePresentationWindow {
   private ledger: PresentationLedger;
   private pages = 1;
+  private shows = 0;
+  // The outcomes main gave the user's requests to see something again, by request.
+  readonly showOutcomes = new Map<string, ShowOutcome>();
   private now = 0;
   private dragging = false;
   private readonly sessions: Set<string>;
@@ -52,6 +57,10 @@ export class FakePresentationWindow {
 
   // A message from main, as the preload bridge delivers it.
   receive(message: PresentationHostMessage): void {
+    if (message.kind === 'show-answer') {
+      if (message.epoch === this.epoch) this.showOutcomes.set(message.requestId, message.outcome);
+      return;
+    }
     this.take(this.ledger.receive(message, this.facts(), this.now));
   }
 
@@ -100,15 +109,26 @@ export class FakePresentationWindow {
     this.report(this.ledger.placed(presentationId));
   }
 
-  // The user asks, from a session's activity, to see one of its presentations again.
-  requestShow(owner: string, presentationId: string): void {
-    this.send({ kind: 'show', epoch: this.epoch, owner, presentationId });
+  // The user asks, from a session's activity, to see one of its presentations again: the request's
+  // id, by which showOutcomes keeps main's answer.
+  requestShow(owner: string, presentationId: string): string {
+    const requestId = this.nextShow();
+    this.send({ kind: 'show', epoch: this.epoch, requestId, owner, presentationId });
+    return requestId;
   }
 
   // The user asks, from the line above a session's composer, to see a tab or application the session
   // uses that no presentation shows.
-  requestShowContent(owner: string, content: UsedContent): void {
-    this.send({ kind: 'show', epoch: this.epoch, owner, content: structuredClone(content) });
+  requestShowContent(owner: string, content: UsedContent): string {
+    const requestId = this.nextShow();
+    this.send({
+      kind: 'show',
+      epoch: this.epoch,
+      requestId,
+      owner,
+      content: structuredClone(content),
+    });
+    return requestId;
   }
 
   startDrag(): void {
@@ -138,6 +158,11 @@ export class FakePresentationWindow {
     this.unsavedItems.clear();
     this.placedBoxes.clear();
     this.sendSnapshot();
+  }
+
+  private nextShow(): string {
+    this.shows += 1;
+    return `fake-show-${String(this.shows)}`;
   }
 
   private newPage(): PresentationLedger {

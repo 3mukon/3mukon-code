@@ -2,9 +2,11 @@ import type { AccountsBridge } from '../../accounts/shared/accounts';
 import type { ApprovalsBridge } from '../../approvals/shared/approvals';
 import type { FilesBridge } from '../../files/shared/files';
 import type { PanelsBridge } from '../../panels/shared/panels';
+import type { PresentationBridge } from '../../panels/shared/presentation';
 import type { SessionsBridge } from '../../sessions/shared/sessions';
 import type { SettingsBridge } from '../../settings/shared/settings';
 import type { TerminalBridge } from '../../terminal/shared/terminal';
+import type { AutomationBridge } from '../../toolset/shared/automation';
 import type { Prompt } from '../../ui/shared/prompts';
 import type { WorkspacesBridge } from '../../workspaces/shared/workspaces';
 
@@ -14,6 +16,8 @@ export interface Bridge {
   workspaces: WorkspacesBridge;
   sessions: SessionsBridge;
   panels: PanelsBridge;
+  presentations: PresentationBridge;
+  automation: AutomationBridge;
   files: FilesBridge;
   approvals: ApprovalsBridge;
   settings: SettingsBridge;
@@ -37,6 +41,20 @@ export const settingsSwitch = '--app-settings=';
 
 // The bridge's IPC channels: one per call the main process answers, and one per notification it sends.
 export const channels = {
+  automation: {
+    snapshot: 'automation:snapshot',
+    subscribe: 'automation:subscribe',
+    unsubscribe: 'automation:unsubscribe',
+    event: 'automation:event',
+    callRecord: 'automation:call-record',
+    callFrames: 'automation:call-frames',
+    icon: 'automation:icon',
+    capabilities: 'automation:capabilities',
+    answer: 'automation:answer',
+    stop: 'automation:stop',
+    endOperation: 'automation:end-operation',
+    endGrant: 'automation:end-grant',
+  },
   workspaces: {
     get: 'workspaces:get',
     changed: 'workspaces:changed',
@@ -79,6 +97,11 @@ export const channels = {
   },
   panels: {
     itemsAt: 'panels:items-at',
+  },
+  presentations: {
+    message: 'presentations:message',
+    report: 'presentations:report',
+    artifact: 'presentations:artifact',
   },
   files: {
     open: 'files:open',

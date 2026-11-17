@@ -29,9 +29,13 @@ export interface RunningToolset {
 export async function startToolset({
   version,
   tools = [],
+  onOwnerRemoved,
+  onDeliveryOpportunity,
 }: {
   version: string;
   tools?: readonly AutomationTool[];
+  onOwnerRemoved?: (id: string) => void;
+  onDeliveryOpportunity?: () => void;
 }): Promise<RunningToolset> {
   const broker = new AutomationBroker(tools);
 
@@ -47,7 +51,17 @@ export async function startToolset({
         name: tool.name,
         description: tool.description,
         inputSchema: {
-          ...z.toJSONSchema(tool.inputSchema.extend({ actionId: z.string().min(1).max(128) })),
+          ...z.toJSONSchema(
+            tool.inputSchema.extend({
+              actionId: z
+                .string()
+                .min(1)
+                .max(128)
+                .describe(
+                  'A unique ID for this action. Reuse it only for an immediate retry with the exact same arguments. Settled IDs have a bounded retention window; give each new action a new ID.',
+                ),
+            }),
+          ),
           type: 'object',
         },
       }),
@@ -91,6 +105,13 @@ export async function startToolset({
       url: `http://${host}${PATH}`,
       credential,
       generation: access.generation,
+      tools: descriptions.map((tool) => tool.name),
+      availability: (value) => {
+        broker.providerAvailability(access, value);
+      },
+      result: (tool, entry, receipt) => {
+        broker.providerResult(access, tool, entry, receipt);
+      },
       close() {
         opened.delete(key);
         credentialsByOwner.get(id)?.delete(key);
@@ -140,16 +161,18 @@ export async function startToolset({
           binding.active = false;
           forgetOwner(id);
           await broker.closeOwner(id, remove);
+          if (remove) onOwnerRemoved?.(id);
           if (remove && owns()) bindings.delete(id);
         },
         prepareSend() {
           if (!active()) throw new Error('access-revoked');
+          onDeliveryOpportunity?.();
           broker.beginTurn(id);
           const delivery = broker.prepareNotices(id);
           return {
             context: { presentationNotices: delivery.notices },
-            accepted: () => {
-              if (owns()) broker.noticesDelivered(id, delivery.id, true);
+            accepted: (delivered) => {
+              if (owns()) broker.noticesDelivered(id, delivery.id, true, delivered);
             },
             failed: () => {
               if (owns()) broker.noticesDelivered(id, delivery.id, false);
@@ -192,10 +215,14 @@ export async function startToolset({
     }
     const mcp = new McpServer({ name: TOOLSET_NAME, version });
     mcp.server.registerCapabilities({ tools: {} });
-    mcp.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: descriptions }));
+    mcp.server.setRequestHandler(ListToolsRequestSchema, () => {
+      broker.discovered(access);
+      return { tools: descriptions };
+    });
     // Validate feature arguments in the broker after allocating the call receipt, so even a bad
     // argument has an activity record. MCP still validates the protocol envelope through the SDK.
     mcp.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+      onDeliveryOpportunity?.();
       const name = request.params.name;
       if (name === 'automation_capabilities') {
         const capabilities = broker.capabilitiesFor(access);

@@ -43,8 +43,10 @@ test('the page reaches the main process only through the bridge’s functions', 
       parts: [
         'accounts',
         'approvals',
+        'automation',
         'files',
         'panels',
+        'presentations',
         'prompts',
         'sessions',
         'settings',
@@ -52,6 +54,22 @@ test('the page reaches the main process only through the bridge’s functions', 
         'workspaces',
       ],
       calls: [
+        [
+          'automation',
+          [
+            'answer:function',
+            'callFrames:function',
+            'callRecord:function',
+            'capabilities:function',
+            'endGrant:function',
+            'endOperation:function',
+            'icon:function',
+            'snapshot:function',
+            'stop:function',
+            'subscribe:function',
+          ],
+        ],
+        ['presentations', ['artifact:function', 'onMessage:function', 'send:function']],
         [
           'workspaces',
           [

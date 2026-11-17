@@ -7,7 +7,6 @@ import {
   type PresentationAnswer,
   type PresentationCancel,
   type PresentationCommand,
-  type PresentationHostMessage,
   type PresentationRefusal,
   type PresentationReport,
   type PresentationSnapshot,
@@ -123,7 +122,7 @@ export class PresentationLedger {
   // once; an update, which places none, goes ahead. The rules check any other command, refusing it at
   // once or giving the plan for the layout, and so a command that waited, as it comes again once the
   // drag is over.
-  receive(message: PresentationHostMessage, area: AreaFacts, now: number): Step {
+  receive(message: PresentationCommand | PresentationCancel, area: AreaFacts, now: number): Step {
     if (message.kind === 'cancel') return { kind: 'answer', answer: this.cancel(message) };
     const text = json(message);
     const answered = this.answers.get(message.commandId);

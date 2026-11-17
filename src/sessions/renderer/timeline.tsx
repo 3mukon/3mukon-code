@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react';
+import { createContext, memo, useContext, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StatusDot, type Status } from '../../ui/renderer/status-dot';
 import type { MessageImage, Task } from '../shared/events';
@@ -17,6 +17,18 @@ import { FileChangeEntry, ToolCall } from './tool-call';
 // decides, and tells whether it is the session's oldest waiting request; the approvals module shows
 // it, with what answers it.
 export type RenderRequest = (item: RequestItem, place: { oldestWaiting: boolean }) => ReactNode;
+
+// What whoever composes the page shows under a tool call, by the provider's id for the call, such as
+// what the app's own tools did, or nothing.
+export type RenderToolExtra = (toolId: string) => ReactNode;
+
+// The extras reach each tool call's entry through the context, so that what they show changing renders
+// only the extras again, never the entries, which render again only as their own items change.
+const ToolExtras = createContext<RenderToolExtra | undefined>(undefined);
+
+function ToolExtra({ id }: { id: string }) {
+  return useContext(ToolExtras)?.(id) ?? null;
+}
 
 // How a session's status shows as a dot: a closed session as done.
 export const statusDots: Record<SessionStatus, Status> = {
@@ -44,20 +56,29 @@ interface TimelineProps {
   // The provider's name, which VoiceOver reads before each of the agent's messages.
   agent: string;
   renderRequest?: RenderRequest;
+  renderToolExtra?: RenderToolExtra;
 }
 
 // A session's activity, oldest first, as the reference's panes show it: the messages (Message), the
 // user's at the right and the agent's at the left, so that the two never read alike, and the agent's
 // thinking quieter; each tool call as one entry, with the files it changed and their diffs; the
-// approvals and questions, as the page's composer renders them; errors, then the agent's task list
+// approvals and questions, as the page's composer renders them, and under a tool call what whoever
+// composes the page gives it; errors, then the agent's task list
 // with finished rows struck through and the current one bright, and Working while a turn runs, with
 // the provider's retry of a failed request to the model under it while it retries.
-export function Timeline({ state, from = 0, pending, agent, renderRequest }: TimelineProps) {
+export function Timeline({
+  state,
+  from = 0,
+  pending,
+  agent,
+  renderRequest,
+  renderToolExtra,
+}: TimelineProps) {
   const { t } = useTranslation();
   const working = pending !== undefined || state?.turnRunning === true;
   const oldestWaiting = state === null ? undefined : openRequests(state)[0]?.id;
   return (
-    <>
+    <ToolExtras.Provider value={renderToolExtra}>
       {state?.timeline.slice(from).map((item, index) => (
         <Item
           key={keyOf(item, from + index)}
@@ -91,7 +112,7 @@ export function Timeline({ state, from = 0, pending, agent, renderRequest }: Tim
         </p>
       )}
       {working && state?.retrying !== undefined && <RetryNotice retrying={state.retrying} />}
-    </>
+    </ToolExtras.Provider>
   );
 }
 
@@ -145,7 +166,12 @@ const Item = memo(function Item({ item, agent, oldestWaiting, renderRequest }: I
     case 'message':
       return <Message role={item.role} text={item.text} images={item.images} agent={agent} />;
     case 'tool':
-      return <ToolCall item={item} />;
+      return (
+        <>
+          <ToolCall item={item} />
+          <ToolExtra id={item.id} />
+        </>
+      );
     case 'file-change':
       return <FileChangeEntry change={item.change} />;
     case 'approval':

@@ -7,6 +7,8 @@ import type { FileService } from '../../files/main/files';
 import type { FilesUi } from '../../files/main/native';
 import { MAX_EDITABLE_BYTES } from '../../files/shared/files';
 import { droppedItems } from '../../panels/main/items';
+import type { PresentationHost } from '../../panels/main/presentation-host';
+import { presentationRendererSchema } from '../../panels/main/presentation-validation';
 import type { RememberedChoices } from '../../sessions/main/choices';
 import type { SessionHost } from '../../sessions/main/host';
 import { dayFolder, makeDayFolder } from '../../sessions/main/folders';
@@ -16,13 +18,17 @@ import type { Settings } from '../../settings/main/settings';
 import type { AppSettings } from '../../settings/shared/settings';
 import type { TerminalUi } from '../../terminal/main/native';
 import type { TerminalViewer, Terminals } from '../../terminal/main/terminals';
+import type { AutomationBridge } from '../../toolset/shared/automation';
 import { MAX_COLUMNS, MAX_ROWS } from '../../terminal/shared/terminal';
 import type { Workspaces, WorkspacesUi } from '../../workspaces/main/workspaces';
 import { channels } from '../shared/bridge';
 import { isAppPage, isWebUrl } from './links';
 import { answerPrompt } from './prompts';
+import { AutomationSubscriptions } from './automation-ui';
 
 interface BridgeServices {
+  presentations: PresentationHost;
+  automation: AutomationBridge;
   workspaces: Workspaces;
   sessions: SessionHost;
   // The settings each folder's sessions last used.
@@ -152,6 +158,8 @@ const url = z.string().max(8_192);
 // frame of an app window showing the app's own page, and its values must have the shapes the call
 // takes; anything else is refused.
 export function serveBridge({
+  presentations,
+  automation,
   workspaces,
   sessions,
   choices,
@@ -175,6 +183,99 @@ export function serveBridge({
       answer(callerWindow(event, page), ...values.parse(given)),
     );
   }
+
+  const subscriptions = new AutomationSubscriptions(automation);
+  const automationWindows = new Set<number>();
+  handle(channels.automation.snapshot, z.tuple([id]), (_window, session) =>
+    automation.snapshot(session),
+  );
+  handle(channels.automation.capabilities, z.tuple([id]), (_window, session) =>
+    automation.capabilities(session),
+  );
+  handle(channels.automation.callRecord, z.tuple([id, id]), (_window, session, call) =>
+    automation.callRecord(session, call),
+  );
+  handle(channels.automation.callFrames, z.tuple([id, id]), (_window, session, call) =>
+    automation.callFrames(session, call),
+  );
+  handle(channels.automation.icon, z.tuple([id, id]), (_window, session, icon) =>
+    automation.icon(session, icon),
+  );
+  handle(
+    channels.automation.answer,
+    z.tuple([id, id, approvalAnswer]),
+    (_window, session, request, answer) => automation.answer(session, request, answer),
+  );
+  handle(channels.automation.stop, z.tuple([id]), (_window, session) => automation.stop(session));
+  handle(channels.automation.endOperation, z.tuple([id, id]), (_window, session, operation) =>
+    automation.endOperation(session, operation),
+  );
+  handle(channels.automation.endGrant, z.tuple([id, id]), (_window, session, grant) =>
+    automation.endGrant(session, grant),
+  );
+  handle(channels.automation.subscribe, z.tuple([id, id]), (window, session, subscriptionId) => {
+    const contents = window.webContents;
+    subscriptions.add(contents.id, subscriptionId, session, (event) => {
+      if (!contents.isDestroyed())
+        contents.send(channels.automation.event, { subscriptionId, event });
+    });
+    if (!automationWindows.has(contents.id)) {
+      automationWindows.add(contents.id);
+      const lost = () => {
+        subscriptions.release(contents.id);
+      };
+      contents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+        if (mainFrame && !inPlace) lost();
+      });
+      contents.on('render-process-gone', lost);
+      contents.once('destroyed', () => {
+        lost();
+        automationWindows.delete(contents.id);
+      });
+    }
+  });
+  handle(channels.automation.unsubscribe, z.tuple([id]), (window, subscriptionId) => {
+    subscriptions.remove(window.webContents.id, subscriptionId);
+  });
+
+  let presentationWindow: WebContents | undefined;
+  const presentationWindows = new Set<number>();
+  handle(
+    channels.presentations.report,
+    z.tuple([presentationRendererSchema]),
+    (window, message) => {
+      const contents = window.webContents;
+      if (presentationWindow && presentationWindow !== contents) return false;
+      if (!presentationWindow) {
+        if (message.kind !== 'snapshot') return false;
+        presentationWindow = contents;
+        presentations.connect((command) => {
+          if (!contents.isDestroyed()) contents.send(channels.presentations.message, command);
+        });
+      }
+      if (!presentationWindows.has(contents.id)) {
+        presentationWindows.add(contents.id);
+        const lost = () => {
+          if (presentationWindow === contents) {
+            presentationWindow = undefined;
+            presentations.disconnect();
+          }
+        };
+        contents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+          if (mainFrame && !inPlace) lost();
+        });
+        contents.on('render-process-gone', lost);
+        contents.once('destroyed', () => {
+          presentationWindows.delete(contents.id);
+          lost();
+        });
+      }
+      return presentations.receive(message);
+    },
+  );
+  handle(channels.presentations.artifact, z.tuple([path.min(1)]), (window, id) =>
+    window.webContents === presentationWindow ? presentations.artifact(id) : null,
+  );
 
   handle(channels.workspaces.get, z.tuple([]), () => workspaces.list());
   handle(channels.workspaces.add, z.tuple([]), (window) => workspaces.add(workspacesUi(window)));
@@ -457,7 +558,12 @@ function callerWindow(event: IpcMainInvokeEvent, page: string): BrowserWindow {
   const window = BrowserWindow.fromWebContents(event.sender);
   // A frame without a parent is the page's main frame.
   const frame = event.senderFrame;
-  if (window === null || frame?.parent !== null || !isAppPage(frame.url, page)) {
+  if (
+    window === null ||
+    frame !== event.sender.mainFrame ||
+    frame.parent !== null ||
+    !isAppPage(frame.url, page)
+  ) {
     throw new Error('The bridge answers only the app’s own page.');
   }
   return window;

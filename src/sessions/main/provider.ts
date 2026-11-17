@@ -12,6 +12,8 @@ import type {
 } from '../shared/events';
 import type {
   AutomationPolicy,
+  AutomationCallReceipt,
+  Availability,
   EndReason,
   PresentationNotice,
   ProviderToolLink,
@@ -80,11 +82,21 @@ export interface ProviderSession {
   // message is reported at once. While no turn runs it starts one, whose progress and end arrive as
   // events; during a turn it goes to the running turn, or, where the provider cannot add it there, to a
   // turn of its own that follows, as the provider takes it.
-  send(text: string, images?: MessageImage[], context?: HostTurnContext): Promise<void>;
+  send(
+    text: string,
+    images?: MessageImage[],
+    context?: HostTurnContext,
+    delivery?: HostContextDelivery,
+  ): Promise<void>;
   // Stops the running turn. Approvals and questions still open resolve as cancelled.
   interrupt(): Promise<void>;
   answerApproval(requestId: string, answer: ApprovalAnswer): Promise<void>;
-  answerQuestion(requestId: string, answer: QuestionAnswer): Promise<void>;
+  answerQuestion(
+    requestId: string,
+    answer: QuestionAnswer,
+    context?: HostTurnContext,
+    delivery?: HostContextDelivery,
+  ): Promise<void>;
   // Switches the permission mode for what follows.
   setMode(mode: PermissionMode): Promise<void>;
   // Switches the model for what follows; null returns to the provider's default.
@@ -119,8 +131,24 @@ export interface ToolsetAccess {
   // opens only the toolset and only for this session, and is never a provider credential.
   readonly credential: string;
   readonly generation?: number;
+  // Canonical names registered by this app, for routing native approvals to the host broker.
+  readonly tools?: readonly string[];
+  // Adapter observations only; neither method is exposed to the model or the renderer.
+  availability?(value: Availability): void;
+  result?(toolName: string, providerToolId: string, receipt: AutomationCallReceipt): void;
   // Ends the session's access.
-  close(): void;
+  close: () => void;
+}
+
+// Providers may include their HTTP configuration in an error. Hide only this process's app-owned
+// transport credential; provider credentials never enter this interface.
+export function toolsetErrorMessage(error: unknown, access?: ToolsetAccess): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return access?.credential ? message.replaceAll(access.credential, '[toolset access]') : message;
+}
+export function toolsetError(error: unknown, access?: ToolsetAccess): Error {
+  // The cause may hold raw transport configuration, so it must not accompany the sanitized error.
+  return new Error(toolsetErrorMessage(error, access));
 }
 
 // App composition supplies the implementation; sessions imports no automation backend.
@@ -137,11 +165,19 @@ export interface SessionAutomation {
   close(remove?: boolean): Promise<void>;
   // Accepted means a capable provider accepted the context with the turn, not that the renderer
   // queued it. Old adapters and failed sends leave notices pending. User text stays unchanged.
-  prepareSend(): { context: HostTurnContext; accepted(): void; failed(): void };
+  prepareSend(): HostContextDelivery & { context: HostTurnContext };
   linkResult(link: ProviderToolLink): void;
 }
 export interface HostTurnContext {
   presentationNotices: readonly PresentationNotice[];
+}
+// Separate from the serializable context: queued input is not yet delivery. The adapter settles
+// this only on a native acknowledgement, or failure, including cancellation of its queued messages.
+export interface HostContextDelivery {
+  // Queued messages can share a bounded context. Omitted notices stay pending, and an older
+  // prepared version cannot acknowledge a newer change.
+  accepted(delivered?: readonly PresentationNotice[]): void;
+  failed(): void;
 }
 
 // A process a provider starts outside its sessions, such as one that lists its models or reads its

@@ -200,7 +200,22 @@
     "sessionPage": "New session",
     "close": "Close panel",
     "resize": "Resize panels",
-    "unsaved": "Unsaved changes"
+    "unsaved": "Unsaved changes",
+    "presented": "{{session}} showed {{title}} beside it",
+    "someSession": "A session",
+    "result": "Result",
+    "resultLoading": "Loading the result…",
+    "resultGone": "This result is no longer available.",
+    "resultInvalid": "This result can’t be shown.",
+    "notYet": "This can’t be shown here yet.",
+    "showed": "Showed {{title}} beside this session",
+    "show": "Show",
+    "showOutcome": {
+      "expired": "It’s no longer available.",
+      "unsaved-changes": "One of its panels has unsaved changes.",
+      "busy": "It’s changing; try again.",
+      "unavailable": "It can’t be shown now."
+    }
   },
   "settings": {
     "title": "Settings",

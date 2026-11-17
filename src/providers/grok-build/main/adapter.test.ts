@@ -11,8 +11,9 @@ import {
   type StopReason,
   type Stream,
 } from '@agentclientprotocol/sdk';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountNews } from '../../../accounts/main/source';
+import type { ToolsetAccess } from '../../../sessions/main/provider';
 import type { ProviderSession } from '../../../sessions/main/provider';
 import type { SessionEvent } from '../../../sessions/shared/events';
 import { createGrokBuildProvider } from './adapter';
@@ -97,6 +98,135 @@ let pages: ListSessionsResponse[];
 // Whether a stopped process takes its time to exit, as Grok does.
 let slowExit: boolean;
 let fakes: FakeGrok[];
+let automationCapabilities = false;
+
+it.each(['auto', 'yolo'] as const)(
+  'connects HTTP on new and resume in %s and retains context until the native answer',
+  async (mode) => {
+    automationCapabilities = true;
+    const accesses: ToolsetAccess[] = [];
+    const linked = vi.fn();
+    const bound = {
+      name: '3mukon-code',
+      open() {
+        const access = {
+          url: 'http://127.0.0.1:4000/mcp',
+          credential: `synthetic-${String(accesses.length)}`,
+          tools: ['panel_list'],
+          close: vi.fn(),
+          result: linked,
+          availability: vi.fn(),
+        };
+        accesses.push(access);
+        return access;
+      },
+    };
+    const { session, events, until } = await open((onEvent) =>
+      provider.start(
+        { cwd: '/work', mode, model: 'grok-small', effort: 'low', toolset: bound },
+        onEvent,
+      ),
+    );
+    expect(fake().paramsOf('session/new')[0]?.mcpServers).toEqual([
+      {
+        type: 'http',
+        name: '3mukon-code',
+        url: accesses[0]?.url,
+        headers: [{ name: 'Authorization', value: 'Bearer synthetic-0' }],
+      },
+    ]);
+    await expect(
+      fake().request({
+        sessionId: 'grok-1',
+        toolCall: { toolCallId: 'entry', kind: 'other', title: '3mukon-code__panel_list' },
+        options: OPTIONS,
+      }),
+    ).resolves.toEqual({ outcome: { outcome: 'selected', optionId: 'allow-once' } });
+    expect(events.some((e) => e.type === 'approval-requested')).toBe(false);
+    const delivery = { accepted: vi.fn(), failed: vi.fn() };
+    const notice = {
+      noticeId: 'n',
+      owner: 'owner',
+      reuseKey: 'r',
+      presentation: {
+        id: 'p',
+        title: 'Fixture',
+        version: 1,
+        items: [{ content: { kind: 'file' as const, path: '/work/a.md' }, box: null }],
+      },
+    };
+    await session.send('Original text', [], { presentationNotices: [notice] }, delivery);
+    await fake().prompted();
+    expect(delivery.accepted).not.toHaveBeenCalled();
+    expect(fake().paramsOf('session/prompt')[0]?.prompt).toEqual([
+      expect.objectContaining({ type: 'resource' }),
+      { type: 'text', text: 'Original text' },
+    ]);
+    const envelope = {
+      automation: { schemaVersion: 1, callId: 'receipt' },
+      outcome: { status: 'verified', value: null },
+      presentationNotices: [],
+    };
+    await fake().update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'entry',
+      status: 'completed',
+      rawOutput: envelope,
+    });
+    await until(() => linked.mock.calls.length === 1);
+    expect(linked).toHaveBeenCalledWith('panel_list', 'entry', envelope.automation);
+    fake().endPrompt('end_turn');
+    await until(() => delivery.accepted.mock.calls.length === 1);
+    await session.setSandbox('read-only');
+    expect(accesses).toHaveLength(2);
+    expect(accesses[0]?.close).toHaveBeenCalled();
+    expect(fake(1).paramsOf('session/resume')[0]?.mcpServers).toEqual([
+      {
+        type: 'http',
+        name: '3mukon-code',
+        url: accesses[1]?.url,
+        headers: [{ name: 'Authorization', value: 'Bearer synthetic-1' }],
+      },
+    ]);
+    expect(fake(1).paramsOf('session/set_config_option')).toContainEqual({
+      sessionId: 'grok-1',
+      configId: 'model',
+      value: 'grok-small',
+    });
+    expect(fake(1).paramsOf('session/set_config_option')).toContainEqual({
+      sessionId: 'grok-1',
+      configId: 'reasoning_effort',
+      value: 'low',
+    });
+    await session.close();
+    expect(accesses[1]?.close).toHaveBeenCalled();
+  },
+);
+
+it('reports unsupported HTTP without disabling ordinary chat', async () => {
+  const availability = vi.fn();
+  const access = {
+    url: 'http://127.0.0.1:4000/mcp',
+    credential: 'synthetic',
+    close: vi.fn(),
+    availability,
+  };
+  const { session } = await open((onEvent) =>
+    provider.resume(
+      { cwd: '/work', sessionId: 'grok-1', toolset: { name: '3mukon-code', open: () => access } },
+      onEvent,
+    ),
+  );
+  expect(availability).toHaveBeenCalledWith({
+    tools: 'unavailable',
+    images: 'unsupported',
+    reason: { code: 'transport-unsupported', transport: 'streamable-http' },
+  });
+  expect(fake().paramsOf('session/load')[0]?.mcpServers).toEqual([]);
+  await session.send('Chat still works');
+  await fake().prompted();
+  await session.close();
+});
 
 beforeEach(() => {
   replay = [];
@@ -106,6 +236,7 @@ beforeEach(() => {
   pages = [];
   slowExit = false;
   fakes = [];
+  automationCapabilities = false;
 });
 
 function memoryStreams(): [Stream, Stream] {
@@ -144,7 +275,15 @@ class FakeGrok {
         record('initialize', params);
         return {
           protocolVersion: 1,
-          agentCapabilities: { loadSession: true },
+          agentCapabilities: {
+            loadSession: true,
+            ...(automationCapabilities
+              ? {
+                  mcpCapabilities: { http: true },
+                  promptCapabilities: { image: true, embeddedContext: true },
+                }
+              : {}),
+          },
           authMethods: [],
           _meta: { modelState: MODEL_STATE },
         };

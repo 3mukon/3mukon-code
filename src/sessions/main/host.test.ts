@@ -1090,6 +1090,56 @@ function automationFixture() {
 }
 
 describe('session automation lifecycle', () => {
+  it('sends the user message and by-message answer even when supplemental context cannot be prepared', async () => {
+    const fake = fakeProvider('codex');
+    const automation = automationFixture();
+    automation.session.prepareSend.mockImplementation(() => {
+      throw Error('access-revoked');
+    });
+    const host = new SessionHost(
+      [fake.provider],
+      memoryRecords().records,
+      memoryTextStorage(),
+      automation,
+    );
+    const id = await host.start('codex', { cwd: folder('web') });
+    await host.send(id, 'Original message');
+    expect(fake.sessions[0]?.send).toHaveBeenCalledExactlyOnceWith('Original message', []);
+    fake.listeners[0]?.({
+      type: 'question-asked',
+      request: { id: 'async', questions: [], requestedAt: 1, byMessage: true },
+    });
+    const answer = { decision: 'answer' as const, answers: { '0': { selected: ['Yes'] } } };
+    await host.answerQuestion(id, 'async', answer);
+    expect(fake.sessions[0]?.answerQuestion).toHaveBeenCalledExactlyOnceWith('async', answer);
+    await host.closeAll();
+  });
+  it('offers pending context on question replies that start a message, without consuming a locally queued reply', async () => {
+    const fake = fakeProvider('codex');
+    const automation = automationFixture();
+    const host = new SessionHost(
+      [fake.provider],
+      memoryRecords().records,
+      memoryTextStorage(),
+      automation,
+    );
+    const id = await host.start('codex', { cwd: folder('web') });
+    fake.listeners[0]?.({
+      type: 'question-asked',
+      request: { id: 'async-question', questions: [], requestedAt: 1, byMessage: true },
+    });
+    const answer = {
+      decision: 'answer' as const,
+      answers: { '0': { selected: ['Yes'], text: '' } },
+    };
+    await host.answerQuestion(id, 'async-question', answer);
+    const sent = fake.sessions[0]?.answerQuestion.mock.calls[0];
+    expect(sent?.[2]).toEqual({ presentationNotices: [] });
+    expect(automation.accepted).not.toHaveBeenCalled();
+    sent?.[3]?.accepted();
+    expect(automation.accepted).toHaveBeenCalledOnce();
+    await host.closeAll();
+  });
   it('binds the app owner before startup, preserving it across a different native ID and resume', async () => {
     const fake = fakeProvider('codex');
     const automation = automationFixture();
@@ -1141,7 +1191,14 @@ describe('session automation lifecycle', () => {
     );
     const id = await host.start('codex', { cwd: folder('web') });
     await host.send(id, 'Hello');
-    expect(fake.sessions[0]?.send).toHaveBeenCalledWith('Hello', [], { presentationNotices: [] });
+    expect(fake.sessions[0]?.send).toHaveBeenCalledWith(
+      'Hello',
+      [],
+      { presentationNotices: [] },
+      expect.objectContaining({ accepted: automation.accepted }),
+    );
+    expect(automation.accepted).not.toHaveBeenCalled();
+    fake.sessions[0]?.send.mock.calls[0]?.[3]?.accepted();
     expect(automation.accepted).toHaveBeenCalledTimes(1);
     fake.sessions[0]?.send.mockRejectedValueOnce(new Error('Send failed.'));
     await expect(host.send(id, 'Retry')).rejects.toThrow('Send failed.');

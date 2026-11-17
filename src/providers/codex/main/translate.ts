@@ -120,7 +120,12 @@ export class Translator {
   history(item: ThreadItem): SessionEvent[] {
     if (item.type !== 'userMessage') return this.item(item, true);
     const text = item.content
-      .flatMap((input) => (input.type === 'text' ? [input.text] : []))
+      .flatMap((input) =>
+        input.type === 'text' &&
+        !input.text_elements.some((element) => element.placeholder === PRESENTATION_CONTEXT)
+          ? [input.text]
+          : [],
+      )
       .join('\n');
     const images = item.content.flatMap((input) =>
       input.type === 'image' && 'url' in input ? imagesOfUrl(input.url) : [],
@@ -451,3 +456,4 @@ function mcpOutput(result: McpToolCallResult | null, error: McpToolCallError | n
   );
   return text.join('\n').slice(0, OUTPUT_LIMIT);
 }
+import { PRESENTATION_CONTEXT } from '../../../sessions/shared/host-context';

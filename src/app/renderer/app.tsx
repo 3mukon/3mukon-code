@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccountsButton, AccountsPanel } from '../../accounts/renderer/accounts-panel';
 import { SignInPrompt, UsageNotice } from '../../accounts/renderer/session-notes';
@@ -16,6 +16,7 @@ import {
   type Panel,
 } from '../../panels/renderer/layout';
 import { PanelArea, type PanelAreaHandle, type PanelView } from '../../panels/renderer/panel-area';
+import { PresentationEntry } from '../../panels/renderer/presentation-entry';
 import { usePanels } from '../../panels/renderer/use-panels';
 import type { PanelContent } from '../../panels/shared/panels';
 import type { ProviderId } from '../../sessions/shared/events';
@@ -36,6 +37,8 @@ import { useWorkspaces } from '../../workspaces/renderer/use-workspaces';
 import type { TreeItem } from '../../workspaces/renderer/workspace-tree';
 import { WorkspacesSection } from '../../workspaces/renderer/workspaces-section';
 import type { Bridge } from '../shared/bridge';
+import { ArtifactView, Notice, useArtifacts } from './artifact-view';
+import { useAutomation } from './use-automation';
 import { PromptHost } from './prompt-host';
 
 // The window shell: a full-height sidebar, which ⌘B shows and hides, beside the main area. The
@@ -55,7 +58,8 @@ import { PromptHost } from './prompt-host';
 // unarchives or removes it, and a removed session's panels close. Session pages and sessions fill
 // their panels, titled by the session once it runs, a page going on as its session's page once it
 // starts it, and files open in editors, which mark unsaved changes and ask about them before their
-// panels close. The archived sessions' button opens their panel, and ⌘, or the gear just after the
+// panels close. What agents present opens beside their sessions as the panel area places it, a file in
+// an editor and a result drawn as Markdown, an image or a table, its header naming the session. The archived sessions' button opens their panel, and ⌘, or the gear just after the
 // app's name opens the settings' panel; each shows in one panel, which opening it again focuses. The
 // gauge between them opens the Accounts panel, the same way, with each provider's sign-in and usage
 // limits; a session page marks a provider that is not signed in and offers its sign-in, which runs
@@ -227,8 +231,67 @@ export function App({ bridge }: { bridge: Bridge }) {
     else panels.open([contentOf(item)]);
   };
 
+  // A session's name, as its panel's header gives it, for what it presents.
+  const sessionName = (id: string): string => {
+    const summary = summaryOf(id);
+    if (summary === undefined) return t('panels.someSession');
+    return summary.title === undefined || summary.title === ''
+      ? t(`providers.${summary.provider}`)
+      : summary.title;
+  };
+
+  // The results agents present, read from main as their panels show them.
+  const artifacts = useArtifacts(
+    bridge.presentations,
+    panelsOf(panels.layout).flatMap((panel) =>
+      panel.content.kind === 'artifact' ? [panel.content.artifactId] : [],
+    ),
+  );
+
+  // The automation of the sessions the panels show, whose activity records what the app's tools did.
+  const automation = useAutomation(
+    bridge.automation,
+    panelsOf(panels.layout).flatMap((panel) =>
+      panel.content.kind === 'session' ? [panel.content.id] : [],
+    ),
+  );
+  // The presentations with a panel open.
+  const openPresentations = new Set(
+    panelsOf(panels.layout).flatMap((panel) =>
+      panel.presented === undefined ? [] : [panel.presented.presentationId],
+    ),
+  );
+  // Under each tool call by which a session presented something, the presentation, with Show.
+  const presentationsUnder =
+    (sessionId: string) =>
+    (toolId: string): ReactNode => {
+      const call = automation
+        .get(sessionId)
+        ?.recentCalls.find(
+          (record) =>
+            record.family === 'panel' &&
+            record.toolName === 'panel_present' &&
+            record.outcome?.status === 'verified' &&
+            record.providerEntry?.providerToolId === toolId,
+        );
+      if (call?.family !== 'panel') return null;
+      return call.presentations.map((presentation) => (
+        <PresentationEntry
+          key={presentation.id}
+          title={presentation.title}
+          open={openPresentations.has(presentation.id)}
+          onShow={() =>
+            area.current?.show(sessionId, presentation.id) ?? Promise.resolve('unavailable')
+          }
+        />
+      ));
+    };
+
   const view = (panel: Panel): PanelView => {
     const { content } = panel;
+    // A presented panel names the session it comes from.
+    const from =
+      panel.presented === undefined ? {} : { detail: sessionName(panel.presented.owner) };
     if (content.kind === 'file') {
       const file = fileEditors.panel(panel.id, content.path);
       return {
@@ -236,6 +299,25 @@ export function App({ bridge }: { bridge: Bridge }) {
         unsaved: file.unsaved,
         confirmClose: file.confirmClose,
         ...(file.actions === undefined ? {} : { actions: file.actions }),
+        ...from,
+      };
+    }
+    if (content.kind === 'artifact') {
+      const state = artifacts.get(content.artifactId) ?? { status: 'loading' };
+      return {
+        title:
+          state.status === 'ready'
+            ? state.artifact.title
+            : (panel.presented?.title ?? t('panels.result')),
+        ...from,
+        body: <ArtifactView state={state} />,
+      };
+    }
+    if (content.kind === 'browser' || content.kind === 'computer') {
+      return {
+        title: panel.presented?.title ?? '',
+        ...from,
+        body: <Notice>{t('panels.notYet')}</Notice>,
       };
     }
     if (content.kind === 'settings') {
@@ -295,6 +377,7 @@ export function App({ bridge }: { bridge: Bridge }) {
           {...(sessionId === null
             ? {}
             : {
+                renderToolExtra: presentationsUnder(sessionId),
                 renderRequest: (item, place) => (
                   <Request
                     item={item}
@@ -461,6 +544,8 @@ export function App({ bridge }: { bridge: Bridge }) {
           ref={area}
           panels={panels}
           bridge={bridge.panels}
+          presentations={bridge.presentations}
+          sessionName={sessionName}
           view={view}
           clearsWindowButtons={!sidebarOpen}
           besideWindowButtons={besideWindowButtons}

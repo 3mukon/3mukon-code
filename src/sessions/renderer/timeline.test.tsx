@@ -216,4 +216,46 @@ describe('Timeline', () => {
     const { container } = render(<Timeline state={state} agent="Claude Code" />);
     expect(container.querySelector('img')).toBeNull();
   });
+
+  it('shows what whoever composes the page gives under a tool call, by the call’s id', () => {
+    const state: SessionState = {
+      ...initialSessionState(),
+      timeline: [
+        {
+          type: 'tool',
+          id: 't1',
+          kind: 'other',
+          title: 'Present',
+          status: 'completed',
+          output: '',
+          changes: [],
+        },
+        {
+          type: 'tool',
+          id: 't2',
+          kind: 'other',
+          title: 'List',
+          status: 'completed',
+          output: '',
+          changes: [],
+        },
+      ],
+    };
+    const { rerender } = render(
+      <Timeline
+        state={state}
+        agent="Codex"
+        renderToolExtra={(id) => (id === 't1' ? <span>Shown under t1</span> : null)}
+      />,
+    );
+    expect(screen.getAllByText('Shown under t1')).toHaveLength(1);
+    rerender(
+      <Timeline
+        state={state}
+        agent="Codex"
+        renderToolExtra={() => <span>Shown under each</span>}
+      />,
+    );
+    expect(screen.getAllByText('Shown under each')).toHaveLength(2);
+  });
 });

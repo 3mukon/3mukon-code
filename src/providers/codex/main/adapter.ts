@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   Probes,
+  toolsetErrorMessage,
   type Provider,
   type ProviderSession,
   type SessionEventListener,
@@ -80,6 +81,13 @@ import {
   type StartRpc,
 } from './rpc';
 import { Translator } from './translate';
+import { toolsetReceipt } from '../../../sessions/shared/toolset-result';
+import {
+  presentationContext,
+  PRESENTATION_CONTEXT,
+  selectPresentationNotices,
+} from '../../../sessions/shared/host-context';
+import type { HostTurnContext, HostContextDelivery } from '../../../sessions/main/provider';
 
 // Codex's approval settings behind each of the app's two permission modes (ADR-0006), for a thread
 // and as overrides for a turn and the turns after it. In auto, Codex asks before it leaves its sandbox,
@@ -468,12 +476,12 @@ interface Attached {
 }
 
 class CodexSession implements ProviderSession {
+  readonly supportsHostContext = true;
   private rpc!: Rpc;
   private threadId = '';
   private readonly translator: Translator;
   // The session's access to the app's toolset, and what its app-servers start with to use it.
-  private readonly access: ToolsetAccess;
-  private readonly launch: Launch;
+  private access?: ToolsetAccess;
   // Codex's async questions waiting for the user's reply, by request id.
   private readonly asyncQuestions = new Map<string, QuestionRequest>();
   // The user's messages that Codex took into no turn, which start the next one together.
@@ -483,6 +491,8 @@ class CodexSession implements ProviderSession {
   private generation = 0;
   private generations = 0;
   private models: Model[] = [];
+  // The model the native thread actually selected, which may differ from its catalog default.
+  private effectiveModel: string | null = null;
   // The policy Codex gave the thread for each level it started or resumed in, as Codex's own settings
   // shape it, such as the network access of its workspace-write.
   private readonly sandboxPolicies: Partial<Record<SandboxLevel, SandboxPolicy>> = {};
@@ -524,7 +534,7 @@ class CodexSession implements ProviderSession {
     try {
       attached = await session.attach(resumeId);
     } catch (error) {
-      session.access.close();
+      session.access?.close();
       throw error;
     }
     session.use(attached);
@@ -541,7 +551,7 @@ class CodexSession implements ProviderSession {
       await session.refreshModels(attached.gatewayModel);
     } catch (error) {
       void attached.rpc.close();
-      session.access.close();
+      session.access?.close();
       throw error;
     }
     link.sessions.add(session);
@@ -551,23 +561,26 @@ class CodexSession implements ProviderSession {
   private constructor(
     private readonly settings: SessionSettings,
     private readonly connect: Connect,
-    toolset: Toolset,
+    private readonly toolset: Toolset,
     private readonly link: AccountLink,
     private readonly onEvent: SessionEventListener,
   ) {
     this.translator = new Translator(settings.cwd);
-    this.access = toolset.open();
-    this.launch = toolsetLaunch(toolset.name, this.access);
     // A thread takes no effort of its own; a chosen one goes with the first turn.
     this.effortChanged = settings.effort !== null;
   }
 
-  async send(text: string, images: MessageImage[] = []): Promise<void> {
+  async send(
+    text: string,
+    images: MessageImage[] = [],
+    context?: HostTurnContext,
+    delivery?: HostContextDelivery,
+  ): Promise<void> {
     if (this.switching !== null) await this.switching;
     if (this.closed) throw new Error('The session is closed.');
     // A message of the user's own is their reply to Codex's async questions still open.
     this.resolveAsyncQuestions('answered');
-    await this.deliver({ text, images });
+    await this.deliver({ text, images, context, delivery });
   }
 
   async interrupt(): Promise<void> {
@@ -586,13 +599,19 @@ class CodexSession implements ProviderSession {
     return Promise.resolve();
   }
 
-  answerQuestion(requestId: string, answer: QuestionAnswer): Promise<void> {
+  answerQuestion(
+    requestId: string,
+    answer: QuestionAnswer,
+    context?: HostTurnContext,
+    delivery?: HostContextDelivery,
+  ): Promise<void> {
     const asynchronous = this.asyncQuestions.get(requestId);
     if (asynchronous !== undefined) {
       this.asyncQuestions.delete(requestId);
       this.onEvent({ type: 'request-resolved', requestId, outcome: 'answered' });
       const reply = asyncReply(asynchronous, answer);
-      if (reply !== undefined) void this.reply(reply);
+      if (reply !== undefined) void this.reply(reply, context, delivery);
+      else delivery?.failed();
       return Promise.resolve();
     }
     const pending = this.pending.get(requestId);
@@ -668,10 +687,18 @@ class CodexSession implements ProviderSession {
   private async attach(resumeId: string | null): Promise<Attached> {
     const { cwd, mode, model, sandbox, gatewaysDir, gateway: name } = this.settings;
     const gateway = name === null ? null : await readGateway(gatewaysDir, name);
+    this.access?.close();
+    this.access = this.toolset.open();
     const provider = name === null || gateway === null ? [] : gatewayLaunchArgs(name, gateway);
-    const launch = { ...this.launch, args: [...this.launch.args, ...provider] };
+    const transport = toolsetLaunch(this.toolset.name, this.access);
+    const launch = { ...transport, args: [...transport.args, ...provider] };
     const generation = ++this.generations;
-    const rpc = await this.connect(cwd, this.handlers(generation), launch);
+    const rpc = await this.connect(cwd, this.handlers(generation), launch).catch(
+      (error: unknown) => {
+        this.access?.close();
+        throw new Error(toolsetErrorMessage(error, this.access));
+      },
+    );
     const params: Pick<
       ThreadResumeParams,
       | 'cwd'
@@ -700,10 +727,11 @@ class CodexSession implements ProviderSession {
             });
       return { rpc, generation, sandbox, response, gatewayModel: gateway?.model };
     } catch (error) {
+      this.access.close();
       void rpc.close();
       // Without the original error as its cause, since that may show the gateway's settings.
       const kind = error instanceof CodexError ? error.kind : undefined;
-      throw new CodexError(redact(errorMessage(error), gateway), kind);
+      throw new CodexError(redact(toolsetErrorMessage(error, this.access), gateway), kind);
     }
   }
 
@@ -714,6 +742,7 @@ class CodexSession implements ProviderSession {
     this.rpc = rpc;
     this.generation = generation;
     this.threadId = response.thread.id;
+    this.effectiveModel = response.model;
     const granted = sandboxLevel(response.sandbox) ?? requested;
     this.sandboxPolicies[granted] = response.sandbox;
     if (this.settings.sandbox === requested) this.settings.sandbox = granted;
@@ -748,6 +777,16 @@ class CodexSession implements ProviderSession {
     this.onEvent({
       type: 'models',
       models: withGatewayModel(modelOptions(this.models), gatewayModel),
+    });
+    this.reportAvailability();
+  }
+
+  private reportAvailability(): void {
+    const selected = this.models.find((model) => model.model === this.effectiveModel);
+    const modalities = selected?.inputModalities;
+    this.access?.availability?.({
+      tools: 'ready',
+      images: !modalities ? 'unknown' : modalities.includes('image') ? 'supported' : 'unsupported',
     });
   }
 
@@ -855,6 +894,17 @@ class CodexSession implements ProviderSession {
     }
     // An async question comes as an agent message that carries it, and shows as the question.
     if (method === 'item/completed') {
+      const completed = params as ItemCompletedNotification;
+      const item = completed.item;
+      if (
+        completed.threadId === this.threadId &&
+        item.type === 'mcpToolCall' &&
+        item.server === this.toolset.name &&
+        this.access?.tools?.includes(item.tool)
+      ) {
+        const receipt = toolsetReceipt(item.result?.structuredContent, item.result?.content);
+        if (receipt) this.access.result?.(item.tool, item.id, receipt);
+      }
       const question = asyncQuestion((params as ItemCompletedNotification).item, {
         cwd: this.settings.cwd,
         now: Date.now(),
@@ -953,7 +1003,12 @@ class CodexSession implements ProviderSession {
       input: turnInput(message),
     };
     return this.rpc.request<TurnSteerResponse>('turn/steer', params).then(
-      () => true,
+      () => {
+        message.delivery?.accepted(
+          selectPresentationNotices(message.context?.presentationNotices ?? []),
+        );
+        return true;
+      },
       () => false,
     );
   }
@@ -966,8 +1021,16 @@ class CodexSession implements ProviderSession {
         .filter((text) => text !== '')
         .join('\n\n'),
       images: messages.flatMap((entry) => entry.images),
+      context: {
+        presentationNotices: selectPresentationNotices(
+          messages.flatMap((entry) => entry.context?.presentationNotices ?? []),
+        ),
+      },
     };
-    const started = this.rpc.request<TurnStartResponse>('turn/start', this.turnParams(message));
+    const params = this.turnParams(message);
+    if (params.model && params.model !== this.effectiveModel)
+      this.access?.availability?.({ tools: 'ready', images: 'unknown' });
+    const started = this.rpc.request<TurnStartResponse>('turn/start', params);
     const starting = started.then(
       () => undefined,
       () => undefined,
@@ -975,12 +1038,16 @@ class CodexSession implements ProviderSession {
     this.starting = starting;
     try {
       const { turn } = await started;
+      for (const entry of messages) entry.delivery?.accepted(message.context.presentationNotices);
+      if (params.model) this.effectiveModel = params.model;
+      this.reportAvailability();
       this.turnId = turn.id;
       this.modeChanged = false;
       this.modelChanged = false;
       this.effortChanged = false;
       this.sandboxChanged = false;
     } catch (error) {
+      for (const message of messages) message.delivery?.failed();
       this.turnRunning = false;
       this.onEvent({ type: 'turn-ended', outcome: 'failed', error: errorMessage(error) });
       throw error;
@@ -1000,10 +1067,19 @@ class CodexSession implements ProviderSession {
   }
 
   // The user's reply to an async question, which goes out as their next message.
-  private async reply(text: string): Promise<void> {
+  private async reply(
+    text: string,
+    context?: HostTurnContext,
+    delivery?: HostContextDelivery,
+  ): Promise<void> {
     if (this.switching !== null) await this.switching;
-    if (this.closed) return;
-    await this.deliver({ text, images: [] }).catch(() => undefined);
+    if (this.closed) {
+      delivery?.failed();
+      return;
+    }
+    await this.deliver({ text, images: [], context, delivery }).catch(() => {
+      delivery?.failed();
+    });
   }
 
   private resolveAsyncQuestions(outcome: 'answered' | 'cancelled'): void {
@@ -1031,8 +1107,9 @@ class CodexSession implements ProviderSession {
     this.link.sessions.delete(this);
     this.turnRunning = false;
     this.resolveAsyncQuestions('cancelled');
+    for (const message of this.queued) message.delivery?.failed();
     this.queued = [];
-    this.access.close();
+    this.access?.close();
     for (const [requestId, pending] of this.pending) {
       pending.resolve(declined(pending.request));
       this.onEvent({ type: 'request-resolved', requestId, outcome: 'cancelled' });
@@ -1042,6 +1119,10 @@ class CodexSession implements ProviderSession {
   }
 
   private emit(event: SessionEvent): void {
+    if (event.type === 'settings' && typeof event.model === 'string') {
+      this.effectiveModel = event.model;
+      this.reportAvailability();
+    }
     if (event.type === 'turn-ended') {
       this.turnRunning = false;
       this.turnId = null;
@@ -1063,11 +1144,28 @@ class CodexSession implements ProviderSession {
 interface Message {
   text: string;
   images: MessageImage[];
+  context?: HostTurnContext;
+  delivery?: HostContextDelivery;
 }
 
 // A message as Codex takes it: its text, then its images as data URLs.
-function turnInput({ text, images }: Message): UserInput[] {
+function turnInput({ text, images, context }: Message): UserInput[] {
+  const host = presentationContext(context?.presentationNotices ?? []);
   return [
+    ...(host
+      ? [
+          {
+            type: 'text' as const,
+            text: host,
+            text_elements: [
+              {
+                byteRange: { start: 0, end: Buffer.byteLength(host, 'utf8') },
+                placeholder: PRESENTATION_CONTEXT,
+              },
+            ],
+          },
+        ]
+      : []),
     ...(text === '' ? [] : [{ type: 'text' as const, text, text_elements: [] }]),
     ...images.map((image) => ({ type: 'image' as const, url: imageUrl(image) })),
   ];

@@ -123,6 +123,80 @@ const tab = (owner = 'a', sharing: 'none' | 'app' | 'global' = 'none') =>
       profile: { id: 'fixture', name: 'Synthetic profile' },
     },
   });
+
+it('rolls settled request identities past the bound while pinning running and uncertain effects', async () => {
+  await broker.dispatch(a, 'panel_present', {}, { actionId: 'old' });
+  execute.mockResolvedValueOnce({
+    outcome: { status: 'indeterminate', reason: 'backend-lost', exclusionHeld: false },
+  });
+  await broker.dispatch(a, 'panel_present', {}, { actionId: 'uncertain' });
+  const gate = deferred<ExecutionResult>();
+  execute.mockReturnValueOnce(gate.promise);
+  const pending = broker.dispatch(a, 'panel_present', {}, { actionId: 'running' });
+  await vi.waitFor(() => {
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+  for (let n = 0; n < 4100; n++)
+    expect(
+      (await broker.dispatch(a, 'panel_present', {}, { actionId: `bounded-${String(n)}` })).outcome
+        .status,
+    ).toBe('verified');
+  const count = execute.mock.calls.length;
+  expect(
+    (await broker.dispatch(a, 'panel_present', {}, { actionId: 'uncertain' })).outcome,
+  ).toMatchObject({ code: 'result-expired' });
+  expect(
+    (await broker.dispatch(a, 'panel_present', {}, { actionId: 'running' })).outcome.status,
+  ).toBe('dispatched');
+  expect(
+    (await broker.dispatch(a, 'panel_present', {}, { actionId: 'bounded-4099' })).outcome.status,
+  ).toBe('verified');
+  expect(execute).toHaveBeenCalledTimes(count);
+  // A confirmed, ancient ID is outside the rolling replay window; it no longer stops new work.
+  expect((await broker.dispatch(a, 'panel_present', {}, { actionId: 'old' })).outcome.status).toBe(
+    'verified',
+  );
+  expect(execute).toHaveBeenCalledTimes(count + 1);
+  gate.resolve(result());
+  await pending;
+}, 20_000);
+
+it('tracks provider availability and rejects result links from another owner, turn or access generation', async () => {
+  expect(broker.snapshot('a').value.availability.tools).toBe('unknown');
+  broker.providerAvailability(a, {
+    tools: 'unavailable',
+    images: 'unsupported',
+    reason: { code: 'transport-unsupported', transport: 'streamable-http' },
+  });
+  expect(broker.snapshot('a').value.availability).toMatchObject({
+    tools: 'unavailable',
+    reason: { code: 'transport-unsupported' },
+  });
+  broker.discovered(a);
+  expect(broker.snapshot('a').value.availability.tools).toBe('ready');
+  const done = await broker.dispatch(a, 'panel_present', {}, { actionId: 'linked' });
+  broker.providerResult(b, 'panel_present', 'foreign', done.automation);
+  expect(broker.snapshot('a').value.recentCalls[0]?.providerEntry).toBeNull();
+  const fresh = broker.openAccess('a');
+  broker.providerAvailability(a, { tools: 'ready', images: 'supported' });
+  expect(broker.snapshot('a').value.availability.tools).toBe('unknown');
+  broker.providerResult(a, 'panel_present', 'old-access', done.automation);
+  broker.providerResult(fresh, 'panel_present', 'new-access', done.automation);
+  expect(broker.snapshot('a').value.recentCalls[0]?.providerEntry).toBeNull();
+  const current = await broker.dispatch(fresh, 'panel_present', {}, { actionId: 'current' });
+  broker.providerResult(fresh, 'other-tool', 'wrong-tool', current.automation);
+  broker.providerResult(fresh, 'panel_present', 'native', current.automation);
+  expect(broker.snapshot('a').value.recentCalls.at(-1)?.providerEntry).toMatchObject({
+    providerToolId: 'native',
+    accessGeneration: fresh.generation,
+  });
+  broker.endTurn('a');
+  broker.beginTurn('a');
+  broker.providerResult(fresh, 'panel_present', 'other-turn', current.automation);
+  expect(broker.snapshot('a').value.recentCalls.at(-1)?.providerEntry).toMatchObject({
+    providerToolId: 'native',
+  });
+});
 const application = (owner: string, key: string) =>
   broker.register(owner, {
     backend: 'fixture-native',

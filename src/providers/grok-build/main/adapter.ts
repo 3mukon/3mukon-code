@@ -20,11 +20,22 @@ import {
 } from '@agentclientprotocol/sdk';
 import {
   Probes,
+  toolsetError,
   type Provider,
   type ProviderSession,
   type SessionEventListener,
   type StartOptions,
+  type Toolset,
+  type ToolsetAccess,
+  type HostTurnContext,
+  type HostContextDelivery,
 } from '../../../sessions/main/provider';
+import { registeredTool, toolsetReceipt } from '../../../sessions/shared/toolset-result';
+import {
+  presentationContext,
+  selectPresentationNotices,
+  PRESENTATION_CONTEXT_URI,
+} from '../../../sessions/shared/host-context';
 import type {
   ApprovalAnswer,
   HistoryEntry,
@@ -139,7 +150,7 @@ interface AccountLink {
 
 // Grok Build through its ACP agent mode (ADR-0003), on whatever sign-in Grok itself has, and that
 // sign-in's account with its plan's current period (ADR-0017). Grok asks its questions through its own
-// question tool, so its sessions do not use the app's toolset.
+// question tool; the app's automation tools use the session-bound HTTP toolset.
 export function createGrokBuildProvider(
   options: GrokBuildProviderOptions,
 ): Provider & AccountSource {
@@ -448,6 +459,7 @@ function turnEndedBy(stopReason: StopReason): TurnEnded {
 }
 
 interface SessionSettings {
+  toolset?: Toolset;
   cwd: string;
   mode: PermissionMode;
   model: string | null;
@@ -463,6 +475,7 @@ function sessionSettings(options: StartOptions): SessionSettings {
     model: options.model ?? null,
     effort: options.effort ?? null,
     sandbox: options.sandbox ?? 'workspace-write',
+    ...(options.toolset ? { toolset: options.toolset } : {}),
   };
 }
 
@@ -486,6 +499,19 @@ type Pending =
 interface Message {
   text: string;
   images: MessageImage[];
+  context?: HostTurnContext;
+  delivery?: HostContextDelivery;
+}
+function contextBlocks(context?: HostTurnContext): ContentBlock[] {
+  const text = presentationContext(context?.presentationNotices ?? []);
+  return text
+    ? [
+        {
+          type: 'resource',
+          resource: { uri: PRESENTATION_CONTEXT_URI, mimeType: 'text/plain', text },
+        },
+      ]
+    : [];
 }
 
 // An image as Grok takes it, in a prompt or an interjection.
@@ -494,6 +520,15 @@ function imageBlock(image: MessageImage): ContentBlock {
 }
 
 class GrokSession implements ProviderSession {
+  private hostEnabled = false;
+  get supportsHostContext(): true | undefined {
+    return this.agent.initialize.agentCapabilities?.promptCapabilities?.embeddedContext === true
+      ? true
+      : undefined;
+  }
+  private readonly deliveries = new Set<HostContextDelivery>();
+  private access?: ToolsetAccess;
+  private readonly toolNames = new Map<string, string>();
   private agent!: Agent;
   private sessionId = '';
   private readonly translator: Translator;
@@ -552,6 +587,7 @@ class GrokSession implements ProviderSession {
       onEvent({ type: 'models', models: session.catalog.models });
     } catch (error) {
       session.generation = 0;
+      session.access?.close();
       await stopAgent(attached.agent);
       throw error;
     }
@@ -574,7 +610,12 @@ class GrokSession implements ProviderSession {
     return this.closed || this.generation === 0 ? null : this.agent.connection;
   }
 
-  async send(text: string, images: MessageImage[] = []): Promise<void> {
+  async send(
+    text: string,
+    images: MessageImage[] = [],
+    context?: HostTurnContext,
+    delivery?: HostContextDelivery,
+  ): Promise<void> {
     if (this.switching !== null) await this.switching;
     if (this.closed) throw new Error('The session is closed.');
     const running = this.turnRunning;
@@ -590,7 +631,8 @@ class GrokSession implements ProviderSession {
       text,
       ...(images.length === 0 ? {} : { images }),
     });
-    const message = { text, images };
+    const message = { text, images, context, delivery };
+    if (delivery) this.deliveries.add(delivery);
     if (!running) {
       this.prompt([...this.queued.splice(0), message]);
       return;
@@ -610,15 +652,24 @@ class GrokSession implements ProviderSession {
     this.prompt([...this.queued.splice(0), message]);
   }
 
-  private interjected({ text, images }: Message): Promise<boolean> {
+  private interjected({ text, images, context, delivery }: Message): Promise<boolean> {
+    const content = [...contextBlocks(context), ...images.map(imageBlock)];
     const params: InterjectParams = {
       sessionId: this.sessionId,
       text: interjectionText(text, images.length),
       interjectionId: randomUUID(),
-      ...(images.length === 0 ? {} : { content: images.map(imageBlock) }),
+      ...(content.length === 0 ? {} : { content }),
     };
     return this.agent.connection.agent.request(INTERJECT, params).then(
-      () => true,
+      // This extension acknowledges a queue, not the model-facing turn record. Keep notices pending
+      // for a result receipt or a full prompt response rather than claiming delivery from queueing.
+      () => {
+        if (delivery) {
+          delivery.failed();
+          this.deliveries.delete(delivery);
+        }
+        return true;
+      },
       () => false,
     );
   }
@@ -626,11 +677,15 @@ class GrokSession implements ProviderSession {
   // Sends a turn's prompt: the messages' text, then their images, which Grok takes in prompts, as its
   // answer to initialize says.
   private prompt(messages: Message[]): void {
+    const notices = selectPresentationNotices(
+      messages.flatMap((message) => message.context?.presentationNotices ?? []),
+    );
     const text = messages
       .map((message) => message.text)
       .filter((part) => part !== '')
       .join('\n\n');
     const prompt: ContentBlock[] = [
+      ...contextBlocks({ presentationNotices: notices }),
       ...(text === '' ? [] : [{ type: 'text' as const, text }]),
       ...messages.flatMap((message) => message.images).map(imageBlock),
     ];
@@ -639,6 +694,12 @@ class GrokSession implements ProviderSession {
     const { connection } = this.agent;
     connection.agent.request('session/prompt', { sessionId: this.sessionId, prompt }).then(
       (response) => {
+        for (const message of messages) {
+          if (message.delivery) {
+            message.delivery.accepted(notices);
+            this.deliveries.delete(message.delivery);
+          }
+        }
         const promptId = response._meta?.promptId;
         this.endTurn(
           turnEndedBy(response.stopReason),
@@ -646,6 +707,12 @@ class GrokSession implements ProviderSession {
         );
       },
       (error: unknown) => {
+        for (const message of messages) {
+          if (message.delivery) {
+            message.delivery.failed();
+            this.deliveries.delete(message.delivery);
+          }
+        }
         if (connection.signal.aborted) return;
         if (isSignInError(error)) this.link.hear({ type: 'signed-out' });
         this.endTurn({ type: 'turn-ended', outcome: 'failed', error: errorMessage(error) });
@@ -655,6 +722,8 @@ class GrokSession implements ProviderSession {
 
   // ACP has the client answer what is still open as cancelled once it cancels the turn.
   async interrupt(): Promise<void> {
+    for (const delivery of this.deliveries) delivery.failed();
+    this.deliveries.clear();
     if (!this.turnRunning) return;
     this.withdrawAll();
     await this.agent.connection.agent.notify('session/cancel', { sessionId: this.sessionId });
@@ -740,6 +809,7 @@ class GrokSession implements ProviderSession {
 
   async close(): Promise<void> {
     this.closing = true;
+    this.access?.close();
     if (this.switching !== null) await this.switching;
     if (this.closed) return;
     await stopAgent(this.agent);
@@ -754,11 +824,48 @@ class GrokSession implements ProviderSession {
   ): Promise<Attached> {
     const generation = ++this.generations;
     this.generation = generation;
+    this.access?.close();
+    const access = this.settings.toolset?.open();
+    this.access = access;
+    this.hostEnabled = false;
+    this.toolNames.clear();
     if (existing !== null) this.sessionId = existing.resumeId;
-    const agent = await this.connect(this.settings.cwd, sandbox, this.handlers(generation));
+    const agent = await this.connect(this.settings.cwd, sandbox, this.handlers(generation)).catch(
+      (error: unknown) => {
+        access?.close();
+        throw error;
+      },
+    );
+    const http = agent.initialize.agentCapabilities?.mcpCapabilities?.http === true;
+    this.hostEnabled = http && access !== undefined;
+    access?.availability?.({
+      tools: http ? 'unknown' : 'unavailable',
+      images:
+        agent.initialize.agentCapabilities?.promptCapabilities?.image === true
+          ? 'supported'
+          : 'unsupported',
+      ...(!http
+        ? {
+            reason: {
+              code: 'transport-unsupported' as const,
+              transport: 'streamable-http' as const,
+            },
+          }
+        : {}),
+    });
     const params: NewSessionRequest = {
       cwd: this.settings.cwd,
-      mcpServers: [],
+      mcpServers:
+        http && access && this.settings.toolset
+          ? [
+              {
+                type: 'http',
+                name: this.settings.toolset.name,
+                url: access.url,
+                headers: [{ name: 'Authorization', value: `Bearer ${access.credential}` }],
+              },
+            ]
+          : [],
       _meta: SESSION_META,
     };
     try {
@@ -779,8 +886,9 @@ class GrokSession implements ProviderSession {
       return { agent, generation, sessionId, configOptions: response.configOptions ?? [] };
     } catch (error) {
       if (this.generation === generation) this.generation = 0;
+      access?.close();
       await stopAgent(agent);
-      throw error;
+      throw toolsetError(error, access);
     } finally {
       this.replaying = false;
       this.translator.endMessage();
@@ -805,6 +913,23 @@ class GrokSession implements ProviderSession {
       update: ({ sessionId, update }) => {
         // Updates of other sessions, such as subagents', belong to those.
         if (!current() || sessionId !== this.sessionId) return;
+        if (
+          !this.replaying &&
+          (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update')
+        ) {
+          const name =
+            update.kind && update.kind !== 'other'
+              ? undefined
+              : this.hostTool(update.toolCallId, update.title);
+          if (name && (update.status === 'completed' || update.status === 'failed')) {
+            const content = update.content?.flatMap((part) =>
+              part.type === 'content' ? [part.content] : [],
+            );
+            const receipt = toolsetReceipt(update.rawOutput, content);
+            if (receipt) this.access?.result?.(name, update.toolCallId, receipt);
+            this.toolNames.delete(update.toolCallId);
+          }
+        }
         if (update.sessionUpdate === 'user_message_chunk' && !this.replaying) return;
         for (const event of this.translator.update(update)) this.onEvent(event);
       },
@@ -914,6 +1039,14 @@ class GrokSession implements ProviderSession {
     params: RequestPermissionRequest,
     signal: AbortSignal,
   ): Promise<RequestPermissionResponse> {
+    if (
+      params.sessionId === this.sessionId &&
+      (params.toolCall.kind === 'other' ||
+        (!params.toolCall.kind && this.toolNames.has(params.toolCall.toolCallId))) &&
+      this.hostTool(params.toolCall.toolCallId, params.toolCall.title)
+    ) {
+      return Promise.resolve(approvalResult(params.options, { decision: 'allow-once' }));
+    }
     const { request, options } = permissionApproval(
       randomUUID(),
       params,
@@ -928,6 +1061,25 @@ class GrokSession implements ProviderSession {
       this.whenAborted(signal, request.id);
       this.onEvent({ type: 'approval-requested', request });
     });
+  }
+
+  // The pinned ACP adapter's native tool title is exactly server__tool. Never match substrings in a
+  // command, prose or arguments, and accept only this connection's registered names.
+  private hostTool(id: string, title: string | null | undefined): string | undefined {
+    if (!this.hostEnabled) return undefined;
+    const name =
+      this.settings.toolset && typeof title === 'string'
+        ? registeredTool(title, `${this.settings.toolset.name}__`, this.access?.tools)
+        : undefined;
+    if (name) {
+      if (this.toolNames.size >= 256)
+        this.toolNames.delete(this.toolNames.keys().next().value ?? '');
+      this.toolNames.set(id, name);
+    } else if (title) {
+      this.toolNames.delete(id);
+      return undefined;
+    }
+    return name ?? this.toolNames.get(id);
   }
 
   private askQuestion(
@@ -1015,6 +1167,9 @@ class GrokSession implements ProviderSession {
     if (this.closed) return;
     this.withdrawAll();
     this.closed = true;
+    for (const delivery of this.deliveries) delivery.failed();
+    this.deliveries.clear();
+    this.access?.close();
     this.link.sessions.delete(this);
     this.turnRunning = false;
     this.queued = [];

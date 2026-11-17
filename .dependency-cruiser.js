@@ -109,7 +109,15 @@ export default {
       comment: 'The panels module uses only the ui and i18n modules (src/panels/README.md).',
       severity: 'error',
       from: { path: '^src/panels/' },
-      to: { path: '^src/', pathNot: ['^src/panels/', '^src/ui/', '^src/i18n/'] },
+      to: {
+        path: '^src/',
+        pathNot: [
+          '^src/panels/',
+          '^src/ui/',
+          '^src/i18n/',
+          '^src/sessions/shared/automation\\.ts$',
+        ],
+      },
     },
     {
       name: 'terminal-only-to-ui-and-i18n',
@@ -172,8 +180,27 @@ export default {
       from: { path: '^src/toolset/' },
       to: {
         path: '^src/',
-        pathNot: ['^src/toolset/', '^src/sessions/main/provider\\.ts$', '^src/sessions/shared/'],
+        pathNot: [
+          '^src/toolset/',
+          '^src/sessions/main/provider\\.ts$',
+          '^src/sessions/shared/',
+          '^src/panels/shared/presentation(-host)?\\.ts$',
+        ],
       },
+    },
+    {
+      name: 'automation-feature-contracts-are-types',
+      comment:
+        'App composition supplies feature implementations and constants; these edges carry types only.',
+      severity: 'error',
+      from: { path: '^src/toolset/' },
+      to: { path: '^src/panels/', dependencyTypesNot: ['type-only'] },
+    },
+    {
+      name: 'panels-session-facts-are-types',
+      severity: 'error',
+      from: { path: '^src/panels/' },
+      to: { path: '^src/sessions/', dependencyTypesNot: ['type-only'] },
     },
     {
       name: 'toolset-only-from-app',

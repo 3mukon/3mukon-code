@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, isAbsolute, normalize } from 'node:path';
 import { MAX_IMAGE_BYTES, type FileImage, type OpenedFile, type SaveResult } from '../shared/files';
 import { readText, writeText } from './text-files';
@@ -46,6 +46,19 @@ export class FileService {
     const file = await readText(path);
     if (file.kind === 'text') this.granted.add(path);
     return file;
+  }
+
+  // Agent-directed presentation uses the editor's existing permission, after resolving links too.
+  // It grants nothing, opens no viewer and reads no file contents.
+  async presentationPath(path: string): Promise<string | null> {
+    if (!this.allows(path)) return null;
+    try {
+      const canonical = await realpath(path);
+      if (!this.allows(canonical) || !(await stat(canonical)).isFile()) return null;
+      return canonical;
+    } catch {
+      return null;
+    }
   }
 
   // An image a rendered Markdown file shows (ADR-0018): one the editors may read, of a type the window

@@ -267,11 +267,10 @@ export class SessionHost {
     const session = this.session(id);
     const hostedBefore = this.sessions.get(id);
     const wasRunning = hostedBefore?.state.turnRunning === true;
-    const prepared = hostedBefore?.automation?.prepareSend();
+    const prepared = prepareContext(hostedBefore?.automation);
     try {
       if (prepared && session.supportsHostContext === true) {
-        await session.send(text, images, prepared.context);
-        prepared.accepted();
+        await session.send(text, images, prepared.context, prepared);
       } else {
         await session.send(text, images);
         prepared?.failed();
@@ -289,6 +288,10 @@ export class SessionHost {
     this.report(hosted);
   }
 
+  has(id: string): boolean {
+    return this.sessions.has(id);
+  }
+
   interrupt(id: string): Promise<void> {
     this.sessions.get(id)?.automation?.stop();
     return this.session(id).interrupt();
@@ -302,7 +305,35 @@ export class SessionHost {
   }
 
   async answerQuestion(id: string, requestId: string, answer: QuestionAnswer): Promise<void> {
-    await this.session(id).answerQuestion(requestId, answer);
+    const session = this.session(id);
+    const hosted = this.sessions.get(id);
+    const byMessage = hosted?.state.timeline.some(
+      (item) =>
+        item.type === 'question' &&
+        item.request.id === requestId &&
+        item.request.byMessage === true,
+    );
+    const prepared =
+      byMessage && answer.decision === 'answer' && session.supportsHostContext === true
+        ? prepareContext(hosted?.automation)
+        : undefined;
+    const failed = () => {
+      prepared?.failed();
+      if (hosted && !hosted.state.turnRunning) hosted.automation?.turnEnded();
+    };
+    try {
+      if (prepared)
+        await session.answerQuestion(requestId, answer, prepared.context, {
+          accepted: (delivered) => {
+            prepared.accepted(delivered);
+          },
+          failed,
+        });
+      else await session.answerQuestion(requestId, answer);
+    } catch (error) {
+      if (prepared) failed();
+      throw error;
+    }
     this.recordAnswer(id, requestId, answer);
   }
 
@@ -815,6 +846,15 @@ export class SessionHost {
       ...(waitingSince === undefined ? {} : { waitingSince }),
       ...(hosted.archived ? { archived: true } : {}),
     };
+  }
+}
+
+// Supplemental host context cannot make the user's message or typed answer unavailable.
+function prepareContext(automation?: SessionAutomation) {
+  try {
+    return automation?.prepareSend();
+  } catch {
+    return undefined;
   }
 }
 

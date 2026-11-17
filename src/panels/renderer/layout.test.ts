@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { PanelContent } from '../shared/panels';
+import type { Placement, PresentedContent } from '../shared/presentation';
 import {
   contentOf,
   emptyPanels,
   folderOf,
   inOpeningOrder,
   panelsOf,
+  presentedPanels,
   reducePanels,
   sameContent,
   type Layout,
@@ -250,5 +252,162 @@ describe('helpers', () => {
       'panel-1',
       'panel-2',
     ]);
+  });
+});
+
+describe('reducePanels with presentations', () => {
+  const session = (id: string): PanelContent => ({ kind: 'session', id, folder: '/web' });
+  const result = (artifactId: string): PresentedContent => ({ kind: 'artifact', artifactId });
+  const doc = (path: string): PresentedContent => ({ kind: 'file', path });
+  const open = (
+    presentationId: string,
+    items: PresentedContent[],
+    placement: Placement = { side: 'right', direction: 'row' },
+    replacing: string | null = null,
+  ): PanelsAction => ({
+    type: 'present',
+    presentationId,
+    change: { kind: 'open', owner: 's1', title: 'Results', items, placement, replacing },
+  });
+  // What each panel shows, in reading order, with the presentation and place of a presented one.
+  const shown = (state: PanelsState) =>
+    panelsOf(state.layout).map(({ content, presented }) => {
+      const what =
+        content.kind === 'artifact'
+          ? content.artifactId
+          : content.kind === 'file'
+            ? content.path
+            : content.kind;
+      return presented === undefined
+        ? what
+        : `${what}@${presented.presentationId}#${String(presented.item)}`;
+    });
+
+  it('opens a presentation beside its session’s panel, its items in a row or a column, leaving the focus where it was', () => {
+    const state = run(
+      { type: 'open', contents: [session('s1')] },
+      {
+        type: 'open',
+        contents: [file('/notes.md')],
+        at: { kind: 'beside', panelId: 'panel-1', side: 'bottom' },
+      },
+      open('p', [result('a'), result('b')], { side: 'left', direction: 'column' }),
+    );
+    expect(shape(state.layout)).toBe(
+      'column(row(column(artifact, artifact), page /web), /notes.md)',
+    );
+    expect(shown(state)).toEqual(['a@p#0', 'b@p#1', 'session', '/notes.md']);
+    expect(state.focusedId).toBe('panel-2');
+    expect(panelsOf(state.layout)[0]?.presented).toEqual({
+      presentationId: 'p',
+      item: 0,
+      owner: 's1',
+      title: 'Results',
+    });
+  });
+
+  it('opens at that side of the area while the session has no panel, and fills an empty area without focusing', () => {
+    const beside = run(
+      { type: 'open', contents: [file('/a.md')] },
+      open('p', [result('a')], { side: 'top', direction: 'row' }),
+    );
+    expect(shape(beside.layout)).toBe('column(artifact, /a.md)');
+    expect(beside.focusedId).toBe('panel-1');
+    const alone = run(open('p', [result('a')]));
+    expect(shape(alone.layout)).toBe('artifact');
+    expect(alone.focusedId).toBeNull();
+  });
+
+  it('opens in place of another presentation’s panels, a focus one of them had going back to the session', () => {
+    const state = run(
+      { type: 'open', contents: [session('s1')] },
+      open('old', [result('a'), result('b')]),
+      { type: 'focus', panelId: 'panel-3' },
+      open('new', [result('c')], { side: 'right', direction: 'row' }, 'old'),
+    );
+    expect(shown(state)).toEqual(['session', 'c@new#0']);
+    expect(state.focusedId).toBe('panel-1');
+  });
+
+  it('changes what a presentation shows in place, giving a changed item a panel of its own, opening and closing panels to match', () => {
+    const before = run(
+      { type: 'open', contents: [session('s1')] },
+      open('p', [result('a'), result('b')]),
+    );
+    const ids = panelsOf(before.layout).map((panel) => panel.id);
+    const changed = reducePanels(before, {
+      type: 'present',
+      presentationId: 'p',
+      change: {
+        kind: 'change',
+        owner: 's1',
+        title: 'Renamed',
+        items: [
+          { content: result('a'), open: true },
+          { content: doc('/b.md'), open: true },
+          { content: result('c'), open: true },
+        ],
+        direction: 'row',
+      },
+    });
+    expect(shown(changed)).toEqual(['session', 'a@p#0', '/b.md@p#1', 'c@p#2']);
+    const after = panelsOf(changed.layout);
+    expect(after[1]?.id).toBe(ids[1]);
+    expect(after[1]?.presented?.title).toBe('Renamed');
+    expect(after[2]?.id).not.toBe(ids[2]);
+    const fewer = reducePanels(changed, {
+      type: 'present',
+      presentationId: 'p',
+      change: {
+        kind: 'change',
+        owner: 's1',
+        title: 'Renamed',
+        items: [
+          { content: result('a'), open: false },
+          { content: doc('/b.md'), open: true },
+        ],
+        direction: 'row',
+      },
+    });
+    expect(shown(fewer)).toEqual(['session', '/b.md@p#1']);
+  });
+
+  it('arranges a presentation’s panels again, keeping them, and closes them, the focus passing on as a close passes it', () => {
+    const state = run(
+      { type: 'open', contents: [session('s1')] },
+      open('p', [result('a'), result('b')]),
+    );
+    const ids = panelsOf(state.layout)
+      .slice(1)
+      .map((panel) => panel.id);
+    const arranged = reducePanels(state, {
+      type: 'present',
+      presentationId: 'p',
+      change: { kind: 'arrange', owner: 's1', placement: { side: 'bottom', direction: 'column' } },
+    });
+    expect(shape(arranged.layout)).toBe('column(page /web, column(artifact, artifact))');
+    expect(
+      panelsOf(arranged.layout)
+        .slice(1)
+        .map((panel) => panel.id),
+    ).toEqual(ids);
+    const focused = reducePanels(arranged, { type: 'focus', panelId: ids[0] ?? '' });
+    const closed = reducePanels(focused, {
+      type: 'present',
+      presentationId: 'p',
+      change: { kind: 'close' },
+    });
+    expect(shown(closed)).toEqual(['session']);
+    expect(closed.focusedId).toBe('panel-1');
+  });
+
+  it('tells presented content apart and gives it no folder', () => {
+    expect(sameContent(result('a'), result('a'))).toBe(true);
+    expect(sameContent(result('a'), result('b'))).toBe(false);
+    expect(sameContent({ kind: 'browser', tabId: 't' }, { kind: 'computer', targetId: 't' })).toBe(
+      false,
+    );
+    expect(folderOf(result('a'))).toBeNull();
+    expect(presentedPanels(run(open('p', [result('a')])).layout, 'p')).toHaveLength(1);
   });
 });

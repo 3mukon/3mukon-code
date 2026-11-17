@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountNews } from '../../../accounts/main/source';
 import type { Toolset, ToolsetAccess } from '../../../sessions/main/provider';
 import type { SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
@@ -23,6 +23,7 @@ const READ_ONLY = { type: 'readOnly', networkAccess: false };
 const MODELS = [
   {
     model: 'gpt-default',
+    inputModalities: ['text', 'image'],
     displayName: 'Default',
     description: 'The usual one',
     hidden: false,
@@ -32,6 +33,7 @@ const MODELS = [
   },
   {
     model: 'gpt-small',
+    inputModalities: ['text'],
     displayName: 'Small',
     description: '',
     hidden: false,
@@ -220,6 +222,8 @@ class FakeCodex implements Rpc {
 
 // Stands in for the app's toolset: it keeps each session's access.
 class FakeToolset implements Toolset {
+  readonly result = vi.fn();
+  readonly availability = vi.fn();
   readonly name = '3mukon-code';
   readonly opened: { access: ToolsetAccess; closed: boolean }[] = [];
 
@@ -229,6 +233,9 @@ class FakeToolset implements Toolset {
       access: {
         url: 'http://127.0.0.1:4000/mcp',
         credential: `credential-${String(this.opened.length + 1)}`,
+        tools: ['panel_list'],
+        result: this.result,
+        availability: this.availability,
         close: () => {
           entry.closed = true;
         },
@@ -238,6 +245,140 @@ class FakeToolset implements Toolset {
     return entry.access;
   }
 }
+
+it('merges queued presentation state once, acknowledging only the latest notices that fit the final block', async () => {
+  const { session } = await startSession();
+  await session.send('Start');
+  failSteer = 'Turn cannot be steered';
+  const notices = Array.from({ length: 50 }, (_, n) => ({
+    noticeId: `n${String(n)}`,
+    owner: 'owner',
+    reuseKey: `r${String(n)}`,
+    presentation: {
+      id: `p${String(n)}`,
+      version: 1,
+      title: 'Synthetic',
+      items: [{ content: { kind: 'file' as const, path: `/${'界'.repeat(1000)}` }, box: null }],
+    },
+  }));
+  const first = { accepted: vi.fn(), failed: vi.fn() };
+  const second = { accepted: vi.fn(), failed: vi.fn() };
+  await session.send('First', [], { presentationNotices: notices }, first);
+  const newer = notices.map((notice) => ({
+    ...notice,
+    presentation: { ...notice.presentation, version: 2 },
+  }));
+  await session.send('Second', [], { presentationNotices: newer }, second);
+  expect(first.accepted).not.toHaveBeenCalled();
+  current().emit('turn/completed', completed('turn-1'));
+  await waitFor(() => second.accepted.mock.calls.length === 1);
+  const input = current().params('turn/start')?.input as { text: string }[];
+  const context = input[0]?.text ?? '';
+  const selected = second.accepted.mock.calls[0]?.[0] as typeof newer;
+  expect(Buffer.byteLength(context)).toBeLessThanOrEqual(64 * 1024);
+  expect(selected.length).toBeLessThan(newer.length);
+  expect(selected.every((notice) => notice.presentation.version === 2)).toBe(true);
+  expect(new Set(selected.map((notice) => notice.presentation.id)).size).toBe(selected.length);
+  expect(JSON.parse(context)).toMatchObject({ presentations: selected });
+  expect(first.accepted).toHaveBeenCalledExactlyOnceWith(selected);
+  expect(input[1]?.text).toBe('First\n\nSecond');
+  await session.close();
+});
+
+it('correlates only this toolset’s live native result and acknowledges a separately marked context block', async () => {
+  const { session, events } = await startSession();
+  const notice = {
+    noticeId: 'n',
+    owner: 'owner',
+    reuseKey: 'r',
+    presentation: {
+      id: 'p',
+      title: 'Fixture',
+      version: 1,
+      items: [{ content: { kind: 'file' as const, path: '/work/a.md' }, box: null }],
+    },
+  };
+  const delivery = { accepted: vi.fn(), failed: vi.fn() };
+  await session.send('Original text', [], { presentationNotices: [notice] }, delivery);
+  expect(current().params('turn/start')?.input).toEqual([
+    expect.objectContaining({
+      type: 'text',
+      text_elements: [expect.objectContaining({ placeholder: '3mukon-code:presentation-state' })],
+    }),
+    { type: 'text', text: 'Original text', text_elements: [] },
+  ]);
+  expect(events).toContainEqual(expect.objectContaining({ role: 'user', text: 'Original text' }));
+  expect(delivery.accepted).toHaveBeenCalledOnce();
+  const envelope = {
+    automation: { schemaVersion: 1, callId: 'receipt' },
+    outcome: { status: 'verified', value: null },
+    presentationNotices: [],
+  };
+  const item = {
+    type: 'mcpToolCall',
+    id: 'entry',
+    server: 'other',
+    tool: 'panel_list',
+    status: 'completed',
+    result: { structuredContent: envelope, content: [] },
+    error: null,
+  };
+  current().emit('item/completed', { threadId: 'th1', item });
+  expect(toolset.result).not.toHaveBeenCalled();
+  current().emit('item/completed', { threadId: 'th1', item: { ...item, server: '3mukon-code' } });
+  expect(toolset.result).toHaveBeenCalledExactlyOnceWith(
+    'panel_list',
+    'entry',
+    envelope.automation,
+  );
+  await session.close();
+});
+
+it('delivers pending presentation state with an async-question reply as separate context', async () => {
+  const { session } = await startSession();
+  current().emit(
+    'item/completed',
+    asyncQuestions('reply', [{ title: 'Continue?', options: ['Yes'] }]),
+  );
+  const notice = {
+    noticeId: 'n',
+    owner: 'owner',
+    reuseKey: 'r',
+    presentation: {
+      id: 'p',
+      title: 'Fixture',
+      version: 1,
+      items: [{ content: { kind: 'file' as const, path: '/work/a.md' }, box: null }],
+    },
+  };
+  const delivery = { accepted: vi.fn(), failed: vi.fn() };
+  await session.answerQuestion(
+    'async-reply',
+    { decision: 'answer', answers: { '0': { selected: ['Yes'], text: '' } } },
+    { presentationNotices: [notice] },
+    delivery,
+  );
+  await waitFor(() => delivery.accepted.mock.calls.length === 1);
+  expect(current().params('turn/start')?.input).toEqual([
+    expect.objectContaining({
+      text_elements: [expect.objectContaining({ placeholder: '3mukon-code:presentation-state' })],
+    }),
+    { type: 'text', text: 'Yes', text_elements: [] },
+  ]);
+  await session.close();
+});
+
+it('reports modalities for the actual thread model rather than a different gateway catalog default', async () => {
+  const gateway = await startSession({ gateway: 'work' });
+  expect(toolset.availability).toHaveBeenLastCalledWith({ tools: 'ready', images: 'unknown' });
+  await gateway.session.close();
+  const normal = await startSession();
+  expect(toolset.availability).toHaveBeenLastCalledWith({ tools: 'ready', images: 'supported' });
+  await normal.session.setModel('gpt-small');
+  await normal.session.send('Synthetic prompt');
+  expect(toolset.availability).toHaveBeenLastCalledWith({ tools: 'ready', images: 'unsupported' });
+  await normal.session.close();
+});
 
 let fakes: FakeCodex[] = [];
 let toolset: FakeToolset;
@@ -855,10 +996,10 @@ describe('a Codex session', () => {
       sandbox: 'read-only',
     });
     expect(events.some((event) => event.type === 'closed' || event.type === 'error')).toBe(false);
-    // The session keeps its toolset access, which the new app-server is started with, naming the
-    // gateway's provider.
-    expect(toolset.opened).toHaveLength(1);
-    expect(toolset.opened[0]?.closed).toBe(false);
+    // The new process rotates the transport access while keeping the app owner.
+    expect(toolset.opened).toHaveLength(2);
+    expect(toolset.opened[0]?.closed).toBe(true);
+    expect(toolset.opened[1]?.closed).toBe(false);
     expect(current().launch).toEqual({
       args: [
         ...(first.launch?.args ?? []),
@@ -867,7 +1008,7 @@ describe('a Codex session', () => {
         '-c',
         'model_providers.proxy.name="proxy"',
       ],
-      env: first.launch?.env,
+      env: { TOOLSET_3MUKON_CODE_TOKEN: 'credential-2' },
     });
     await session.send('again');
     expect(current().params('turn/start')).toMatchObject({ threadId: 'th1' });

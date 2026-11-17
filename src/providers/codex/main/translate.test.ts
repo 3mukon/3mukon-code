@@ -5,6 +5,26 @@ import { Translator } from './translate';
 const cwd = '/work/app';
 const turn = { threadId: 't1', turnId: 'u1' };
 
+it('keeps original user text when native history also carries marked host context', () => {
+  const translator = new Translator(cwd);
+  expect(
+    translator.history({
+      type: 'userMessage',
+      id: 'user',
+      content: [
+        {
+          type: 'text',
+          text: 'Host state',
+          text_elements: [
+            { byteRange: { start: 0, end: 10 }, placeholder: '3mukon-code:presentation-state' },
+          ],
+        },
+        { type: 'text', text: 'User text', text_elements: [] },
+      ],
+    } as ThreadItem),
+  ).toEqual([{ type: 'message', id: 'user', role: 'user', text: 'User text' }]);
+});
+
 function command(status: string, extra: Record<string, unknown> = {}) {
   return {
     type: 'commandExecution',

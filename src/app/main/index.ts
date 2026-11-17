@@ -8,6 +8,8 @@ import { dockAttention } from '../../approvals/main/dock';
 import { FileService } from '../../files/main/files';
 import { keepUnsavedChanges, windowFilesUi } from '../../files/main/native';
 import { switchableTranslator } from '../../i18n/main/i18n';
+import { PresentationHost } from '../../panels/main/presentation-host';
+import { ARTIFACT_LIMITS, PRESENTATION_LIMITS } from '../../panels/shared/presentation';
 import { createClaudeCodeProvider } from '../../providers/claude-code/main/adapter';
 import { createCodexProvider } from '../../providers/codex/main/adapter';
 import { createGrokBuildProvider } from '../../providers/grok-build/main/adapter';
@@ -27,12 +29,15 @@ import {
   windowTerminalUi,
 } from '../../terminal/main/native';
 import { Terminals } from '../../terminal/main/terminals';
+import { panelTools } from '../../toolset/main/panel-tools';
+import type { AutomationTool } from '../../toolset/main/execution';
 import { loginShellPath } from './shell-path';
 import { startToolset, type RunningToolset } from '../../toolset/main/server';
 import { windowWorkspacesUi } from '../../workspaces/main/native';
 import { fileStorage } from '../../workspaces/main/storage';
 import { Workspaces } from '../../workspaces/main/workspaces';
 import { serveBridge } from './bridge';
+import { automationUi } from './automation-ui';
 
 import { windowPrompts } from './prompts';
 import { createMainWindow, pageUrl } from './window';
@@ -67,8 +72,39 @@ void app
     });
     // Opened from the Finder, a packaged app has macOS's minimal PATH, so it takes the login shell's,
     // which the agents' commands and the providers' tools need (ADR-0019), while the toolset starts.
-    const [toolset, shellPath] = await Promise.all([
-      startToolsetIfPossible(version),
+    const presentations: PresentationHost = new PresentationHost({
+      hasOwner: (owner) => toolset?.broker.hasOwner(owner) ?? false,
+      file: (_owner, path) => files.presentationPath(path),
+      resource: (owner, content) => {
+        const target = toolset?.broker.resource(
+          owner,
+          content.kind === 'browser' ? content.tabId : content.targetId,
+        );
+        return target &&
+          (content.kind === 'browser'
+            ? target.ref.kind === 'browser-tab'
+            : ['application', 'window'].includes(target.ref.kind))
+          ? target.name
+          : null;
+      },
+      notice: (owner, notice) =>
+        toolset?.broker.recordPresentation(owner, notice) ?? {
+          status: 'refused',
+          code: 'not-found',
+          dispatched: false,
+        },
+    });
+    const [toolset, shellPath]: [RunningToolset | undefined, string | null] = await Promise.all([
+      startToolsetIfPossible(
+        version,
+        panelTools(presentations, { artifact: ARTIFACT_LIMITS, presentation: PRESENTATION_LIMITS }),
+        (owner) => {
+          presentations.removeOwner(owner);
+        },
+        () => {
+          presentations.flushNotices();
+        },
+      ),
       app.isPackaged ? loginShellPath(loginShell()) : Promise.resolve(null),
     ]);
     if (shellPath !== null) process.env.PATH = shellPath;
@@ -95,6 +131,8 @@ void app
       workspaces.list().workspaces.map((workspace) => workspace.path),
     );
     serveBridge({
+      presentations,
+      automation: automationUi(toolset?.broker, sessions),
       workspaces,
       sessions,
       choices: new RememberedChoices(choiceStorage(data), dayRoot(homedir())),
@@ -111,6 +149,7 @@ void app
       page: pageUrl(),
     });
     closeBeforeQuitting(sessions, adapters, toolset, () => {
+      presentations.disconnect();
       terminals.closeAll();
       accounts.close();
     });
@@ -152,9 +191,14 @@ app.on('window-all-closed', () => {
 
 // The app's toolset (ADR-0023), which every Codex session connects to; without it, the app offers no
 // Codex sessions, since Codex starts no thread while it cannot reach the toolset.
-async function startToolsetIfPossible(version: string): Promise<RunningToolset | undefined> {
+async function startToolsetIfPossible(
+  version: string,
+  tools: readonly AutomationTool[],
+  onOwnerRemoved: (id: string) => void,
+  onDeliveryOpportunity: () => void,
+): Promise<RunningToolset | undefined> {
   try {
-    return await startToolset({ version });
+    return await startToolset({ version, tools, onOwnerRemoved, onDeliveryOpportunity });
   } catch (error) {
     console.error('The toolset could not start, so Codex sessions are unavailable:', error);
     return undefined;

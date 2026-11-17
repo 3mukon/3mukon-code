@@ -141,7 +141,33 @@ export interface PresentationCancel {
   epoch: string;
 }
 
-export type PresentationHostMessage = PresentationCommand | PresentationCancel;
+// What became of the user's request to see something again (a `show` report), which main answers
+// once for each request, after the present it sent for it has its answer, or at once where it sends
+// none.
+export type ShowOutcome =
+  // Its panels are open.
+  | 'shown'
+  // What it showed is no longer held, as a result main reclaimed to make room for newer ones.
+  | 'expired'
+  // One of its open panels holds unsaved changes, which showing it again would replace.
+  | 'unsaved-changes'
+  // It was changing, as by its agent's command, when the request came; asking again can show it.
+  | 'busy'
+  // It cannot be shown: its session, tab or application is gone, or the page could not take it.
+  | 'unavailable';
+
+export interface PresentationShowAnswer {
+  kind: 'show-answer';
+  epoch: string;
+  // The window's id for the request, from its report.
+  requestId: string;
+  outcome: ShowOutcome;
+}
+
+// What main sends the window. The window's rules take the commands and cancels; a show's answer goes
+// to whoever asked.
+export type PresentationHostMessage =
+  PresentationCommand | PresentationCancel | PresentationShowAnswer;
 
 // Why the window refused a command.
 export type PresentationRefusal =
@@ -208,11 +234,12 @@ export type PresentationAnswer =
 //   of its session taking its place. The agent needs only where things stand, not how they came to be.
 // - show: the user asked to see one of the session's presentations again, from its activity, or a tab
 //   or application the session uses that no presentation shows, from the line above its composer,
-//   which main answers with a present command.
+//   under an id of the window's own, which main answers with a present command and then with the
+//   request's outcome.
 export type PresentationReport =
   | { kind: 'changed'; epoch: string; state: PresentationState }
-  | { kind: 'show'; epoch: string; owner: string; presentationId: string }
-  | { kind: 'show'; epoch: string; owner: string; content: UsedContent };
+  | { kind: 'show'; epoch: string; requestId: string; owner: string; presentationId: string }
+  | { kind: 'show'; epoch: string; requestId: string; owner: string; content: UsedContent };
 
 // What the line above a session's composer names, which the user can ask to see: a tab or application
 // the session uses.
@@ -237,7 +264,8 @@ export type PresentationRendererMessage =
 
 // What the window's presentations ask of the main process through the preload bridge.
 export interface PresentationBridge {
-  // Main's commands and cancels, in the order sent; the function returned stops listening.
+  // Main's commands, cancels and answers to shows, in the order sent; the function returned stops
+  // listening.
   onMessage(listener: (message: PresentationHostMessage) => void): () => void;
   // The window's answers, reports and snapshots, in order.
   send(message: PresentationRendererMessage): void;

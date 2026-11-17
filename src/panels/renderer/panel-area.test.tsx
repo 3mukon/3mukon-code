@@ -3,6 +3,11 @@ import { createRef } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { DroppedItem, PanelsBridge } from '../shared/panels';
+import type {
+  PresentationBridge,
+  PresentationHostMessage,
+  PresentationRendererMessage,
+} from '../shared/presentation';
 import type { DraggedItem, Panel } from './layout';
 import { PanelArea, type PanelAreaHandle, type PanelView } from './panel-area';
 import { usePanels } from './use-panels';
@@ -537,5 +542,105 @@ describe('PanelArea panels without a folder', () => {
     expect(within(settings).queryByTitle(/\//)).toBeNull();
     expect(fireEvent.keyDown(window, { key: 'd', metaKey: true })).toBe(true);
     expect(screen.getAllByRole('region')).toHaveLength(1);
+  });
+});
+
+describe('PanelArea presentations', () => {
+  // Main's side of the presentation contract, played by the test.
+  function presentationBridge() {
+    let deliver: ((message: PresentationHostMessage) => void) | undefined;
+    const sent: PresentationRendererMessage[] = [];
+    const bridge: PresentationBridge = {
+      onMessage: (listener) => {
+        deliver = listener;
+        return () => {
+          deliver = undefined;
+        };
+      },
+      send: (message) => {
+        sent.push(message);
+      },
+      artifact: () => Promise.resolve(null),
+    };
+    return {
+      bridge,
+      sent,
+      deliver: (message: PresentationHostMessage) => {
+        act(() => {
+          deliver?.(message);
+        });
+      },
+    };
+  }
+
+  function PresentingArea({ presentations }: { presentations: PresentationBridge }) {
+    return (
+      <PanelArea
+        ref={area}
+        panels={usePanels()}
+        bridge={{ itemsAt: () => Promise.resolve([]) }}
+        presentations={presentations}
+        sessionName={(id) => `Session ${id}`}
+        clearsWindowButtons={false}
+        view={sessionTitles}
+      />
+    );
+  }
+
+  it('presents beside the session without the focus, announces it, and reports the user’s close from its header', async () => {
+    const presentations = presentationBridge();
+    render(<PresentingArea presentations={presentations.bridge} />);
+    const [snapshot] = presentations.sent;
+    if (snapshot?.kind !== 'snapshot') throw new Error('The page sent no snapshot first.');
+    await dragIn(session('s1'));
+    presentations.deliver({
+      kind: 'present',
+      commandId: 'c1',
+      epoch: snapshot.epoch,
+      owner: 's1',
+      presentationId: 'p',
+      version: 0,
+      title: 'Results',
+      items: [{ kind: 'file', path: '/Users/me/result.md' }],
+      placement: { side: 'right', direction: 'row' },
+    });
+    expect(names()).toEqual(['Session s1', 'result.md']);
+    expect(panel('Session s1').getAttribute('aria-current')).toBe('true');
+    expect(panel('result.md').getAttribute('aria-current')).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe('Session s1 showed Results beside it');
+    expect(presentations.sent.at(-1)).toMatchObject({
+      kind: 'applied',
+      state: { boxes: [{ x: 0.5, width: 0.5 }] },
+    });
+    fireEvent.click(within(panel('result.md')).getByRole('button', { name: 'Close panel' }));
+    expect(presentations.sent.at(-1)).toMatchObject({
+      kind: 'changed',
+      state: { presentationId: 'p', version: 2, boxes: [null] },
+    });
+  });
+
+  it('holds a present that arrives during a drag until the drop', async () => {
+    const presentations = presentationBridge();
+    render(<PresentingArea presentations={presentations.bridge} />);
+    const [snapshot] = presentations.sent;
+    if (snapshot?.kind !== 'snapshot') throw new Error('The page sent no snapshot first.');
+    pressItem(file('/Users/me/a.ts'));
+    pointerTo(500, 300);
+    presentations.deliver({
+      kind: 'present',
+      commandId: 'c1',
+      epoch: snapshot.epoch,
+      owner: 's1',
+      presentationId: 'p',
+      version: 0,
+      title: 'Results',
+      items: [{ kind: 'file', path: '/Users/me/result.md' }],
+      placement: { side: 'right', direction: 'row' },
+    });
+    expect(screen.queryByRole('region', { name: 'result.md' })).toBeNull();
+    release(500, 300);
+    await dropped();
+    expect(names()).toEqual(expect.arrayContaining(['a.ts', 'result.md']));
+    expect(presentations.sent.at(-1)).toMatchObject({ kind: 'applied', commandId: 'c1' });
   });
 });

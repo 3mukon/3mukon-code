@@ -20,6 +20,9 @@ import type {
   WorkspaceMenuChoice,
 } from '../../workspaces/shared/workspaces';
 import { channels, type Bridge } from '../shared/bridge';
+import type { Artifact, PresentationHostMessage } from '../../panels/shared/presentation';
+import type { AutomationBridge } from '../../toolset/shared/automation';
+import type { AutomationEvent, Envelope } from '../../sessions/shared/automation';
 
 type Listener = (event: unknown, ...values: unknown[]) => void;
 
@@ -51,6 +54,65 @@ export function createBridge(
     };
   }
   return {
+    automation: {
+      snapshot: (id) =>
+        invoke(channels.automation.snapshot, id) as ReturnType<AutomationBridge['snapshot']>,
+      capabilities: (id) =>
+        invoke(channels.automation.capabilities, id) as ReturnType<
+          AutomationBridge['capabilities']
+        >,
+      callRecord: (id, call) =>
+        invoke(channels.automation.callRecord, id, call) as ReturnType<
+          AutomationBridge['callRecord']
+        >,
+      callFrames: (id, call) =>
+        invoke(channels.automation.callFrames, id, call) as ReturnType<
+          AutomationBridge['callFrames']
+        >,
+      icon: (id, icon) =>
+        invoke(channels.automation.icon, id, icon) as ReturnType<AutomationBridge['icon']>,
+      answer: (id, request, answer) =>
+        invoke(channels.automation.answer, id, request, answer) as ReturnType<
+          AutomationBridge['answer']
+        >,
+      stop: (id) => invoke(channels.automation.stop, id) as ReturnType<AutomationBridge['stop']>,
+      endOperation: (id, operation) =>
+        invoke(channels.automation.endOperation, id, operation) as ReturnType<
+          AutomationBridge['endOperation']
+        >,
+      endGrant: (id, grant) =>
+        invoke(channels.automation.endGrant, id, grant) as ReturnType<AutomationBridge['endGrant']>,
+      subscribe(id, listener) {
+        const subscriptionId = globalThis.crypto.randomUUID();
+        let stopped = false;
+        const detach = subscribe(channels.automation.event, (value) => {
+          const message = value as { subscriptionId: string; event: Envelope<AutomationEvent> };
+          if (message.subscriptionId === subscriptionId && message.event.sessionId === id)
+            listener(message.event);
+        });
+        const ready = invoke(channels.automation.subscribe, id, subscriptionId);
+        void ready.catch(detach);
+        return () => {
+          if (stopped) return;
+          stopped = true;
+          detach();
+          // A StrictMode cleanup may precede the main process accepting the subscription.
+          void ready
+            .then(() => invoke(channels.automation.unsubscribe, subscriptionId))
+            .catch(() => undefined);
+        };
+      },
+    },
+    presentations: {
+      onMessage: (listener) =>
+        subscribe(channels.presentations.message, (value) => {
+          listener(value as PresentationHostMessage);
+        }),
+      send: (message) => {
+        void invoke(channels.presentations.report, message).catch(() => undefined);
+      },
+      artifact: (id) => invoke(channels.presentations.artifact, id) as Promise<Artifact | null>,
+    },
     workspaces: {
       get: () => invoke(channels.workspaces.get) as Promise<WorkspaceList>,
       onChange: (listener) =>

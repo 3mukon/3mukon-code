@@ -1,4 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
+import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+import type { ToolsetAccess } from '../../../sessions/main/provider';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +24,9 @@ const fakes = vi.hoisted(() => {
     readonly applyFlagSettings = vi.fn(() => Promise.resolve());
     readonly setPermissionMode = vi.fn(() => Promise.resolve());
     readonly interrupt = vi.fn(() => Promise.resolve());
+    readonly mcpServerStatus = vi.fn(() =>
+      Promise.resolve([{ name: '3mukon-code', status: 'connected' }]),
+    );
     // Claude Code's own count of the context, which names the model a session uses.
     readonly getContextUsage = vi.fn(() =>
       stalled.has('getContextUsage')
@@ -191,6 +196,120 @@ async function playTurn(
 }
 
 describe('the Claude Code provider', () => {
+  it.each(['auto', 'yolo'] as const)(
+    'connects the bound tools in %s and waits for the native context receipt',
+    async (mode) => {
+      const accesses: ToolsetAccess[] = [];
+      const resultLink = vi.fn();
+      const bound = {
+        name: '3mukon-code',
+        open() {
+          const access = {
+            url: 'http://127.0.0.1:4000/mcp',
+            credential: `synthetic-${String(accesses.length)}`,
+            tools: ['panel_list'],
+            close: vi.fn(),
+            result: resultLink,
+            availability: vi.fn(),
+          };
+          accesses.push(access);
+          return access;
+        },
+      };
+      const events: SessionEvent[] = [];
+      const provider = createClaudeCodeProvider({ gatewaysDir });
+      const session = await provider.start({ cwd: '/work', mode, toolset: bound }, (e) =>
+        events.push(e),
+      );
+      const first = current();
+      expect(first.params.options.mcpServers).toEqual({
+        '3mukon-code': {
+          type: 'http',
+          url: accesses[0]?.url,
+          headers: { Authorization: 'Bearer synthetic-0' },
+          alwaysLoad: true,
+        },
+      });
+      const ask = first.params.options.canUseTool as CanUseTool;
+      await expect(
+        ask(
+          'mcp__3mukon-code__panel_list',
+          {},
+          {
+            signal: new AbortController().signal,
+            toolUseID: 'tool-1',
+            requestId: 'request-1',
+            suggestions: [],
+          },
+        ),
+      ).resolves.toMatchObject({ behavior: 'allow' });
+      expect(events.some((e) => e.type === 'approval-requested')).toBe(false);
+      const delivery = { accepted: vi.fn(), failed: vi.fn() };
+      const notice = {
+        noticeId: 'n',
+        owner: 'owner',
+        reuseKey: 'r',
+        presentation: {
+          id: 'p',
+          title: 'Fixture',
+          version: 1,
+          items: [{ content: { kind: 'file' as const, path: '/work/a.md' }, box: null }],
+        },
+      };
+      await session.send('Keep this exact text', [], { presentationNotices: [notice] }, delivery);
+      await waitFor(() => first.inputs.length === 1);
+      expect(delivery.accepted).not.toHaveBeenCalled();
+      expect(first.inputs[0]).toMatchObject({
+        message: {
+          content: [{ type: 'document' }, { type: 'text', text: 'Keep this exact text' }],
+        },
+      });
+      first.push(first.inputs[0]);
+      await waitFor(() => delivery.accepted.mock.calls.length === 1);
+      const envelope = {
+        automation: { schemaVersion: 1, callId: 'receipt' },
+        outcome: { status: 'refused', code: 'sandbox-denied' },
+        presentationNotices: [],
+      };
+      first.push({
+        type: 'assistant',
+        uuid: 'a',
+        parent_tool_use_id: null,
+        message: {
+          id: 'a',
+          content: [
+            { type: 'tool_use', id: 'tool-1', name: 'mcp__3mukon-code__panel_list', input: {} },
+          ],
+        },
+      });
+      first.push({
+        type: 'user',
+        parent_tool_use_id: null,
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'tool-1',
+              is_error: true,
+              content: [{ type: 'text', text: JSON.stringify(envelope) }],
+            },
+          ],
+        },
+      });
+      await waitFor(() => resultLink.mock.calls.length === 1);
+      expect(resultLink).toHaveBeenCalledWith('panel_list', 'tool-1', envelope.automation);
+      first.push(result);
+      await waitFor(() => events.some((e) => e.type === 'turn-ended'));
+      await session.setGateway('work');
+      expect(accesses).toHaveLength(2);
+      expect(accesses[0]?.close).toHaveBeenCalled();
+      expect(current().params.options.mcpServers).toMatchObject({
+        '3mukon-code': { headers: { Authorization: 'Bearer synthetic-1' } },
+      });
+      await session.close();
+      expect(accesses[1]?.close).toHaveBeenCalled();
+    },
+  );
   it('starts a session with the chosen gateway, model and effort, and reports them and the models', async () => {
     const { events } = await startSession({ gateway: 'work', model: 'opus', effort: 'high' });
     expect(current().params.options).toMatchObject({

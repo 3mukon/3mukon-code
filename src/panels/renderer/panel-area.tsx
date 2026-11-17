@@ -9,12 +9,14 @@ import {
   type DragEvent,
   type ReactNode,
   type Ref,
+  type RefObject,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Divider } from '../../ui/renderer/divider';
 import { Pane } from '../../ui/renderer/pane';
 import type { Status } from '../../ui/renderer/status-dot';
 import type { PanelContent, PanelsBridge } from '../shared/panels';
+import type { PresentationBridge, ShowOutcome } from '../shared/presentation';
 import { arrange, neighbour, zoneAt, type Box, type Direction, type Rect } from './geometry';
 import {
   contentOf,
@@ -28,6 +30,7 @@ import {
   type Side,
   type Target,
 } from './layout';
+import { PresentationPage, type PresentationArea } from './presentations';
 import type { Panels } from './use-panels';
 
 // What a panel shows, as whoever composes the area decides: its header's title, detail, the detail's
@@ -50,6 +53,10 @@ export interface PanelView {
 interface PanelAreaProps {
   panels: Panels;
   bridge: PanelsBridge;
+  // Main's side of the presentation contract, through which agents present beside their sessions.
+  presentations?: PresentationBridge;
+  // A session's name, by the app's id for it, for VoiceOver's announcement of what it presents.
+  sessionName?: (id: string) => string;
   view?: (panel: Panel) => PanelView;
   // macOS's window buttons lie over the area's top-left corner, as they do while the sidebar is
   // hidden.
@@ -72,9 +79,11 @@ export interface Press {
 
 // What whoever composes the area may ask of it: to follow a press on an item of the app's lists,
 // which drags the item into the area once the pointer has gone far enough, the ghost that follows the
-// pointer saying the label.
+// pointer saying the label; and to show one of a session's presentations again, as the user asks from
+// its activity, telling what became of it.
 export interface PanelAreaHandle {
   dragItem(item: DraggedItem, label: string, press: Press): void;
+  show(owner: string, presentationId: string): Promise<ShowOutcome>;
 }
 
 // What a drag with the pointer carries: a panel moved by its title, or an item from the app's lists,
@@ -124,9 +133,15 @@ const DRAG_AFTER = 4;
 // downwards, opening a session page in its folder; ⌘W closes the focused panel; ⌘1 to ⌘9 focus the
 // panels in reading order; ⌥⌘ and an arrow focus the next panel that way, and ⇧⌥⌘ and an arrow swap
 // the focused panel with it. Dividers take focus with Tab and move with the arrow keys.
+//
+// What agents present opens as main's commands ask, by the window's rules (PresentationPage): beside
+// the session's panel, without the focus, VoiceOver announcing it, and after the drop when it comes
+// during a drag. The user's closes, and where presented panels come to lie, go back to main.
 export function PanelArea({
   panels,
   bridge,
+  presentations,
+  sessionName,
   view,
   clearsWindowButtons,
   besideWindowButtons,
@@ -144,6 +159,12 @@ export function PanelArea({
   const [dragging, setDragging] = useState<{ carried: Carried; pointerId: number } | null>(null);
   const ghost = useRef<HTMLDivElement | null>(null);
   const pointer = useRef({ x: 0, y: 0 });
+  // The presentation that opened last, which VoiceOver announces.
+  const [opened, setOpened] = useState<{ owner: string; title: string } | null>(null);
+  const page = usePresentationPage(presentations, panels, view, root, setOpened);
+  useEffect(() => {
+    page.current?.setDragging(dragging !== null || drop !== null);
+  }, [page, dragging, drop]);
 
   const ordered = panelsOf(panels.layout);
   const arrangement = arrange(panels.layout);
@@ -337,6 +358,8 @@ export function PanelArea({
     dragItem: (item, label, press) => {
       follow({ kind: 'item', item, label }, press);
     },
+    show: (owner, presentationId) =>
+      page.current?.show(owner, { presentationId }) ?? Promise.resolve('unavailable'),
   }));
 
   // Finder items, which come as a drag of the system's.
@@ -460,6 +483,13 @@ export function PanelArea({
         </div>
       )}
       {drop?.kind === 'area' && <DropZone zone="middle" />}
+      <div role="status" className="sr-only">
+        {opened !== null &&
+          t('panels.presented', {
+            session: sessionName?.(opened.owner) ?? '',
+            title: opened.title,
+          })}
+      </div>
       {dragging !== null && (
         <>
           {/* Over the whole window while a drag goes on, holding the pointer, so that its events come
@@ -485,6 +515,54 @@ export function PanelArea({
       )}
     </div>
   );
+}
+
+// The page's side of the presentation contract while the area has main's bridge, from the area's
+// first render until it goes or the bridge changes. What it asks of the area, it reads as the latest
+// render has it.
+function usePresentationPage(
+  bridge: PresentationBridge | undefined,
+  panels: Panels,
+  view: ((panel: Panel) => PanelView) | undefined,
+  root: RefObject<HTMLDivElement | null>,
+  onOpened: (opened: { owner: string; title: string }) => void,
+): RefObject<PresentationPage | null> {
+  const page = useRef<PresentationPage | null>(null);
+  const latest = useRef({ panels, view, onOpened });
+  useLayoutEffect(() => {
+    latest.current = { panels, view, onOpened };
+  });
+  useEffect(() => {
+    if (bridge === undefined) return;
+    const area: PresentationArea = {
+      unsaved: (panel) => latest.current.view?.(panel).unsaved === true,
+      size: () => {
+        const rect = root.current?.getBoundingClientRect();
+        return { width: rect?.width ?? 0, height: rect?.height ?? 0 };
+      },
+      opened: (owner, title) => {
+        latest.current.onOpened({ owner, title });
+      },
+    };
+    const started = new PresentationPage(
+      bridge,
+      {
+        latest: () => latest.current.panels.latest(),
+        present: (presentationId, change) => {
+          latest.current.panels.present(presentationId, change);
+        },
+        subscribe: (listener) => latest.current.panels.subscribe(listener),
+      },
+      area,
+    );
+    page.current = started;
+    const stop = started.start();
+    return () => {
+      stop();
+      page.current = null;
+    };
+  }, [bridge, root]);
+  return page;
 }
 
 // A panel's body, as the view gives it, which renders again only when the panel or the view does,
@@ -599,8 +677,8 @@ function openingAt(target: DropTarget): Target {
 
 // A panel's own title, and its folder's name with the full path: a session page or session goes by
 // the given title, a file by its name, and a terminal by the title whoever composes the area gives it,
-// with its folder; the archived sessions, the accounts and the settings have neither, and go by the
-// title whoever composes the area gives them.
+// with its folder; the archived sessions, the accounts, the settings and what an agent presents
+// besides files have neither, and go by the title whoever composes the area gives them.
 function describe(
   content: PanelContent,
   sessionPage: string,
@@ -620,6 +698,9 @@ function describe(
     case 'archived':
     case 'accounts':
     case 'settings':
+    case 'artifact':
+    case 'browser':
+    case 'computer':
       return { title: '' };
   }
 }

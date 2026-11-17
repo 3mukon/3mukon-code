@@ -6,8 +6,14 @@ import { initialSessionState } from '../../sessions/shared/session-state';
 import type { SessionList, SessionSummary } from '../../sessions/shared/sessions';
 import type { AppSettings } from '../../settings/shared/settings';
 import type { WorkspaceList } from '../../workspaces/shared/workspaces';
+import type {
+  PresentationHostMessage,
+  PresentationRendererMessage,
+} from '../../panels/shared/presentation';
+import type { AutomationSnapshot } from '../../sessions/shared/automation';
 import type { Bridge } from '../shared/bridge';
 import { App } from './app';
+import { FakeAutomationBridge } from '../../toolset/shared/automation-fake';
 
 beforeAll(() => {
   initI18n(['en-US']);
@@ -26,6 +32,12 @@ function fakeBridge(
     shown: [],
   };
   return {
+    automation: new FakeAutomationBridge(),
+    presentations: {
+      onMessage: () => () => undefined,
+      send: () => undefined,
+      artifact: () => Promise.resolve(null),
+    },
     workspaces: {
       get: () => Promise.resolve(list),
       onChange: () => () => undefined,
@@ -776,5 +788,136 @@ describe('App', () => {
     fireEvent.keyDown(window, { key: 'b', metaKey: true, shiftKey: true });
     fireEvent.keyDown(window, { key: 'b', metaKey: true, altKey: true });
     expect(sidebar.hasAttribute('inert')).toBe(false);
+  });
+
+  it('records a presentation under the tool call that made it, whose Show asks main and says why it could not show it', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/web',
+        title: 'Compare pricing pages',
+        status: 'idle',
+        activeAt: 1,
+      },
+    ]);
+    bridge.sessions.snapshot = () =>
+      Promise.resolve({
+        seq: 0,
+        state: {
+          ...initialSessionState(),
+          timeline: [
+            {
+              type: 'tool',
+              id: 'tool-1',
+              kind: 'other',
+              title: 'panel_present',
+              status: 'completed',
+              output: '',
+              changes: [],
+            },
+          ],
+        },
+      });
+    const automation = new FakeAutomationBridge();
+    const snapshot: AutomationSnapshot = {
+      sessionId: 's1',
+      policy: { mode: 'auto', sandbox: 'workspace-write' },
+      policyEpoch: 1,
+      phase: 'idle',
+      resources: [],
+      operations: [],
+      grants: [],
+      pendingApprovals: [],
+      foregroundOwner: null,
+      availability: { tools: 'ready', images: 'unknown' },
+      endedGrants: [],
+      presentationNotices: [],
+      recentCalls: [
+        {
+          callId: 'call-1',
+          sessionId: 's1',
+          turnId: 'turn-1',
+          accessGeneration: 1,
+          revision: 2,
+          toolName: 'panel_present',
+          operationId: null,
+          operationEnd: null,
+          grantId: null,
+          grantEnd: null,
+          approval: null,
+          incidents: [],
+          startedAt: 1,
+          completedAt: 2,
+          phase: 'settled',
+          outcome: { status: 'verified', value: null },
+          frames: [],
+          framesState: 'available',
+          providerEntry: {
+            callId: 'call-1',
+            sessionId: 's1',
+            turnId: 'turn-1',
+            accessGeneration: 1,
+            toolName: 'panel_present',
+            providerToolId: 'tool-1',
+          },
+          family: 'panel',
+          presentations: [
+            {
+              id: 'p1',
+              title: 'comparison.md',
+              version: 2,
+              items: [{ content: { kind: 'artifact', artifactId: 'a1' }, box: null }],
+            },
+          ],
+        },
+      ],
+    };
+    automation.seed(snapshot);
+    bridge.automation = automation;
+    let deliver: ((message: PresentationHostMessage) => void) | undefined;
+    const sent: PresentationRendererMessage[] = [];
+    bridge.presentations = {
+      onMessage: (listener) => {
+        deliver = listener;
+        return () => {
+          deliver = undefined;
+        };
+      },
+      send: (message) => {
+        sent.push(message);
+      },
+      artifact: () => Promise.resolve(null),
+    };
+    await renderApp(bridge);
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Compare pricing pages/,
+      }),
+    );
+    const panel = within(screen.getByRole('main')).getByRole('region', {
+      name: 'Compare pricing pages',
+    });
+    await waitFor(() => {
+      expect(within(panel).getByText('Showed comparison.md beside this session')).toBeTruthy();
+    });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Show' }));
+    const request = sent.at(-1);
+    if (request?.kind !== 'show' || !('presentationId' in request)) {
+      throw new Error('The window asked main for nothing.');
+    }
+    expect(request).toMatchObject({ owner: 's1', presentationId: 'p1' });
+    act(() => {
+      deliver?.({
+        kind: 'show-answer',
+        epoch: request.epoch,
+        requestId: request.requestId,
+        outcome: 'expired',
+      });
+    });
+    await waitFor(() => {
+      expect(within(panel).getByText('It’s no longer available.')).toBeTruthy();
+    });
   });
 });
