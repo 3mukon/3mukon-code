@@ -4,7 +4,9 @@ import { StatusDot, type Status } from './status-dot';
 
 interface PaneProps {
   title: string;
-  // Shown after the title in a quieter style, such as the provider's name or a folder's name.
+  // Shown after the title in a quieter style, such as the provider's name or a folder's name. It takes
+  // only the room the title leaves, so that where both do not fit it gives way first, and the title
+  // shortens only once the detail is gone.
   detail?: string;
   // The detail in full, as its tooltip, such as a path.
   detailTitle?: string;
@@ -88,7 +90,7 @@ export function Pane({
           <span className="truncate">{title}</span>
           {unsaved && unsavedLabel !== undefined && <span className="sr-only">{unsavedLabel}</span>}
           {detail !== undefined && (
-            <small title={detailTitle} className="truncate text-xs font-normal text-faint">
+            <small title={detailTitle} className="flex-1 truncate text-xs font-normal text-faint">
               {detail}
             </small>
           )}

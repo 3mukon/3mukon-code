@@ -177,3 +177,56 @@ test('a drop takes the grabbing cursor off the pointer at once, even when what i
     rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test('a panel’s header keeps its title whole and lets its detail give way where both do not fit', async () => {
+  const data = dataFolder();
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'smoke-headers-')));
+  // A workspace whose name, the detail of the files in it, is longer than any panel's header.
+  const folder = join(
+    parent,
+    'a-workspace-whose-name-is-far-longer-than-a-panel-header-'.repeat(4),
+  );
+  mkdirSync(folder);
+  writeFileSync(join(folder, 'notes.md'), '');
+  try {
+    const app = await launch(data.path);
+    try {
+      const window = await app.firstWindow();
+      await pickFolder(app, folder);
+      await window.getByRole('button', { name: 'Add workspace' }).click();
+      await answerQuestion(window, 'Trust');
+      const workspace = window.getByRole('treeitem', { name: basename(folder), exact: true });
+      await workspace.focus();
+      await window.keyboard.press('ArrowRight');
+      const file = workspace.getByRole('treeitem', { name: 'notes.md', exact: true });
+      await file.focus();
+      await window.keyboard.press('Enter');
+      const header = window
+        .getByRole('main')
+        .getByRole('region', { name: 'notes.md', exact: true })
+        .locator('header');
+      const detail = header.locator('small');
+      await expect(detail).toHaveText(basename(folder));
+      // The folder's name does not fit and is cut short, while the file's name stays whole.
+      expect(await overflows(detail)).toBe(true);
+      expect(await overflows(header.getByText('notes.md', { exact: true }))).toBe(false);
+    } finally {
+      await app.close();
+    }
+  } finally {
+    data.remove();
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+// Whether the element's text runs past its box, as text cut short with an ellipsis does.
+function overflows(locator: Locator) {
+  return locator.evaluate((element: Measured) => element.scrollWidth > element.clientWidth);
+}
+
+// The page's side of that check, described as far as it needs, since the smoke tests compile for
+// Node.js without the DOM's types.
+interface Measured {
+  scrollWidth: number;
+  clientWidth: number;
+}
