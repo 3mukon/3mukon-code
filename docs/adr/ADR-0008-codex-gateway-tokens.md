@@ -2,14 +2,14 @@
 id: ADR-0008
 type: adr
 title: Pass a Codex gateway file's settings to Codex, token included
-status: accepted
+status: superseded
 visibility: public
 date: 2026-10-26
 summary: Provider credentials stay in the providers' own settings and the app never stores, logs or shows a key or token, with one exception to reading and passing them: the main process reads a selected Codex gateway file and passes its settings to Codex, including a token the file holds; refusing such files and letting Codex read them as profiles were rejected
 scope: ["src/**"]
 tags: []
 supersedes: [ADR-0001]
-superseded_by:
+superseded_by: ADR-0028
 ---
 
 ## Context
