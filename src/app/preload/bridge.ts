@@ -147,8 +147,10 @@ export function createBridge(
       providers: () => invoke(channels.sessions.providers) as Promise<ProviderId[]>,
       dayFolder: () => invoke(channels.sessions.dayFolder) as Promise<string>,
       gateways: (provider) => invoke(channels.sessions.gateways, provider) as Promise<string[]>,
-      models: (provider, gateway) =>
-        invoke(channels.sessions.models, provider, gateway) as Promise<ModelOption[]>,
+      models: (provider, gateway, folder, fresh) =>
+        invoke(channels.sessions.models, provider, gateway, folder, fresh) as Promise<
+          ModelOption[]
+        >,
       choices: () => invoke(channels.sessions.choices) as Promise<FolderChoices>,
       rememberChoice: (folder, choice) =>
         invoke(channels.sessions.rememberChoice, folder, choice) as Promise<void>,

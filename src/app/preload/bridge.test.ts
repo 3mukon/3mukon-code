@@ -134,7 +134,7 @@ describe('createBridge', () => {
     };
     await bridge.sessions.resume('s1', resumed);
     await bridge.sessions.showMenu('s1');
-    await bridge.sessions.models('codex', null);
+    await bridge.sessions.models('codex', null, '/Users/me/web', true);
     await bridge.sessions.choices();
     await bridge.sessions.rememberChoice('/Users/me/web', {
       provider: 'codex',
@@ -183,7 +183,7 @@ describe('createBridge', () => {
       ['settings:set', { appearance: 'light' }],
       ['sessions:resume', 's1', resumed],
       ['sessions:show-menu', 's1'],
-      ['sessions:models', 'codex', null],
+      ['sessions:models', 'codex', null, '/Users/me/web', true],
       ['sessions:choices'],
       [
         'sessions:remember-choice',

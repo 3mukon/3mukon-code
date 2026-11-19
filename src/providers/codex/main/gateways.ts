@@ -5,8 +5,9 @@ import { parse, TomlError } from 'smol-toml';
 
 // A gateway is a Codex profile file named <name>.toml in the gateways folder of Codex's home. Codex
 // loads profiles only from its home folder itself, so the app reads the selected file and passes its
-// settings with the session's thread. The file may hold a token: the app keeps no copy of the settings,
-// never logs or shows them, and hides their text in Codex's errors (ADR-0008).
+// settings with the session's thread. The file may hold a token: the app keeps no copy of the settings
+// but the model and effort, shows none but those two among a session's models, logs none, and hides
+// their text in Codex's errors (ADR-0028).
 
 // Letters, digits, dots, hyphens and underscores, starting with a letter or digit, so that a gateway's
 // name can never lead outside the folder.
@@ -23,8 +24,10 @@ export interface GatewaySettings {
   config: Record<string, JsonValue>;
   // The file's model_provider, which the thread runs on.
   modelProvider?: string;
-  // The file's model, offered among the models of a session through the gateway.
+  // The file's model and model_reasoning_effort, which a thread through the gateway runs when the
+  // session chooses none, since the file's settings go with the thread over Codex's own.
   model?: string;
+  effort?: string;
 }
 
 // The gateways folder in Codex's home, which CODEX_HOME moves.
@@ -78,11 +81,12 @@ export async function readGateway(dir: string, name: string): Promise<GatewaySet
     throw new Error(`The gateway "${name}" is not valid TOML${place}.`);
   }
   const config = jsonObject(parsed, name, '');
-  const { model_provider: modelProvider, model } = config;
+  const { model_provider: modelProvider, model, model_reasoning_effort: effort } = config;
   return {
     config,
     ...(typeof modelProvider === 'string' && modelProvider !== '' ? { modelProvider } : {}),
     ...(typeof model === 'string' && model !== '' ? { model } : {}),
+    ...(typeof effort === 'string' && effort !== '' ? { effort } : {}),
   };
 }
 

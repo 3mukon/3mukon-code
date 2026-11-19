@@ -336,7 +336,7 @@ describe('SessionHost', () => {
     await expect(host.send('missing', 'Hi')).rejects.toThrow('not open');
   });
 
-  it('offers its providers, their gateways, and their models, found once per gateway', async () => {
+  it('offers its providers, their gateways, and their models, kept once found for each gateway', async () => {
     const claude = fakeProvider('claude-code');
     const models: ModelOption[] = [{ id: 'opus', label: 'Opus', efforts: ['high'] }];
     claude.listModels.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(models);
@@ -346,12 +346,46 @@ describe('SessionHost', () => {
     );
     expect(host.providerIds()).toEqual(['claude-code', 'codex']);
     expect(await host.gateways('claude-code')).toEqual(['work']);
-    // A failed search is tried again; a found list is kept.
+    // A failed search is tried again; a found list is kept for a page that does not choose.
     await expect(host.models('claude-code', null)).rejects.toThrow('offline');
     expect(await host.models('claude-code', null)).toEqual(models);
     expect(await host.models('claude-code', null)).toEqual(models);
     expect(await host.models('claude-code', 'work')).toEqual(models);
     expect(claude.listModels.mock.calls).toEqual([[null], [null], ['work']]);
+  });
+
+  it('lists models anew in its folder for a new page, once at a time, unless found within 15 seconds', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_000);
+    const codex = fakeProvider('codex');
+    const first: ModelOption[] = [{ id: 'gpt-a', label: 'A', efforts: [], default: true }];
+    const second: ModelOption[] = [{ id: 'gpt-b', label: 'B', efforts: [], default: true }];
+    codex.listModels
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+      .mockRejectedValueOnce(new Error('offline'));
+    const host = new SessionHost([codex.provider], memoryRecords().records);
+    // Pages opening together share one listing for their folder.
+    expect(
+      await Promise.all([
+        host.models('codex', null, '/work', true),
+        host.models('codex', null, '/work', true),
+      ]),
+    ).toEqual([first, first]);
+    vi.setSystemTime(15_999);
+    expect(await host.models('codex', null, '/work', true)).toEqual(first);
+    // Older than 15 seconds, the list is found again, since the provider's settings may have changed.
+    vi.setSystemTime(16_000);
+    expect(await host.models('codex', null, '/work', true)).toEqual(second);
+    // A listing that fails leaves the list kept as it was.
+    vi.setSystemTime(40_000);
+    await expect(host.models('codex', null, '/work', true)).rejects.toThrow('offline');
+    expect(await host.models('codex', null, '/work', false)).toEqual(second);
+    expect(codex.listModels.mock.calls).toEqual([
+      [null, '/work'],
+      [null, '/work'],
+      [null, '/work'],
+    ]);
   });
 
   it('fails a list of models that has not come within a minute, and asks for it again next time', async () => {

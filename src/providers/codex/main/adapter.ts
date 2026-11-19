@@ -35,10 +35,13 @@ import {
   listGateways,
   readGateway,
   redact,
+  type GatewaySettings,
 } from './gateways';
 import type { InitializeParams } from './protocol/InitializeParams';
 import type { RequestId } from './protocol/RequestId';
 import type { CommandExecutionRequestApprovalParams } from './protocol/v2/CommandExecutionRequestApprovalParams';
+import type { ConfigReadParams } from './protocol/v2/ConfigReadParams';
+import type { ConfigReadResponse } from './protocol/v2/ConfigReadResponse';
 import type { FileChangeRequestApprovalParams } from './protocol/v2/FileChangeRequestApprovalParams';
 import type { ItemCompletedNotification } from './protocol/v2/ItemCompletedNotification';
 import type { Model } from './protocol/v2/Model';
@@ -294,12 +297,19 @@ export function createCodexProvider({
     listGateways() {
       return listGateways(gatewaysDir);
     },
-    async listModels(gateway) {
-      const own = gateway === null ? undefined : (await readGateway(gatewaysDir, gateway)).model;
+    // With the configuration as Codex reads it for the folder a page would start a session in, where
+    // it gives one, so that a trusted project's own settings count as they do for a thread there; the
+    // probe itself runs in a throwaway folder.
+    async listModels(gateway, folder) {
+      const own =
+        gateway === null ? NO_DEFAULTS : gatewayDefaults(await readGateway(gatewaysDir, gateway));
       const cwd = await mkdtemp(join(tmpdir(), 'codex-models-'));
       probeFolders.add(cwd);
       try {
-        return withGatewayModel(modelOptions(await withCodex(probeConnect, cwd, allModels)), own);
+        return await withCodex(probeConnect, cwd, async (rpc) => {
+          const models = await allModels(rpc);
+          return modelOptions(models, overGateway(own, await configuredDefaults(rpc, folder)));
+        });
       } finally {
         probeFolders.delete(cwd);
         await rm(cwd, { recursive: true, force: true });
@@ -402,23 +412,77 @@ async function allModels(rpc: Rpc): Promise<Model[]> {
   return models.filter((model) => !model.hidden);
 }
 
-// The models, with the one Codex uses when a thread chooses none marked, and each one's own effort.
-function modelOptions(models: Model[]): ModelOption[] {
-  return models.map((model) => ({
+// The model and effort a thread runs when the session chooses none, where settings name them.
+interface Defaults {
+  model: string | undefined;
+  effort: ReasoningEffort | undefined;
+}
+
+const NO_DEFAULTS: Defaults = { model: undefined, effort: undefined };
+
+// What a gateway's file names, which goes with the thread over Codex's own configuration.
+function gatewayDefaults({ model, effort }: GatewaySettings): Defaults {
+  return { model, effort };
+}
+
+// What Codex's own configuration names, as config/read gives it, for the folder where one is given,
+// whose project settings then count, as for a thread there: a trusted project's, and none for a folder
+// that does not exist yet. Codex 0.166.0 refuses the legacy `profile` key, so these are what it runs.
+// Should Codex not answer, nothing counts as named, and the catalog's defaults stand.
+async function configuredDefaults(rpc: Rpc, cwd?: string): Promise<Defaults> {
+  const params: ConfigReadParams = cwd === undefined ? {} : { cwd };
+  try {
+    const { config } = await rpc.request<ConfigReadResponse>('config/read', params);
+    return { model: config.model ?? undefined, effort: config.model_reasoning_effort ?? undefined };
+  } catch {
+    return NO_DEFAULTS;
+  }
+}
+
+// The gateway's own over Codex's configuration, as the thread takes them.
+function overGateway(gateway: Defaults, configured: Defaults): Defaults {
+  return { model: gateway.model ?? configured.model, effort: gateway.effort ?? configured.effort };
+}
+
+// The model a thread runs when it chooses none: the one its settings name, or else the catalog's.
+function defaultModel(models: Model[], defaults: Defaults): string | undefined {
+  return defaults.model ?? models.find((model) => model.isDefault)?.model;
+}
+
+// The effort a thread runs a model with when the session chooses none: the one its settings name,
+// which Codex runs whatever the model, even one that the model does not list, or else the model's own.
+function defaultEffort(
+  models: Model[],
+  defaults: Defaults,
+  model: string | undefined,
+): ReasoningEffort | undefined {
+  return defaults.effort ?? models.find((entry) => entry.model === model)?.defaultReasoningEffort;
+}
+
+// The models, with the one a thread runs when it chooses none marked, and the effort each one then
+// runs with. A model that the settings name and Codex does not offer, such as a gateway's own, leads
+// the list, since Codex runs it all the same.
+function modelOptions(models: Model[], defaults: Defaults): ModelOption[] {
+  const selected = defaultModel(models, defaults);
+  const options = models.map((model): ModelOption => ({
     id: model.model,
     label: model.displayName,
     ...(model.description === '' ? {} : { description: model.description }),
     efforts: model.supportedReasoningEfforts.map((option) => option.reasoningEffort),
-    ...(model.isDefault ? { default: true } : {}),
-    defaultEffort: model.defaultReasoningEffort,
+    ...(model.model === selected ? { default: true } : {}),
+    defaultEffort: defaults.effort ?? model.defaultReasoningEffort,
   }));
-}
-
-// A gateway's own model, from its file, leads the list when Codex does not offer it.
-function withGatewayModel(models: ModelOption[], own: string | undefined): ModelOption[] {
-  return own === undefined || models.some((model) => model.id === own)
-    ? models
-    : [{ id: own, label: own, efforts: [] }, ...models];
+  if (selected === undefined || options.some((option) => option.id === selected)) return options;
+  return [
+    {
+      id: selected,
+      label: selected,
+      efforts: [],
+      default: true,
+      ...(defaults.effort === undefined ? {} : { defaultEffort: defaults.effort }),
+    },
+    ...options,
+  ];
 }
 
 function errorMessage(error: unknown): string {
@@ -472,7 +536,7 @@ interface Attached {
   sandbox: SandboxLevel;
   response: ThreadStartResponse | ThreadResumeResponse;
   // From the gateway's file, as it was read for this connection.
-  gatewayModel: string | undefined;
+  gatewayDefaults: Defaults;
 }
 
 class CodexSession implements ProviderSession {
@@ -491,6 +555,8 @@ class CodexSession implements ProviderSession {
   private generation = 0;
   private generations = 0;
   private models: Model[] = [];
+  // What the gateway's file and Codex's configuration, as the session's folder makes it, name.
+  private defaults: Defaults = NO_DEFAULTS;
   // The model the native thread actually selected, which may differ from its catalog default.
   private effectiveModel: string | null = null;
   // The policy Codex gave the thread for each level it started or resumed in, as Codex's own settings
@@ -548,7 +614,7 @@ class CodexSession implements ProviderSession {
         effort: settings.effort ?? attached.response.reasoningEffort,
         sandbox: settings.sandbox,
       });
-      await session.refreshModels(attached.gatewayModel);
+      await session.refreshModels(attached.gatewayDefaults);
     } catch (error) {
       void attached.rpc.close();
       session.access?.close();
@@ -725,7 +791,13 @@ class CodexSession implements ProviderSession {
               threadId: resumeId,
               excludeTurns: true,
             });
-      return { rpc, generation, sandbox, response, gatewayModel: gateway?.model };
+      return {
+        rpc,
+        generation,
+        sandbox,
+        response,
+        gatewayDefaults: gateway === null ? NO_DEFAULTS : gatewayDefaults(gateway),
+      };
     } catch (error) {
       this.access.close();
       void rpc.close();
@@ -772,12 +844,12 @@ class CodexSession implements ProviderSession {
     this.onEvent({ type: 'replay-finished' });
   }
 
-  private async refreshModels(gatewayModel: string | undefined): Promise<void> {
+  // The models, and the defaults that Codex's configuration names for the session's folder, under the
+  // gateway's own.
+  private async refreshModels(gateway: Defaults): Promise<void> {
     this.models = await allModels(this.rpc);
-    this.onEvent({
-      type: 'models',
-      models: withGatewayModel(modelOptions(this.models), gatewayModel),
-    });
+    this.defaults = overGateway(gateway, await configuredDefaults(this.rpc, this.settings.cwd));
+    this.onEvent({ type: 'models', models: modelOptions(this.models, this.defaults) });
     this.reportAvailability();
   }
 
@@ -791,12 +863,11 @@ class CodexSession implements ProviderSession {
   }
 
   // The turn's input, with whatever changed since the last turn. A model or an effort set back to the
-  // default goes as Codex's default, since a turn cannot unset what an earlier one chose.
+  // default goes as the default that the models mark, the one the thread runs when it chooses none,
+  // since a turn cannot unset what an earlier one chose.
   private turnParams(message: Message): TurnStartParams {
-    const model = this.settings.model ?? this.models.find((entry) => entry.isDefault)?.model;
-    const effort =
-      this.settings.effort ??
-      this.models.find((entry) => entry.model === model)?.defaultReasoningEffort;
+    const model = this.settings.model ?? defaultModel(this.models, this.defaults);
+    const effort = this.settings.effort ?? defaultEffort(this.models, this.defaults, model);
     return {
       threadId: this.threadId,
       input: turnInput(message),
@@ -866,7 +937,7 @@ class CodexSession implements ProviderSession {
       model: attached.response.model,
       sandbox: this.settings.sandbox,
     });
-    await this.refreshModels(attached.gatewayModel);
+    await this.refreshModels(attached.gatewayDefaults);
   }
 
   // The session's app-server, for the account's calls, while it runs on Codex's own sign-in; null

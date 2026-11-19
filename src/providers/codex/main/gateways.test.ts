@@ -31,7 +31,7 @@ describe('Codex gateways', () => {
     expect(() => gatewayPath(dir, '')).toThrow('not a gateway name');
   });
 
-  it('reads a profile file as configuration, with its provider and model', async () => {
+  it('reads a profile file as configuration, with its provider, model and effort', async () => {
     writeFileSync(
       join(dir, 'work.toml'),
       [
@@ -59,6 +59,7 @@ describe('Codex gateways', () => {
       },
       modelProvider: 'proxy',
       model: 'gpt-test',
+      effort: 'low',
     });
   });
 

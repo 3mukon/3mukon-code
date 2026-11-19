@@ -32,6 +32,8 @@ const ROOTS = [
   'v2/TurnInterruptParams',
   'v2/ModelListParams',
   'v2/ModelListResponse',
+  'v2/ConfigReadParams',
+  'v2/ConfigReadResponse',
   'v2/CommandExecutionRequestApprovalParams',
   'v2/CommandExecutionRequestApprovalResponse',
   'v2/FileChangeRequestApprovalParams',

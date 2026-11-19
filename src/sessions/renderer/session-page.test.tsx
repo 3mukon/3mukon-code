@@ -206,7 +206,7 @@ describe('SessionPage', () => {
     // A gateway appears for a provider that has gateways, and effort for a model that takes it.
     choose('Gateway', 'work');
     await settle();
-    expect(bridge.models.mock.calls.at(-1)).toEqual(['claude-code', 'work']);
+    expect(bridge.models.mock.calls.at(-1)).toEqual(['claude-code', 'work', '/Users/me/web', true]);
     choose('Model', 'opus');
     choose('Reasoning effort', 'max');
     choose('Sandbox', 'read-only');
@@ -401,15 +401,14 @@ describe('SessionPage', () => {
     expect(screen.queryByRole('combobox', { name: 'Reasoning effort' })).toBeNull();
   });
 
-  it('says it is loading the models until they come, and has those found ahead of time at once', async () => {
+  it('says it is loading the models until they come, has those found ahead of time at once, and then its folder’s', async () => {
     const { bridge } = fakeBridge();
     let answer: (models: ModelOption[]) => void = () => undefined;
-    bridge.models.mockReturnValueOnce(
+    bridge.models.mockReturnValue(
       new Promise((resolve) => {
         answer = resolve;
       }),
     );
-    bridge.models.mockResolvedValue(MODELS);
     render(page(bridge));
     await settle();
     expect(screen.getByText('Loading models…')).toBeDefined();
@@ -428,15 +427,26 @@ describe('SessionPage', () => {
     preloadOffers(ahead);
     await settle();
     expect(ahead.models.mock.calls).toEqual([
-      ['claude-code', null],
-      ['codex', null],
+      ['claude-code', null, null, false],
+      ['codex', null, null, false],
     ]);
+    // The page asks for its folder's models as they are now, where another model may be the default,
+    // and shows those found ahead of time until they come.
+    ahead.models.mockResolvedValue(
+      MODELS.map((model) => ({ ...model, default: model.id === 'luna' })),
+    );
     render(page(ahead));
     expect(options('Model')[0]).toEqual(['', 'Sol']);
     expect(chooser('Reasoning effort').value).toBe('medium');
     expect(options('Gateway')).toEqual([
       ['', 'No gateway'],
       ['work', 'work'],
+    ]);
+    await settle();
+    expect(ahead.models.mock.calls.at(-1)).toEqual(['claude-code', null, '/Users/me/web', true]);
+    expect(options('Model').slice(0, 2)).toEqual([
+      ['sol', 'Sol'],
+      ['', 'Luna'],
     ]);
   });
 
@@ -621,6 +631,8 @@ describe('SessionPage', () => {
     );
     await settle();
     expect(screen.getByText('Reading the session’s history…')).toBeDefined();
+    // A session's page asks for no list of its folder's own.
+    expect(bridge.models.mock.calls.filter((call) => call[2] !== null || call[3])).toEqual([]);
     emit(2, {
       type: 'history',
       events: [{ type: 'message', id: 'm1', role: 'user', text: 'Fix the build' }],

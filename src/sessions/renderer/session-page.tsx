@@ -163,7 +163,10 @@ export function SessionPage({
     : state === null && starting !== null
       ? starting.settings
       : own;
-  const offers = useOffers(bridge, provider, settings.gateway);
+  // A page before its first message asks for its folder's models as the provider's settings are now;
+  // a session's page, which shows the model the session last ran, takes those found without a folder.
+  const opening = sessionId === null;
+  const offers = useOffers(bridge, provider, settings.gateway, opening ? folder : null, opening);
   // A running session's own list once it reports one, else the provider's; missing while it loads.
   const models = (choosing ? undefined : state?.models) ?? offers.models;
   // The model the provider uses when the session chooses none, under its own name, and the model in

@@ -322,8 +322,8 @@ export function serveBridge({
   );
   handle(
     channels.sessions.models,
-    z.tuple([provider, name.nullable()]),
-    (_window, chosen, gateway) => sessions.models(chosen, gateway),
+    z.tuple([provider, name.nullable(), path.startsWith('/').nullable(), z.boolean()]),
+    (_window, chosen, gateway, folder, fresh) => sessions.models(chosen, gateway, folder, fresh),
   );
   handle(channels.sessions.choices, z.tuple([]), () => choices.all(sessions.providerIds()));
   handle(

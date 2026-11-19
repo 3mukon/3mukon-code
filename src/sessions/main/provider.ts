@@ -65,8 +65,10 @@ export interface Provider {
   // without gateways.
   listGateways(): Promise<string[]>;
   // The models a session through this gateway, or through the provider's own configuration when it is
-  // null, could use. Found without starting a session, so nothing appears in the provider's history.
-  listModels(gateway: string | null): Promise<ModelOption[]>;
+  // null, could use, in the folder where one is given. Found without starting a session, so nothing
+  // appears in the provider's history, and without running anything in the folder, which may not exist
+  // yet: a provider counts the folder's own settings only where it can read them so, as Codex can.
+  listModels(gateway: string | null, cwd?: string): Promise<ModelOption[]>;
   // Ends the processes the provider runs outside its sessions, such as those listing its models or
   // reading its account, and starts no more; resolves once they have ended. The app calls it as it
   // quits, so that none of them outlives the app.

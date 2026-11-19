@@ -26,5 +26,5 @@ One name per concept: naming and search follow the Term column, and Avoid lists 
 | workspace | A folder on this Mac that the user added to the app's Workspaces list, with their answer to whether they trust its files | project, root (for this meaning) |
 | bridge | The typed interface the app module's preload script gives the page, its only way to the main process | IPC API, preload API |
 | panel | One part of the main area's layout, showing a session, a session page, a file, a terminal, or one of the app's own panels: the archived sessions, the accounts or the settings | pane, tab, view |
-| gateway | A provider's settings file that the user picks for a session to run it through another endpoint or account: a Claude Code settings file or a Codex profile in the provider's gateways folder (ADR-0008) | proxy, profile (for this meaning) |
+| gateway | A provider's settings file that the user picks for a session to run it through another endpoint or account: a Claude Code settings file or a Codex profile in the provider's gateways folder (ADR-0028) | proxy, profile (for this meaning) |
 | usage window | One span of a subscription's usage limits, such as five hours or a week, with the share used and when it resets (ADR-0017) | quota, window (alone, for this meaning) |

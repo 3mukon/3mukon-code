@@ -143,8 +143,15 @@ export interface SessionsBridge {
   dayFolder(): Promise<string>;
   // The gateways set up in the provider's own settings; empty for a provider without gateways.
   gateways(provider: ProviderId): Promise<string[]>;
-  // The models a session through the gateway, or the provider's own configuration, could use.
-  models(provider: ProviderId, gateway: string | null): Promise<ModelOption[]>;
+  // The models a session through the gateway, or the provider's own configuration, could use, in the
+  // folder where one is given; fresh for a page before its first message, which wants them as the
+  // provider's settings are now, rather than as they were found earlier.
+  models(
+    provider: ProviderId,
+    gateway: string | null,
+    folder: string | null,
+    fresh: boolean,
+  ): Promise<ModelOption[]>;
   // The settings sessions last used, each folder's and the day folders'.
   choices(): Promise<FolderChoices>;
   // Remembers the settings a session in the folder started with or switched to, for all the day

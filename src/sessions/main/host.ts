@@ -42,6 +42,9 @@ import { matchOf, memoryTextStorage, textOf, type TextStorage } from './texts';
 
 // How long a provider has to list its models before the list fails.
 const MODELS_TIMEOUT_MS = 60_000;
+// How long a list of models found counts as fresh for a page before its first message, so that pages
+// opened, or gateways switched between, in quick succession share one listing.
+const MODELS_FRESH_MS = 15_000;
 
 // The events after which a session's text is kept anew: its history read, a turn ended, the session
 // closed.
@@ -122,8 +125,10 @@ export class SessionHost {
   private readonly resuming = new Map<string, Promise<void>>();
   private readonly listeners = new Set<(list: SessionList) => void>();
   private readonly eventListeners = new Set<SessionEventsListener>();
-  // The models each provider and gateway offer, found once per run of the app.
-  private readonly modelLists = new Map<string, Promise<ModelOption[]>>();
+  // The models each provider and gateway offer in each folder: the last list found, with when, and the
+  // listing under way.
+  private readonly modelLists = new Map<string, { models: ModelOption[]; at: number }>();
+  private readonly modelListings = new Map<string, Promise<ModelOption[]>>();
   // The text of each session's messages, which a search by conversation reads (ADR-0014): the
   // sessions that have one, once listed, and those whose history could not be read in this run.
   private readonly texts: TextStorage;
@@ -163,24 +168,39 @@ export class SessionHost {
     return this.provider(providerId).listGateways();
   }
 
-  // Found without starting a session, and kept for the rest of the app's run once found. A list that
-  // fails, or that the provider has not found within a minute, is asked for again next time.
-  models(providerId: ProviderId, gateway: string | null): Promise<ModelOption[]> {
+  // Found without starting a session, for the folder a page would start one in where it gives one, and
+  // kept once found. A page before its first message asks for them fresh, since the provider's settings
+  // may have changed since, and gets a list found within the last 15 seconds or a new one; one listing runs at
+  // a time for each provider, gateway and folder. A list that fails, or that the provider has not found
+  // within a minute, leaves the one kept as it was, and is asked for again next time.
+  models(
+    providerId: ProviderId,
+    gateway: string | null,
+    folder: string | null = null,
+    fresh = false,
+  ): Promise<ModelOption[]> {
     const provider = this.provider(providerId);
-    const key = `${providerId}\n${gateway ?? ''}`;
-    let models = this.modelLists.get(key);
-    if (models === undefined) {
-      models = withinTime(
-        provider.listModels(gateway),
-        MODELS_TIMEOUT_MS,
-        `${providerId} did not list its models in time.`,
-      );
-      this.modelLists.set(key, models);
-      models.catch(() => {
-        this.modelLists.delete(key);
-      });
+    const key = `${providerId}\n${gateway ?? ''}\n${folder ?? ''}`;
+    const listing = this.modelListings.get(key);
+    if (listing !== undefined) return listing;
+    const kept = this.modelLists.get(key);
+    if (kept !== undefined && (!fresh || Date.now() - kept.at < MODELS_FRESH_MS)) {
+      return Promise.resolve(kept.models);
     }
-    return models;
+    const listed = withinTime(
+      folder === null ? provider.listModels(gateway) : provider.listModels(gateway, folder),
+      MODELS_TIMEOUT_MS,
+      `${providerId} did not list its models in time.`,
+    ).then((models) => {
+      this.modelLists.set(key, { models, at: Date.now() });
+      return models;
+    });
+    this.modelListings.set(key, listed);
+    const done = () => {
+      if (this.modelListings.get(key) === listed) this.modelListings.delete(key);
+    };
+    listed.then(done, done);
+    return listed;
   }
 
   // Starts a session in a folder and resolves with the app's id for it once the provider has started

@@ -74,7 +74,7 @@ async function gatewayService(
 }
 
 // The token the gateway's file holds, which passes to Codex with the thread and nowhere else
-// (ADR-0008).
+// (ADR-0028).
 const TOKEN = 'placeholder-gateway-token';
 
 // The app in English on the given data folder, in the isolated environment (L-0006, L-0007), with a

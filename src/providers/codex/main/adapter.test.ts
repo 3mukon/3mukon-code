@@ -56,6 +56,12 @@ let duringResume: (() => void) | undefined;
 let failSteer: string | undefined;
 // The name thread/read gives a thread, the title Codex keeps for it.
 let threadName: string | null;
+// The model and effort Codex's own configuration names, as config/read gives them, and those a
+// trusted project's own settings name in its folder.
+let configured: { model: string | null; effort: string | null };
+let project: { folder: string; model: string; effort: string } | undefined;
+// A config/read refused.
+let failConfigRead: string | undefined;
 
 function sandboxOf(mode: unknown): Params {
   if (heldSandbox !== undefined) return heldSandbox;
@@ -65,12 +71,15 @@ function sandboxOf(mode: unknown): Params {
 
 function reply(method: string, params: Params): unknown {
   const config = (params.config ?? {}) as Params;
+  const own = project !== undefined && params.cwd === project.folder ? project : configured;
+  // As Codex resolves them: the thread's model, else its settings over Codex's configuration, else
+  // the catalog's default and its effort.
   const thread = (id: string) => ({
     thread: { id },
-    model: params.model ?? config.model ?? 'gpt-default',
+    model: params.model ?? config.model ?? own.model ?? 'gpt-default',
     modelProvider: params.modelProvider ?? 'openai',
     sandbox: sandboxOf(params.sandbox),
-    reasoningEffort: 'medium',
+    reasoningEffort: config.model_reasoning_effort ?? own.effort ?? 'medium',
   });
   switch (method) {
     case 'initialize':
@@ -112,6 +121,13 @@ function reply(method: string, params: Params): unknown {
       return { thread: { id: params.threadId, name: threadName } };
     case 'model/list':
       return { data: MODELS, nextCursor: null };
+    case 'config/read':
+      if (failConfigRead !== undefined) throw new Error(failConfigRead);
+      return {
+        config: { model: own.model, model_reasoning_effort: own.effort },
+        origins: {},
+        layers: null,
+      };
     case 'turn/start':
       return {
         turn: {
@@ -392,6 +408,9 @@ beforeEach(() => {
   duringResume = undefined;
   failSteer = undefined;
   threadName = null;
+  configured = { model: null, effort: null };
+  project = undefined;
+  failConfigRead = undefined;
   gatewaysDir = mkdtempSync(join(tmpdir(), 'codex-gateways-'));
   writeFileSync(
     join(gatewaysDir, 'work.toml'),
@@ -440,6 +459,17 @@ async function startSession(
     events.push(event);
   });
   return { session, events };
+}
+
+// One of the fake's models as an option, with the effort it runs when the session chooses none.
+function option(id: 'gpt-default' | 'gpt-small', defaultEffort: string, isDefault = false) {
+  return {
+    ...(id === 'gpt-default'
+      ? { id, label: 'Default', description: 'The usual one', efforts: ['low', 'medium'] }
+      : { id, label: 'Small', efforts: ['low'] }),
+    ...(isDefault ? { default: true } : {}),
+    defaultEffort,
+  };
 }
 
 const completed = (turnId: string) => ({
@@ -534,20 +564,22 @@ describe('the Codex provider', () => {
       {
         type: 'models',
         models: [
-          { id: 'gpt-proxy', label: 'gpt-proxy', efforts: [] },
-          // The model Codex uses when the thread chooses none, and each model's own effort.
+          // The gateway's own model, which the thread runs when it chooses none, since the file's
+          // settings go with the thread; Codex does not offer it, so it leads.
+          { id: 'gpt-proxy', label: 'gpt-proxy', efforts: [], default: true },
+          // Each model's own effort, as nothing names one.
           {
             id: 'gpt-default',
             label: 'Default',
             description: 'The usual one',
             efforts: ['low', 'medium'],
-            default: true,
             defaultEffort: 'medium',
           },
           { id: 'gpt-small', label: 'Small', efforts: ['low'], defaultEffort: 'low' },
         ],
       },
     ]);
+    expect(current().params('config/read')).toEqual({ cwd: '/work' });
   });
 
   it('starts a thread on the sandbox level chosen, whatever the mode', async () => {
@@ -641,6 +673,62 @@ describe('the Codex provider', () => {
     ]);
     expect(current().closed).toBe(true);
     expect(await codex.listGateways()).toEqual(['work']);
+  });
+
+  it('marks the model and effort that Codex’s configuration names as the defaults before a session starts', async () => {
+    configured = { model: 'gpt-small', effort: 'high' };
+    expect(await provider().listModels(null)).toEqual([
+      option('gpt-default', 'high'),
+      option('gpt-small', 'high', true),
+    ]);
+    // Before a session has a folder, so without a project's settings.
+    expect(current().params('config/read')).toEqual({});
+    expect(current().closed).toBe(true);
+  });
+
+  it('reads Codex’s configuration for the folder a page would start a session in', async () => {
+    configured = { model: 'gpt-small', effort: 'high' };
+    project = { folder: '/Users/me/web', model: 'gpt-default', effort: 'low' };
+    expect(await provider().listModels(null, '/Users/me/web')).toEqual([
+      option('gpt-default', 'low', true),
+      option('gpt-small', 'low'),
+    ]);
+    expect(current().params('config/read')).toEqual({ cwd: '/Users/me/web' });
+    // The probe itself runs in a throwaway folder.
+    expect(current().cwd).not.toBe('/Users/me/web');
+  });
+
+  it('marks a gateway’s own model and effort over Codex’s configuration', async () => {
+    configured = { model: 'gpt-small', effort: 'high' };
+    writeFileSync(
+      join(gatewaysDir, 'quick.toml'),
+      ['model = "gpt-default"', 'model_reasoning_effort = "low"'].join('\n'),
+    );
+    expect(await provider().listModels('quick')).toEqual([
+      option('gpt-default', 'low', true),
+      option('gpt-small', 'low'),
+    ]);
+    expect((await provider().listModels('work'))[0]).toEqual({
+      id: 'gpt-proxy',
+      label: 'gpt-proxy',
+      efforts: [],
+      default: true,
+      defaultEffort: 'high',
+    });
+  });
+
+  it('puts a configured model that Codex does not offer first, and keeps the catalog’s defaults where Codex does not answer', async () => {
+    configured = { model: 'gpt-unlisted', effort: null };
+    expect(await provider().listModels(null)).toEqual([
+      { id: 'gpt-unlisted', label: 'gpt-unlisted', efforts: [], default: true },
+      option('gpt-default', 'medium'),
+      option('gpt-small', 'low'),
+    ]);
+    failConfigRead = 'config/read is not supported';
+    expect(await provider().listModels(null)).toEqual([
+      option('gpt-default', 'medium', true),
+      option('gpt-small', 'low'),
+    ]);
   });
 
   it('reads a thread’s history page by page from a short-lived app-server, with the name Codex keeps for it', async () => {
@@ -741,6 +829,41 @@ describe('a Codex session', () => {
       approvalPolicy: 'on-request',
       approvalsReviewer: 'auto_review',
     });
+  });
+
+  it('marks the defaults Codex’s configuration names for the session’s folder, and sends them back as the defaults', async () => {
+    configured = { model: 'gpt-small', effort: 'high' };
+    const { session, events } = await startSession();
+    expect(current().params('config/read')).toEqual({ cwd: '/work' });
+    expect(events).toContainEqual({
+      type: 'models',
+      models: [option('gpt-default', 'high'), option('gpt-small', 'high', true)],
+    });
+    await session.setModel('gpt-default');
+    await session.setEffort('low');
+    await session.send('one');
+    current().emit('turn/completed', completed('turn-1'));
+    await session.setModel(null);
+    await session.setEffort(null);
+    await session.send('two');
+    expect(current().params('turn/start')).toMatchObject({ model: 'gpt-small', effort: 'high' });
+  });
+
+  it('marks the gateway’s defaults as a switch moves the thread to it', async () => {
+    configured = { model: 'gpt-small', effort: 'high' };
+    const { session, events } = await startSession();
+    await session.setGateway('work');
+    expect(events.at(-1)).toEqual({
+      type: 'models',
+      models: [
+        { id: 'gpt-proxy', label: 'gpt-proxy', efforts: [], default: true, defaultEffort: 'high' },
+        option('gpt-default', 'high'),
+        option('gpt-small', 'high'),
+      ],
+    });
+    await session.setModel(null);
+    await session.send('one');
+    expect(current().params('turn/start')).toMatchObject({ model: 'gpt-proxy' });
   });
 
   it('carries a switched sandbox with the next turn, without the mode, as Codex shaped it', async () => {

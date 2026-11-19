@@ -4,28 +4,48 @@ import { choiceIn, withChoice } from '../shared/folders';
 import type { FolderChoices, RememberedChoice, SessionsBridge } from '../shared/sessions';
 
 // What session pages offer to choose from: the providers, each provider's gateways, and the models
-// of each provider through each gateway, keyed as `modelsKey` gives them; and the settings sessions
-// last used, each folder's and the day folders', which a page in the folder starts with. Missing until
-// it comes; a list that could not be found is empty.
+// of each provider through each gateway, without a folder and in each folder a new page opens in,
+// keyed as `modelsKey` gives them; and the settings sessions last used, each folder's and the day
+// folders', which a page in the folder starts with. Missing until it comes; a list that could not be
+// found is empty.
 interface Lists {
   providers?: ProviderId[];
   gateways: Partial<Record<ProviderId, string[]>>;
-  models: Partial<Record<string, ModelOption[]>>;
+  // A failed initial listing stays distinct from a successful empty catalog, so a fallback that
+  // finishes later can still be shown.
+  models: Partial<Record<string, ModelOption[] | null>>;
   remembered?: FolderChoices;
 }
 
 const NONE: string[] = [];
+const NO_MODELS: ModelOption[] = [];
 
-function modelsKey(provider: ProviderId, gateway: string | null): string {
-  return `${provider}\n${gateway ?? ''}`;
+function modelsKey(provider: ProviderId, gateway: string | null, folder: string | null): string {
+  return `${provider}\n${gateway ?? ''}\n${folder ?? ''}`;
+}
+
+// The models a page in the folder shows: those found there, or else, until they come, those found
+// without a folder.
+function shownModels(
+  lists: Lists,
+  provider: ProviderId,
+  gateway: string | null,
+  folder: string | null,
+): ModelOption[] | undefined {
+  const own = lists.models[modelsKey(provider, gateway, folder)];
+  const fallback = folder === null ? undefined : lists.models[modelsKey(provider, gateway, null)];
+  return own ?? fallback ?? (own === null || fallback === null ? NO_MODELS : undefined);
 }
 
 // The lists one window's session pages share, so that a page opened after they came has them as it
 // first shows. Once the providers are known, each one's gateways and the models of its own
-// configuration are asked for, whichever provider a page shows. The providers and a found list of
-// models are kept, as the main process keeps them for the app's run; gateways are asked for again
-// whenever a page needs them, since the user may add one at any time; a list that failed is asked
-// for again when a page needs it. Each list is asked for once at a time.
+// configuration, without a folder, are asked for, whichever provider a page shows. The providers and
+// a found list of models are kept, as the main process keeps them; a page before its first message
+// asks for the models in its folder fresh as it opens, since the provider's settings may have changed,
+// and shows the list kept for its folder, or else the one without a folder, until they come. Gateways are asked
+// for again whenever a page needs them, since the user may add one at any time; a list that failed is
+// asked for again when a page needs it, and leaves a list already shown as it was. Each list is asked
+// for once at a time.
 class Offers {
   private lists: Lists = { gateways: {}, models: {} };
   private readonly listeners = new Set<() => void>();
@@ -53,7 +73,7 @@ class Offers {
       (providers) => {
         for (const provider of providers) {
           this.loadGateways(provider);
-          this.loadModels(provider, null);
+          this.loadModels(provider, null, null, false);
         }
       },
     );
@@ -93,14 +113,24 @@ class Offers {
     });
   }
 
-  loadModels(provider: ProviderId, gateway: string | null): void {
-    const key = modelsKey(provider, gateway);
-    this.ask(
-      `models\n${key}`,
+  loadModels(
+    provider: ProviderId,
+    gateway: string | null,
+    folder: string | null,
+    fresh: boolean,
+  ): void {
+    const key = modelsKey(provider, gateway, folder);
+    const asked = `models\n${key}`;
+    if (fresh) this.kept.delete(asked);
+    this.ask<ModelOption[] | undefined>(
+      asked,
       true,
-      () => this.bridge.models(provider, gateway),
-      (lists, models) => ({ ...lists, models: { ...lists.models, [key]: models } }),
-      [],
+      () => this.bridge.models(provider, gateway, folder, fresh),
+      (lists, models) =>
+        models === undefined && shownModels(lists, provider, gateway, folder) !== undefined
+          ? lists
+          : { ...lists, models: { ...lists.models, [key]: models ?? null } },
+      undefined,
     );
   }
 
@@ -190,11 +220,14 @@ export function rememberChoice(
 }
 
 // What a session page offers for its provider and gateway: the providers, the provider's gateways
-// and its models through the gateway, each missing until it comes.
+// and its models through the gateway, in the folder where one is given, each missing until it comes;
+// fresh for a page before its first message, which asks for the models anew as it opens.
 export function useOffers(
   bridge: SessionsBridge,
   provider: ProviderId,
   gateway: string | null,
+  folder: string | null,
+  fresh: boolean,
 ): { providers?: ProviderId[]; gateways: string[]; models?: ModelOption[] } {
   const offers = offersOf(bridge);
   const lists = useSyncExternalStore(offers.subscribe, offers.current);
@@ -205,9 +238,9 @@ export function useOffers(
     offers.loadGateways(provider);
   }, [offers, provider]);
   useEffect(() => {
-    offers.loadModels(provider, gateway);
-  }, [offers, provider, gateway]);
-  const models = lists.models[modelsKey(provider, gateway)];
+    offers.loadModels(provider, gateway, folder, fresh);
+  }, [offers, provider, gateway, folder, fresh]);
+  const models = shownModels(lists, provider, gateway, folder);
   return {
     ...(lists.providers === undefined ? {} : { providers: lists.providers }),
     gateways: lists.gateways[provider] ?? NONE,

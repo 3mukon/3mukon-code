@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 // A gateway is a Claude Code settings file named <name>.json in the gateways folder. The app lists these
-// files and hands one to Claude Code by its path; it never opens them (ADR-0008).
+// files and hands one to Claude Code by its path; it never opens them (ADR-0028).
 
 // Letters, digits, dots, hyphens and underscores, starting with a letter or digit, so that a gateway's
 // name can never lead outside the folder.
