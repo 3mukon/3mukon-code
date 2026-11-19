@@ -197,6 +197,28 @@ it('records invalid arguments and shares cancellation across separate MCP POST i
   owner.turnStarted();
   const access = owner.toolset.open();
   const client = await connect(access);
+  for (const [arguments_, reason] of [
+    [{ value: 1 }, 'required'],
+    [{ value: 1, actionId: 42 }, 'invalid-type'],
+    [{ value: 1, actionId: '' }, 'too-short'],
+    [{ value: 1, actionId: 'x'.repeat(129) }, 'too-long'],
+  ] as const) {
+    const refused = await client.callTool({ name: 'fixture_wait', arguments: arguments_ });
+    expect(refused.isError).toBe(true);
+    const expected = {
+      status: 'refused',
+      code: 'invalid-request',
+      dispatched: false,
+      detail: { kind: 'argument', field: 'actionId', reason },
+    };
+    expect(refused.structuredContent).toMatchObject({ outcome: expected });
+    expect(refused.content).toEqual([
+      { type: 'text', text: JSON.stringify(refused.structuredContent) },
+    ]);
+    expect(
+      toolset.broker.snapshot('fixture-cancellation').value.recentCalls.at(-1)?.outcome,
+    ).toEqual(expected);
+  }
   const invalid = await client.callTool({
     name: 'fixture_wait',
     arguments: { actionId: 'invalid', value: 'invalid' },

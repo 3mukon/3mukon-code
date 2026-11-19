@@ -81,6 +81,29 @@ let a: BrokerAccess;
 let b: BrokerAccess;
 let serial = 0;
 const policy = { mode: 'auto' as const, sandbox: 'workspace-write' as const };
+
+it.each([
+  { actionId: undefined, reason: 'required' },
+  { actionId: null, reason: 'invalid-type' },
+  { actionId: 42, reason: 'invalid-type' },
+  { actionId: { privateValue: 'must-not-be-returned' }, reason: 'invalid-type' },
+  { actionId: '', reason: 'too-short' },
+  { actionId: 'x'.repeat(129), reason: 'too-long' },
+])('identifies an actionId that is $reason without dispatching or echoing it', async (input) => {
+  const refused = await broker.dispatch(a, 'panel_present', {}, { actionId: input.actionId });
+  expect(refused.outcome).toEqual({
+    status: 'refused',
+    code: 'invalid-request',
+    dispatched: false,
+    detail: { kind: 'argument', field: 'actionId', reason: input.reason },
+  });
+  expect(broker.record('a', refused.automation.callId)?.outcome).toEqual(refused.outcome);
+  expect(execute).not.toHaveBeenCalled();
+  const corrected = await broker.dispatch(a, 'panel_present', {}, { actionId: 'corrected' });
+  expect(corrected.outcome.status).toBe('verified');
+  expect(execute).toHaveBeenCalledTimes(1);
+});
+
 beforeEach(async () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'automation-contract-')));
   for (const name of ['a', 'b', 'temporary', 'outside']) mkdirSync(join(root, name));

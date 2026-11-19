@@ -72,6 +72,11 @@ export type SetupRequirement =
   | { kind: 'permission'; permission: 'accessibility' | 'screen-recording' | 'input-monitoring' }
   | { kind: 'restart-helper' };
 export type RefusalDetail =
+  | {
+      kind: 'argument';
+      field: 'actionId';
+      reason: 'required' | 'invalid-type' | 'too-short' | 'too-long';
+    }
   | { kind: 'setup'; requirement: SetupRequirement }
   | { kind: 'availability'; reason: AvailabilityReason }
   | { kind: 'denial'; message: string }

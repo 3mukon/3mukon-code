@@ -546,7 +546,7 @@ export class AutomationBroker {
     access: BrokerAccess,
     name: string,
     input: unknown,
-    options: { actionId: string; signal?: AbortSignal; timeoutMs?: number },
+    options: { actionId?: unknown; signal?: AbortSignal; timeoutMs?: number },
   ): Promise<ToolsetResult> {
     const owner = this.caller(access);
     const tool = this.tools.get(name);
@@ -555,12 +555,27 @@ export class AutomationBroker {
     const finish = (outcome: Outcome) => owner.activity.settle(record.callId, outcome);
     if (owner.calls.size >= 32) return finish(refuse('limit-exceeded'));
     if (!owner.turn) return finish(refuse('turn-inactive'));
+    const actionId = options.actionId;
+    if (typeof actionId !== 'string' || actionId.length === 0 || actionId.length > 128) {
+      return finish(
+        refuse('invalid-request', {
+          kind: 'argument',
+          field: 'actionId',
+          reason:
+            actionId === undefined
+              ? 'required'
+              : typeof actionId !== 'string'
+                ? 'invalid-type'
+                : actionId.length === 0
+                  ? 'too-short'
+                  : 'too-long',
+        }),
+      );
+    }
     let key: string;
     let args: Record<string, unknown>;
     let plan: ExecutionPlan;
     try {
-      if (!options.actionId || options.actionId.length > 128)
-        return finish(refuse('invalid-request'));
       key = requestKey(input);
       if (Buffer.byteLength(key, 'utf8') > (tool.maxArgumentBytes ?? DEFAULT_ARGUMENT_BYTES))
         return finish(refuse('limit-exceeded'));
@@ -574,7 +589,7 @@ export class AutomationBroker {
       if (resource) owner.activity.target(record.callId, resource.target, plan.delivery);
     }
     const hash = createHash('sha256').update(name).update('\0').update(key).digest('hex');
-    const previous = owner.actions.get(options.actionId);
+    const previous = owner.actions.get(actionId);
     if (previous) {
       if (previous.hash !== hash) return finish(refuse('request-conflict'));
       const known = owner.activity.get(previous.callId);
@@ -599,7 +614,7 @@ export class AutomationBroker {
       owner.actions.delete(oldest[0]);
     }
     const action = { hash, callId: record.callId, evictable: false };
-    owner.actions.set(options.actionId, action);
+    owner.actions.set(actionId, action);
     const controller = new AbortController();
     const work: Work = {
       callId: record.callId,

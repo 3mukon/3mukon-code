@@ -244,7 +244,7 @@ export async function startToolset({
       const { actionId, ...input } = request.params.arguments ?? {};
       try {
         const result = await broker.dispatch(access, name, input, {
-          actionId: typeof actionId === 'string' ? actionId : '',
+          actionId,
           signal: AbortSignal.any([controller.signal, extra.signal]),
         });
         const frames = result.frames.map((frame) => ({
