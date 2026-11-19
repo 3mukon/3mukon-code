@@ -89,8 +89,27 @@ const profiles: Record<SandboxLevel, string> = {
 // `grok agent stdio` at the level's profile, never through a shared leader process, and with Grok's own
 // plan mode off: the app's modes are auto and yolo (ADR-0006), and Grok asks to leave its plan mode
 // through an undocumented extension request.
-function launchArgs(sandbox: SandboxLevel): string[] {
-  return ['--no-plan', '--sandbox', profiles[sandbox], 'agent', '--no-leader', 'stdio'];
+// The toolset's server as Grok knows it. Grok registers an MCP server's tools only if its name
+// starts with a letter or an underscore, and otherwise skips them all, while the toolset's name
+// starts with its 3; Grok gets the 3 as san, the Japanese word for three. The session's server, the
+// allow rules and the titles that route approvals and results all use this name.
+function grokServerName(name: string): string {
+  return name.replace(/^3/, 'san');
+}
+
+// A server name Grok admits, which an allow rule may also name.
+const GROK_SERVER_NAME = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+
+function launchArgs(sandbox: SandboxLevel, hostTools: readonly string[] = []): string[] {
+  return [
+    '--no-plan',
+    '--sandbox',
+    profiles[sandbox],
+    ...hostTools.flatMap((name) => ['--allow', `MCPTool(${name})`]),
+    'agent',
+    '--no-leader',
+    'stdio',
+  ];
 }
 
 // Tells Grok Build that the app shows the questions of its own question tool.
@@ -129,6 +148,8 @@ interface Handlers {
   question(params: AskUserQuestionParams, signal: AbortSignal): Promise<AskUserQuestionResult>;
   queueChanged(params: QueueChanged): void;
   notice(params: SessionNotice): void;
+  // Grok's catalog changed, as when its first fetch lands: the model state it now holds.
+  models(modelState: unknown): void;
 }
 
 // A Grok Build process with ACP started on it, at a sandbox level.
@@ -139,7 +160,12 @@ interface Agent {
   sandbox: SandboxLevel;
 }
 
-type Connect = (cwd: string, sandbox: SandboxLevel, handlers: Handlers) => Promise<Agent>;
+type Connect = (
+  cwd: string,
+  sandbox: SandboxLevel,
+  handlers: Handlers,
+  hostTools?: readonly string[],
+) => Promise<Agent>;
 
 // How the sessions take part in Grok's account (ADR-0017): those running lend their processes to the
 // account's calls, and pass on that a turn failed for want of a sign-in.
@@ -158,8 +184,8 @@ export function createGrokBuildProvider(
     'startGrok' in options ? options.startGrok : startBundledGrok(options.binaryFolder);
   const binaryFolder = 'binaryFolder' in options ? options.binaryFolder : undefined;
   const clientVersion = options.clientVersion ?? '0.0.0';
-  const connect: Connect = (cwd, sandbox, handlers) =>
-    connectGrok(startGrok, cwd, sandbox, handlers, clientVersion);
+  const connect: Connect = (cwd, sandbox, handlers, hostTools) =>
+    connectGrok(startGrok, cwd, sandbox, handlers, clientVersion, hostTools);
   // The probes' processes, each kept from the moment it starts, before Grok answers it, so that closing
   // ends one still starting.
   const probes = new Probes();
@@ -236,8 +262,13 @@ export function createGrokBuildProvider(
       const cwd = await mkdtemp(join(tmpdir(), 'grok-models-'));
       probeFolders.add(cwd);
       try {
-        return await withGrok(probeConnect, cwd, (agent) =>
-          Promise.resolve(catalogOf(agent.initialize).models),
+        return await withGrok(
+          probeConnect,
+          cwd,
+          async (agent) =>
+            catalogOf(
+              (await listedModelState(agent.connection)) ?? agent.initialize._meta?.modelState,
+            ).models,
         );
       } finally {
         probeFolders.delete(cwd);
@@ -287,8 +318,9 @@ async function connectGrok(
   sandbox: SandboxLevel,
   handlers: Handlers,
   clientVersion: string,
+  hostTools?: readonly string[],
 ): Promise<Agent> {
-  const process = await startGrok(cwd, launchArgs(sandbox));
+  const process = await startGrok(cwd, launchArgs(sandbox, hostTools));
   const connection = client({ name: '3mukon-code' })
     .onNotification('session/update', ({ params }) => {
       handlers.update(params);
@@ -305,6 +337,13 @@ async function connectGrok(
     .onNotification(SESSION_NOTICE, parseSessionNotice, ({ params }) => {
       handlers.notice(params);
     })
+    .onNotification(
+      MODELS_UPDATE,
+      (params: unknown) => params,
+      ({ params }) => {
+        handlers.models(params);
+      },
+    )
     .connect(process.stream);
   try {
     // The app reads and writes no files and runs no terminals for Grok, which uses its own tools.
@@ -356,6 +395,7 @@ async function withGrok<Result>(
     question: () => Promise.resolve(cancelledQuestion),
     queueChanged: () => undefined,
     notice: () => undefined,
+    models: () => undefined,
   });
   try {
     return await use(agent);
@@ -371,8 +411,44 @@ interface Catalog {
   defaultEfforts: Map<string, ReasoningEffort>;
 }
 
-function catalogOf(initialize: InitializeResponse): Catalog {
-  const state = record(initialize._meta?.modelState);
+// Grok's catalog for one-shot consumers, and its announcement of a changed catalog, both carrying
+// the model state initialize gives: the current model and the available ones.
+const MODELS_LIST = '_x.ai/models/list';
+const MODELS_UPDATE = '_x.ai/models/update';
+// Grok bounds its own wait for its first catalog; this bounds the app's wait for its answer.
+const MODELS_LIST_TIMEOUT_MS = 20_000;
+
+// Grok answers initialize at once with the catalog it holds: its cached one while the cache is
+// fresh, or else only its built-in models until its first fetch lands, which it then announces with
+// x.ai/models/update. x.ai/models/list waits, as session/new does, a bounded time for that first
+// catalog, so a short-lived process can list the models a session will have. A Grok without it, an
+// error or no answer in time leaves the catalog initialize gave.
+async function listedModelState(connection: ClientConnection): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const answer = record(
+      await Promise.race([
+        connection.agent.request(MODELS_LIST, {}),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => {
+            resolve(undefined);
+          }, MODELS_LIST_TIMEOUT_MS);
+        }),
+      ]),
+    );
+    return answer?.error === undefined || answer.error === null
+      ? record(answer?.result)
+      : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// A model state, as initialize, x.ai/models/list and x.ai/models/update give it.
+function catalogOf(modelState: unknown): Catalog {
+  const state = record(modelState);
   const models: ModelOption[] = [];
   const defaultEfforts = new Map<string, ReasoningEffort>();
   for (const entry of Array.isArray(state?.availableModels) ? state.availableModels : []) {
@@ -529,6 +605,7 @@ class GrokSession implements ProviderSession {
   private readonly deliveries = new Set<HostContextDelivery>();
   private access?: ToolsetAccess;
   private readonly toolNames = new Map<string, string>();
+  private readonly resultNames = new Map<string, string>();
   private agent!: Agent;
   private sessionId = '';
   private readonly translator: Translator;
@@ -574,6 +651,7 @@ class GrokSession implements ProviderSession {
     session.use(attached);
     try {
       if (resumeId !== null) onEvent({ type: 'replay-finished' });
+      await session.settleCatalog();
       await session.applySettings();
       const current = session.choices();
       onEvent({ type: 'mode', mode: settings.mode });
@@ -829,13 +907,27 @@ class GrokSession implements ProviderSession {
     this.access = access;
     this.hostEnabled = false;
     this.toolNames.clear();
+    this.resultNames.clear();
     if (existing !== null) this.sessionId = existing.resumeId;
-    const agent = await this.connect(this.settings.cwd, sandbox, this.handlers(generation)).catch(
-      (error: unknown) => {
-        access?.close();
-        throw error;
-      },
-    );
+    // Grok's use_tool can display only the bare name. Its native MCPTool rules match server__tool,
+    // whereas that ACP title cannot establish a server's identity. Allow only exact names in this
+    // app's server; bare callbacks still follow normal provider approvals.
+    const server = this.settings.toolset && grokServerName(this.settings.toolset.name);
+    const hostTools =
+      server && GROK_SERVER_NAME.test(server)
+        ? (access?.tools ?? [])
+            .filter((name) => /^[A-Za-z0-9_-]+$/.test(name))
+            .map((name) => `${server}__${name}`)
+        : [];
+    const agent = await this.connect(
+      this.settings.cwd,
+      sandbox,
+      this.handlers(generation),
+      hostTools,
+    ).catch((error: unknown) => {
+      access?.close();
+      throw error;
+    });
     const http = agent.initialize.agentCapabilities?.mcpCapabilities?.http === true;
     this.hostEnabled = http && access !== undefined;
     access?.availability?.({
@@ -860,7 +952,7 @@ class GrokSession implements ProviderSession {
           ? [
               {
                 type: 'http',
-                name: this.settings.toolset.name,
+                name: grokServerName(this.settings.toolset.name),
                 url: access.url,
                 headers: [{ name: 'Authorization', value: `Bearer ${access.credential}` }],
               },
@@ -901,7 +993,7 @@ class GrokSession implements ProviderSession {
     this.generation = generation;
     this.sessionId = sessionId;
     this.configOptions = configOptions;
-    this.catalog = catalogOf(agent.initialize);
+    this.catalog = catalogOf(agent.initialize._meta?.modelState);
     void agent.process.ended.then((error) => {
       if (generation === this.generation) this.finish(error);
     });
@@ -917,17 +1009,24 @@ class GrokSession implements ProviderSession {
           !this.replaying &&
           (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update')
         ) {
-          const name =
-            update.kind && update.kind !== 'other'
-              ? undefined
-              : this.hostTool(update.toolCallId, update.title);
+          const wrongKind = update.kind && update.kind !== 'other';
+          if (wrongKind) {
+            this.toolNames.delete(update.toolCallId);
+            this.resultNames.delete(update.toolCallId);
+          }
+          const name = wrongKind
+            ? undefined
+            : this.resultTool(update.toolCallId, update.title, update._meta);
           if (name && (update.status === 'completed' || update.status === 'failed')) {
             const content = update.content?.flatMap((part) =>
               part.type === 'content' ? [part.content] : [],
             );
-            const receipt = toolsetReceipt(update.rawOutput, content);
+            const receipt = this.resultReceipt(name, update.rawOutput, content);
             if (receipt) this.access?.result?.(name, update.toolCallId, receipt);
+          }
+          if (update.status === 'completed' || update.status === 'failed') {
             this.toolNames.delete(update.toolCallId);
+            this.resultNames.delete(update.toolCallId);
           }
         }
         if (update.sessionUpdate === 'user_message_chunk' && !this.replaying) return;
@@ -953,6 +1052,14 @@ class GrokSession implements ProviderSession {
         const completed = completedTurn(notice);
         if (completed?.promptId !== this.grokTurn) return;
         this.endTurn(turnEndedBy(completed.stopReason), completed.promptId);
+      },
+      // The process's catalog, not a session's: it names no session.
+      models: (modelState) => {
+        if (!current()) return;
+        const catalog = catalogOf(modelState);
+        if (catalog.models.length === 0) return;
+        this.catalog = catalog;
+        this.onEvent({ type: 'models', models: catalog.models });
       },
     };
   }
@@ -1018,7 +1125,9 @@ class GrokSession implements ProviderSession {
       this.onEvent({ type: 'settings', sandbox: previous.sandbox });
       try {
         this.use(await this.attach(existing, previous.sandbox));
+        await this.settleCatalog();
         await this.applySettings();
+        this.onEvent({ type: 'models', models: this.catalog.models });
       } catch (again) {
         this.finish(errorMessage(again));
       }
@@ -1031,7 +1140,16 @@ class GrokSession implements ProviderSession {
       return;
     }
     this.use(attached);
+    await this.settleCatalog();
     await this.applySettings();
+    this.onEvent({ type: 'models', models: this.catalog.models });
+  }
+
+  // The catalog Grok settles on once its first fetch lands, which session/new, load and resume wait
+  // for, in place of the one initialize gave; later changes come with x.ai/models/update.
+  private async settleCatalog(): Promise<void> {
+    const listed = await listedModelState(this.agent.connection);
+    if (listed !== undefined) this.catalog = catalogOf(listed);
   }
 
   // An approval waits for the user; in yolo, Grok asks for none, and one it still asks for is allowed.
@@ -1063,13 +1181,17 @@ class GrokSession implements ProviderSession {
     });
   }
 
-  // The pinned ACP adapter's native tool title is exactly server__tool. Never match substrings in a
-  // command, prose or arguments, and accept only this connection's registered names.
+  // A qualified title can route an approval; a bare name cannot distinguish another MCP server.
+  // Never match substrings in commands, prose or arguments.
   private hostTool(id: string, title: string | null | undefined): string | undefined {
     if (!this.hostEnabled) return undefined;
     const name =
       this.settings.toolset && typeof title === 'string'
-        ? registeredTool(title, `${this.settings.toolset.name}__`, this.access?.tools)
+        ? registeredTool(
+            title,
+            `${grokServerName(this.settings.toolset.name)}__`,
+            this.access?.tools,
+          )
         : undefined;
     if (name) {
       if (this.toolNames.size >= 256)
@@ -1080,6 +1202,68 @@ class GrokSession implements ProviderSession {
       return undefined;
     }
     return name ?? this.toolNames.get(id);
+  }
+
+  // Grok's native use_tool metadata identifies the dispatcher, not the MCP server. A bare name is
+  // only a candidate for receipt correlation, never approval authority. The host must validate the
+  // unguessable receipt against its retained call's owner, turn, access generation and tool name
+  // before it links activity or retires notices. Foreign or invented receipts cannot do either.
+  private resultTool(
+    id: string,
+    title: string | null | undefined,
+    meta: Record<string, unknown> | null | undefined,
+  ): string | undefined {
+    const qualified = this.hostTool(id, title);
+    if (qualified) return qualified;
+    if (!this.hostEnabled) return undefined;
+    const native = record(meta?.['x.ai/tool']);
+    const useTool =
+      native?.version === 1 &&
+      native.namespace === 'grok_build' &&
+      native.name === 'use_tool' &&
+      native.kind === 'use_tool';
+    if (title && useTool && this.access?.tools?.includes(title)) {
+      if (this.resultNames.size >= 256)
+        this.resultNames.delete(this.resultNames.keys().next().value ?? '');
+      this.resultNames.set(id, title);
+      return title;
+    }
+    if (title || (meta && !useTool)) {
+      this.resultNames.delete(id);
+      return undefined;
+    }
+    return this.resultNames.get(id);
+  }
+
+  // Grok's MCP completion has no title or text content. Its native wrapper names the server and
+  // canonical tool, and holds the toolset's JSON as a string in one variant: OkayOutput for a
+  // result, or Error with is_error for one the server marked isError, such as a refusal, which Grok
+  // reports as failed; both carry the result's text the same way. Unwrap only that exact shape for
+  // this connection and the tool identified by the preceding native updates. A foreign or malformed
+  // wrapper must not fall back to another receipt in its content or outer fields.
+  private resultReceipt(
+    name: string,
+    output: unknown,
+    content: unknown,
+  ): ReturnType<typeof toolsetReceipt> {
+    const native = record(output);
+    if (
+      native &&
+      ('type' in native || 'server_name' in native || 'tool_name' in native || 'output' in native)
+    ) {
+      if (
+        native.type !== 'MCP' ||
+        !this.settings.toolset ||
+        native.server_name !== grokServerName(this.settings.toolset.name) ||
+        native.tool_name !== name
+      )
+        return undefined;
+      const details = record(native.output);
+      const variant = native.is_error === true ? 'Error' : 'OkayOutput';
+      const value = details && Object.keys(details).length === 1 ? details[variant] : undefined;
+      return typeof value === 'string' ? toolsetReceipt(value, undefined) : undefined;
+    }
+    return toolsetReceipt(output, content);
   }
 
   private askQuestion(

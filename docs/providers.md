@@ -37,7 +37,7 @@ The app drives three providers. Each has an adapter module that implements the s
 | Yolo | `bypassPermissions` | Approvals never asked for | Always approve |
 | Sandbox levels | Claude Code's sandbox, set through flag settings; a switch applies at once | Codex's read-only, workspace-write and danger-full-access sandboxes; a switch applies from the next turn | Grok's read-only, workspace and off profiles; a switch moves the session to a new process |
 | Gateways | Claude Code settings files, `gateways/<name>.json`, which Claude Code reads | Codex profile files, `gateways/<name>.toml`, which the adapter reads and sends with the thread, naming the file's provider on the thread's app-server (ADR-0008); a running session switches only to a gateway, or to none, on the provider it started with | None; Grok's custom models take their place among its models |
-| Models and effort | From Claude Code's initialization; a switch applies at once | `model/list`; a switch applies from the next turn | From Grok's answer to `initialize`; a switch applies at once |
+| Models and effort | From Claude Code's initialization; a switch applies at once | `model/list`; a switch applies from the next turn | From Grok's `x.ai/models/list`; a switch applies at once |
 | A message during a turn | Joins the running turn between tool calls | Joins it through `turn/steer` | Joins it through Grok's interjection |
 | Retries of a failed request to the model | The SDK's `api_retry` messages, with the retry, of how many, and the HTTP status and Claude Code's kind of error as the reason | Errors Codex will retry, whose message counts them, such as `Reconnecting... 2/5`, with their details as the reason; over its WebSocket transport Codex leaves the first unreported | Grok's `retry_state` notices while it is retrying, with the retry, of how many, and its reason |
 | Questions | AskUserQuestion, in yolo too | Codex's own question tools, the async one answered by the user's next message (ADR-0012) | Grok's own question tool |
@@ -45,7 +45,7 @@ The app drives three providers. Each has an adapter module that implements the s
 | Task list | Claude Code's task tools, which it offers by default only to its older models, and to the others when its settings turn them on | The turn plan, from the plan tool, which Codex's settings turn on | The plan Grok sends |
 | History and resume | The SDK's transcripts and session info | `thread/list`, `thread/turns/list`, `thread/read` and `thread/resume` | `session/list` and `session/load` |
 | Usage limits | The SDK's experimental usage call and the turns' rate-limit events | `account/rateLimits/read` and its updates; a reset spends a reset credit | `x.ai/billing`, the plan's current period; no reset |
-| The app's toolset | Bound HTTP MCP through SDK configuration | Bound HTTP MCP through app-server configuration | Bound HTTP MCP on new/load/resume when advertised; otherwise explicitly unavailable |
+| The app's toolset | Bound HTTP MCP through SDK configuration | Bound HTTP MCP through app-server configuration | Bound HTTP MCP on new/load/resume when advertised, as `sanmukon-code`, since Grok takes no server name that starts with a digit; otherwise explicitly unavailable |
 
 ## Where things are
 

@@ -15,8 +15,10 @@ export function isAutomationReceipt(value: unknown): value is AutomationCallRece
   );
 }
 
-// Call only after checking the native entry's server/tool identity. Read the outer envelope, never
-// recursively search page content, tool arguments or model prose for a correlation ID.
+// Call only for a registered native tool or dispatcher candidate. A parsed receipt is not authority:
+// ToolsetAccess.result must validate the retained call's owner, turn, generation and canonical name
+// before linking anything. Read the outer envelope, never recursively search page content, tool
+// arguments or model prose for a correlation ID.
 export function toolsetReceipt(
   structured: unknown,
   content: unknown,

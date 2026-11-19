@@ -41,6 +41,12 @@ const MODEL_STATE = {
   ],
 };
 
+// The catalog of Grok's first fetch, where initialize gave only its built-in models.
+const NEWER_MODELS = {
+  currentModelId: 'grok-newer',
+  availableModels: [{ modelId: 'grok-newer', name: 'Grok Newer', _meta: { reasoningEfforts: [] } }],
+};
+
 function configOptions(model: string, effort: string): SessionConfigOption[] {
   return [
     {
@@ -97,6 +103,10 @@ let failResumeAt: string | undefined;
 let pages: ListSessionsResponse[];
 // Whether a stopped process takes its time to exit, as Grok does.
 let slowExit: boolean;
+// The catalog x.ai/models/list answers with once Grok's first fetch lands, initialize's by default,
+// and whether the Grok has no such call, as an older one.
+let listedModels: unknown;
+let noModelsList: boolean;
 let fakes: FakeGrok[];
 let automationCapabilities = false;
 
@@ -127,10 +137,22 @@ it.each(['auto', 'yolo'] as const)(
         onEvent,
       ),
     );
+    expect(fake().args).toEqual([
+      '--no-plan',
+      '--sandbox',
+      'workspace',
+      '--allow',
+      'MCPTool(sanmukon-code__panel_list)',
+      'agent',
+      '--no-leader',
+      'stdio',
+    ]);
+    // Grok registers none of a server's tools unless its name starts with a letter or an underscore,
+    // so the toolset's 3mukon-code reaches Grok as sanmukon-code.
     expect(fake().paramsOf('session/new')[0]?.mcpServers).toEqual([
       {
         type: 'http',
-        name: '3mukon-code',
+        name: 'sanmukon-code',
         url: accesses[0]?.url,
         headers: [{ name: 'Authorization', value: 'Bearer synthetic-0' }],
       },
@@ -138,7 +160,7 @@ it.each(['auto', 'yolo'] as const)(
     await expect(
       fake().request({
         sessionId: 'grok-1',
-        toolCall: { toolCallId: 'entry', kind: 'other', title: '3mukon-code__panel_list' },
+        toolCall: { toolCallId: 'entry', kind: 'other', title: 'sanmukon-code__panel_list' },
         options: OPTIONS,
       }),
     ).resolves.toEqual({ outcome: { outcome: 'selected', optionId: 'allow-once' } });
@@ -180,10 +202,11 @@ it.each(['auto', 'yolo'] as const)(
     await session.setSandbox('read-only');
     expect(accesses).toHaveLength(2);
     expect(accesses[0]?.close).toHaveBeenCalled();
+    expect(fake(1).args).toContain('MCPTool(sanmukon-code__panel_list)');
     expect(fake(1).paramsOf('session/resume')[0]?.mcpServers).toEqual([
       {
         type: 'http',
-        name: '3mukon-code',
+        name: 'sanmukon-code',
         url: accesses[1]?.url,
         headers: [{ name: 'Authorization', value: 'Bearer synthetic-1' }],
       },
@@ -202,6 +225,291 @@ it.each(['auto', 'yolo'] as const)(
     expect(accesses[1]?.close).toHaveBeenCalled();
   },
 );
+
+// Grok Build 1.0.70's observed dispatcher sequence, with synthetic IDs and content. Its metadata
+// names use_tool in grok_build, not the MCP server; the initial title changes to the bare tool name.
+const USE_TOOL_META = {
+  'x.ai/tool': {
+    version: 1,
+    name: 'use_tool',
+    kind: 'use_tool',
+    namespace: 'grok_build',
+    label: 'Use Tool',
+    read_only: false,
+  },
+};
+function useToolFixture(id: string, name: string): SessionUpdate[] {
+  const input = {
+    tool_name: name,
+    tool_input: {
+      actionId: 'fixture-present',
+      reuseKey: 'fixture',
+      title: 'Fixture',
+      version: 0,
+      items: [{ kind: 'file', path: '/work/notes.md' }],
+    },
+  };
+  return [
+    {
+      sessionUpdate: 'tool_call',
+      toolCallId: id,
+      title: 'use_tool',
+      _meta: USE_TOOL_META,
+      rawInput: { variant: null, ...input },
+    },
+    {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: id,
+      title: name,
+      kind: 'other',
+      _meta: USE_TOOL_META,
+      rawInput: { variant: 'UseTool', ...input },
+    },
+  ];
+}
+
+it.each([
+  { name: 'panel_present', status: 'completed' as const },
+  { name: 'sanmukon-code__panel_present', status: 'completed' as const },
+  { name: 'panel_present', status: 'failed' as const },
+  { name: 'sanmukon-code__panel_present', status: 'failed' as const },
+])(
+  'forwards the recorded MCP result wrapper from $name ($status) for host validation',
+  async ({ name, status }) => {
+    automationCapabilities = true;
+    const linked = vi.fn();
+    const { session, until } = await open((onEvent) =>
+      provider.start(
+        {
+          cwd: '/work',
+          toolset: {
+            name: '3mukon-code',
+            open: () => ({
+              url: 'http://127.0.0.1:4000/mcp',
+              credential: 'synthetic',
+              tools: ['panel_present'],
+              result: linked,
+              close: vi.fn(),
+            }),
+          },
+        },
+        onEvent,
+      ),
+    );
+    await session.send('Present the fixture');
+    await fake().prompted();
+    for (const update of useToolFixture('entry', name)) await fake().update(update);
+    const receipt = { schemaVersion: 1, callId: 'synthetic-receipt' };
+    await fake().update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'entry',
+      status,
+      rawOutput: {
+        type: 'MCP',
+        server_name: 'sanmukon-code',
+        tool_name: 'panel_present',
+        // Grok's MCPOutputDetails: OkayOutput for a result, and Error with is_error for one the
+        // server marked isError, as the toolset marks a refusal, which Grok reports as failed.
+        ...(status === 'completed'
+          ? {
+              output: {
+                OkayOutput: JSON.stringify({
+                  automation: receipt,
+                  frames: [],
+                  outcome: { status: 'verified', value: null },
+                  presentationNotices: [],
+                }),
+              },
+            }
+          : {
+              output: {
+                Error: JSON.stringify({
+                  automation: receipt,
+                  frames: [],
+                  outcome: { status: 'refused', code: 'invalid-request', dispatched: false },
+                  presentationNotices: [],
+                }),
+              },
+              is_error: true,
+            }),
+      },
+    });
+    await until(() => linked.mock.calls.length === 1);
+    expect(linked).toHaveBeenCalledWith('panel_present', 'entry', receipt);
+    await session.close();
+  },
+);
+
+it('does not auto-approve bare or foreign names, or infer receipts from their arguments', async () => {
+  automationCapabilities = true;
+  const linked = vi.fn();
+  const { session, events, until } = await open((onEvent) =>
+    provider.start(
+      {
+        cwd: '/work',
+        toolset: {
+          name: '3mukon-code',
+          open: () => ({
+            url: 'http://127.0.0.1:4000/mcp',
+            credential: 'synthetic',
+            tools: ['panel_present'],
+            result: linked,
+            close: vi.fn(),
+          }),
+        },
+      },
+      onEvent,
+    ),
+  );
+  await session.send('Use a tool');
+  await fake().prompted();
+  // The toolset's own name, 3mukon-code, is not the one Grok knows it by, so it is foreign too.
+  for (const name of ['panel_present', 'foreign__panel_present', '3mukon-code__panel_present']) {
+    for (const update of useToolFixture(name, name)) await fake().update(update);
+    const pending = fake().request({
+      sessionId: 'grok-1',
+      toolCall: { toolCallId: name, kind: 'other', title: name, _meta: USE_TOOL_META },
+      options: OPTIONS,
+    });
+    await until((all) =>
+      all.some((e) => e.type === 'approval-requested' && e.request.title === name),
+    );
+    await session.answerApproval(last(events, 'approval-requested')?.request.id ?? '', {
+      decision: 'deny',
+    });
+    await expect(pending).resolves.toEqual({
+      outcome: { outcome: 'selected', optionId: 'reject-once' },
+    });
+    await fake().update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: name,
+      status: 'failed',
+      rawOutput: {
+        nested: {
+          automation: { schemaVersion: 1, callId: 'injected' },
+          outcome: { status: 'verified', value: null },
+          presentationNotices: [],
+        },
+      },
+    });
+  }
+  await session.close();
+  expect(linked).not.toHaveBeenCalled();
+});
+
+it('rejects foreign, conflicting and malformed MCP wrappers without falling back to content', async () => {
+  automationCapabilities = true;
+  const linked = vi.fn();
+  const { session, until } = await open((onEvent) =>
+    provider.start(
+      {
+        cwd: '/work',
+        toolset: {
+          name: '3mukon-code',
+          open: () => ({
+            url: 'http://127.0.0.1:4000/mcp',
+            credential: 'synthetic',
+            tools: ['panel_present', 'panel_list'],
+            result: linked,
+            close: vi.fn(),
+          }),
+        },
+      },
+      onEvent,
+    ),
+  );
+  const envelope = {
+    automation: { schemaVersion: 1, callId: 'must-not-link' },
+    outcome: { status: 'verified', value: null },
+    presentationNotices: [],
+  };
+  const text = JSON.stringify(envelope);
+  const wrapper = {
+    type: 'MCP',
+    server_name: 'sanmukon-code',
+    tool_name: 'panel_present',
+    output: { OkayOutput: text },
+  };
+  const cases = [
+    { ...wrapper, server_name: 'foreign' },
+    { ...wrapper, server_name: '3mukon-code' },
+    { ...wrapper, server_name: undefined },
+    { ...wrapper, tool_name: 'panel_list' },
+    { ...wrapper, tool_name: undefined },
+    { ...wrapper, type: 'SearchTool' },
+    { ...wrapper, type: undefined },
+    { ...wrapper, output: { OkayOutput: envelope } },
+    { ...wrapper, output: { ErrorOutput: text } },
+    { ...wrapper, output: { Error: text } },
+    { ...wrapper, is_error: true },
+    { ...wrapper, output: { OkayOutput: text, Error: text } },
+    { ...wrapper, output: { OkayOutput: text, Error: text }, is_error: true },
+    { ...wrapper, output: { OkayOutput: '{broken' } },
+    { ...wrapper, output: { OkayOutput: ' '.repeat(256 * 1024) + text } },
+    { ...wrapper, output: { OkayOutput: JSON.stringify({ nested: envelope }) } },
+    { ...wrapper, ...envelope, server_name: 'foreign' },
+  ];
+  try {
+    await session.send('Present a fixture');
+    await fake().prompted();
+    for (const [index, rawOutput] of cases.entries()) {
+      const id = `rejected-${String(index)}`;
+      for (const update of useToolFixture(id, 'sanmukon-code__panel_present'))
+        await fake().update(update);
+      await fake().update({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: id,
+        status: 'completed',
+        rawOutput,
+        content: [{ type: 'content', content: { type: 'text', text } }],
+      });
+      await until((events) =>
+        events.some((e) => e.type === 'tool' && e.id === id && e.status === 'completed'),
+      );
+      expect(linked).not.toHaveBeenCalled();
+    }
+  } finally {
+    await session.close();
+  }
+});
+
+it('uses the Grok-only server name on history load without renaming the shared toolset', async () => {
+  automationCapabilities = true;
+  const toolset = {
+    name: '3mukon-code',
+    open: () => ({
+      url: 'http://127.0.0.1:4000/mcp',
+      credential: 'synthetic',
+      tools: ['panel_list'],
+      close: vi.fn(),
+    }),
+  };
+  const { session } = await open((onEvent) =>
+    provider.resume(
+      {
+        cwd: '/work',
+        sessionId: 'grok-1',
+        toolset,
+      },
+      onEvent,
+    ),
+  );
+  try {
+    expect(fake().paramsOf('session/load')[0]?.mcpServers).toEqual([
+      {
+        type: 'http',
+        name: 'sanmukon-code',
+        url: 'http://127.0.0.1:4000/mcp',
+        headers: [{ name: 'Authorization', value: 'Bearer synthetic' }],
+      },
+    ]);
+    expect(fake().args).toContain('MCPTool(sanmukon-code__panel_list)');
+    expect(fake().args).not.toContain('MCPTool(3mukon-code__panel_list)');
+    expect(toolset.name).toBe('3mukon-code');
+  } finally {
+    await session.close();
+  }
+});
 
 it('reports unsupported HTTP without disabling ordinary chat', async () => {
   const availability = vi.fn();
@@ -235,6 +543,8 @@ beforeEach(() => {
   failResumeAt = undefined;
   pages = [];
   slowExit = false;
+  listedModels = MODEL_STATE;
+  noModelsList = false;
   fakes = [];
   automationCapabilities = false;
 });
@@ -328,6 +638,15 @@ class FakeGrok {
           };
         });
       })
+      .onRequest(
+        '_x.ai/models/list',
+        (params) => params as Params,
+        ({ params }) => {
+          record('_x.ai/models/list', params);
+          if (noModelsList) throw new RequestError(-32601, 'Method not found');
+          return { result: listedModels };
+        },
+      )
       .onRequest(
         '_x.ai/auth/info',
         (params) => params as Params,
@@ -516,6 +835,7 @@ describe('starting a session', () => {
     expect(fake().methods()).toEqual([
       'initialize',
       'session/new',
+      '_x.ai/models/list',
       'session/set_mode',
       'session/set_config_option',
       'session/set_config_option',
@@ -985,6 +1305,7 @@ describe('switching', () => {
     expect(fake(1).methods()).toEqual([
       'initialize',
       'session/resume',
+      '_x.ai/models/list',
       'session/set_mode',
       'session/set_config_option',
     ]);
@@ -1024,6 +1345,28 @@ describe('switching', () => {
     expect(fake(1).stopped).toBe(true);
     await session.send('Still here');
     await fake(2).prompted();
+  });
+
+  it('refreshes the catalog after a failed sandbox switch before restoring the default model', async () => {
+    failResumeAt = 'read-only';
+    const { session, events } = await open((onEvent) => provider.start({ cwd: '/work' }, onEvent));
+    // The replacement's initialize still has the built-in catalog, but its model listing has a
+    // newer default. Recovery must settle that catalog just as a successful replacement does.
+    listedModels = NEWER_MODELS;
+    try {
+      await expect(session.setSandbox('read-only')).rejects.toThrow('could not resume');
+      await session.setModel(null);
+      expect(fake(2).paramsOf('session/set_config_option').at(-1)).toEqual({
+        sessionId: 'grok-1',
+        configId: 'model',
+        value: 'grok-newer',
+      });
+      expect(last(events, 'models')?.models).toEqual([
+        { id: 'grok-newer', label: 'Grok Newer', efforts: [], default: true },
+      ]);
+    } finally {
+      await session.close();
+    }
   });
 });
 
@@ -1107,12 +1450,41 @@ describe('resuming and history', () => {
     expect(fake().stopped).toBe(true);
   });
 
-  it('lists the models as Grok starts, without creating a session or waiting for the process to exit', async () => {
+  it('lists the models Grok settles on, without creating a session or waiting for the process to exit', async () => {
     slowExit = true;
     const models = await provider.listModels(null);
     expect(models.map((model) => model.id)).toEqual(['grok-default', 'grok-small']);
-    expect(fake().methods()).toEqual(['initialize']);
+    expect(fake().methods()).toEqual(['initialize', '_x.ai/models/list']);
     expect(fake().stopped).toBe(true);
+  });
+
+  it('lists the catalog of Grok’s first fetch, not the built-in models initialize gives before it', async () => {
+    listedModels = NEWER_MODELS;
+    const models = await provider.listModels(null);
+    expect(models).toEqual([{ id: 'grok-newer', label: 'Grok Newer', efforts: [], default: true }]);
+  });
+
+  it('lists the models initialize gives when Grok has no call for its catalog', async () => {
+    noModelsList = true;
+    const models = await provider.listModels(null);
+    expect(models.map((model) => model.id)).toEqual(['grok-default', 'grok-small']);
+  });
+
+  it('gives a session the catalog Grok settles on, then the catalog Grok announces', async () => {
+    listedModels = NEWER_MODELS;
+    const { session, events, until } = await open((onEvent) =>
+      provider.start({ cwd: '/work' }, onEvent),
+    );
+    expect(last(events, 'models')?.models.map((model) => model.id)).toEqual(['grok-newer']);
+    await fake().notify('_x.ai/models/update', {
+      currentModelId: 'grok-newest',
+      availableModels: [{ modelId: 'grok-newest', name: 'Grok Newest', _meta: {} }],
+    });
+    await until((all) => last(all, 'models')?.models[0]?.id === 'grok-newest');
+    expect(last(events, 'models')?.models).toEqual([
+      { id: 'grok-newest', label: 'Grok Newest', efforts: [], default: true },
+    ]);
+    await session.close();
   });
 });
 
