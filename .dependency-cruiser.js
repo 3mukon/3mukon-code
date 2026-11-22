@@ -189,6 +189,16 @@ export default {
       },
     },
     {
+      name: 'browser-and-computer-use-shared-session-facts',
+      comment: 'App composition connects automation backends to the broker and the panel area.',
+      severity: 'error',
+      from: { path: '^src/(browser|computer)/' },
+      to: {
+        path: '^src/',
+        pathNot: ['^src/$1/', '^src/sessions/shared/', '^src/ui/', '^src/i18n/'],
+      },
+    },
+    {
       name: 'automation-feature-contracts-are-types',
       comment:
         'App composition supplies feature implementations and constants; these edges carry types only.',

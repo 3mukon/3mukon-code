@@ -1,0 +1,76 @@
+{
+  "pins": [
+    {
+      "identity": "peekaboo",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/openclaw/Peekaboo.git",
+      "state": {
+        "revision": "69764083b16397845dc68b5c0ddb4f674290ae70"
+      }
+    },
+    {
+      "identity": "axorcist",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/openclaw/AXorcist.git",
+      "state": {
+        "revision": "6322e77a934e42f95ec912a32bdc9af014b5524e",
+        "version": "0.2.2"
+      }
+    },
+    {
+      "identity": "swift-algorithms",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/apple/swift-algorithms",
+      "state": {
+        "revision": "87e50f483c54e6efd60e885f7f5aa946cee68023",
+        "version": "1.2.1"
+      }
+    },
+    {
+      "identity": "swift-log",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/apple/swift-log.git",
+      "state": {
+        "revision": "9c6fb14227f55d8f711ce3847dc2f419fb0ecacb",
+        "version": "1.15.1"
+      }
+    },
+    {
+      "identity": "swift-numerics",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/apple/swift-numerics.git",
+      "state": {
+        "revision": "0a5bc04095a675662cf24757cc0640aa2204253b",
+        "version": "1.0.2"
+      }
+    },
+    {
+      "identity": "commander",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/steipete/Commander.git",
+      "state": {
+        "revision": "3f5a3cb1f19ce7ca79fdc2111a09dfb3da200c1c",
+        "version": "0.3.0"
+      }
+    },
+    {
+      "identity": "swift-docc-plugin",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/apple/swift-docc-plugin",
+      "state": {
+        "revision": "a255bbdb5d10d36788a39f239d7d2ac2734cef35",
+        "version": "1.4.0"
+      }
+    },
+    {
+      "identity": "swift-docc-symbolkit",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/swiftlang/swift-docc-symbolkit",
+      "state": {
+        "revision": "b45d1f2ed151d057b54504d653e0da5552844e34",
+        "version": "1.0.0"
+      }
+    }
+  ],
+  "version": 2
+}

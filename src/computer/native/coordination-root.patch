@@ -1,0 +1,58 @@
+--- a/Core/PeekabooAutomationKit/Sources/PeekabooAutomationKit/Services/Support/DesktopOperationLaneCoordinator.swift
++++ b/Core/PeekabooAutomationKit/Sources/PeekabooAutomationKit/Services/Support/DesktopOperationLaneCoordinator.swift
+@@ -86,6 +86,11 @@
+ 
+     public init() {
+         self.init(coordinationRootURL: DesktopCoordinationRuntimeRoot.defaultURL)
++    }
++
++    // Use an explicit application-owned root with the existing lock algorithm.
++    public init(appOwnedCoordinationRootURL: URL) {
++        self.init(coordinationRootURL: appOwnedCoordinationRootURL)
+     }
+ 
+     init(
+--- a/Core/PeekabooAutomationKit/Sources/PeekabooAutomationKit/Services/UI/AXWindowIDResolver.swift
++++ b/Core/PeekabooAutomationKit/Sources/PeekabooAutomationKit/Services/UI/AXWindowIDResolver.swift
+@@ -1,18 +1,18 @@
+ import ApplicationServices
+ import CoreGraphics
+ 
+ @_silgen_name("_AXUIElementGetWindow")
+ private func copyAXWindowID(_ element: AXUIElement, _ windowID: inout CGWindowID) -> AXError
+ 
+-enum AXWindowIDResolver {
++public enum AXWindowIDResolver {
+     static func copyWindowID(_ element: AXUIElement, into windowID: inout CGWindowID) -> AXError {
+         copyAXWindowID(element, &windowID)
+     }
+ 
+-    static func windowID(of element: AXUIElement) -> CGWindowID? {
++    public static func windowID(of element: AXUIElement) -> CGWindowID? {
+         var windowID: CGWindowID = 0
+         return self.copyWindowID(element, into: &windowID) == .success ? windowID : nil
+     }
+ 
+     static func owningWindowID(
+         of element: AXUIElement,
+--- a/Core/PeekabooAutomationKit/Sources/PeekabooAutomationKit/Services/UI/UIAutomationService.swift
++++ b/Core/PeekabooAutomationKit/Sources/PeekabooAutomationKit/Services/UI/UIAutomationService.swift
+@@ -156,7 +156,8 @@
+         loggingService: (any LoggingServiceProtocol)? = nil,
+         searchPolicy: SearchPolicy = .balanced,
+         inputPolicy: UIInputPolicy = .currentBehavior,
+-        feedbackClient: any AutomationFeedbackClient = NoopAutomationFeedbackClient())
++        feedbackClient: any AutomationFeedbackClient = NoopAutomationFeedbackClient(),
++        operationLaneCoordinator: DesktopOperationLaneCoordinator = .shared)
+     {
+         self.init(
+             snapshotManager: snapshotManager,
+@@ -167,7 +168,7 @@
+             syntheticInputDriver: SyntheticInputDriver(),
+             automationElementResolver: AutomationElementResolver(),
+             feedbackClient: feedbackClient,
+-            operationLaneCoordinator: .shared)
++            operationLaneCoordinator: operationLaneCoordinator)
+     }
+ 
+     init(
