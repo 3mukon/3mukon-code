@@ -1,12 +1,22 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { addCover } from '../../ui/renderer/cover';
 import type { MessageImage } from '../shared/events';
 import { imageUrl } from '../shared/images';
 import { TimelineActionsContext } from './timeline-actions';
 
 // Images in a message, in what a tool call returned or going with the message being written, as
-// thumbnails that keep their proportions; small ones in the composer.
-export function Images({ images, small = false }: { images: MessageImage[]; small?: boolean }) {
+// thumbnails that keep their proportions; small ones in the composer; and the screenshots the app's
+// tools took, each a small frame of its top, in a well under a dashed line.
+export function Images({
+  images,
+  small = false,
+  shot = false,
+}: {
+  images: MessageImage[];
+  small?: boolean;
+  shot?: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -17,6 +27,7 @@ export function Images({ images, small = false }: { images: MessageImage[]; smal
           image={image}
           label={t('sessions.image.alt', { index: index + 1 })}
           small={small}
+          shot={shot}
         />
       ))}
     </div>
@@ -29,10 +40,12 @@ export function Thumbnail({
   image,
   label,
   small = false,
+  shot = false,
 }: {
   image: MessageImage;
   label: string;
   small?: boolean;
+  shot?: boolean;
 }) {
   const actions = useContext(TimelineActionsContext);
   const [enlarged, setEnlarged] = useState(false);
@@ -53,16 +66,22 @@ export function Thumbnail({
           event.preventDefault();
           actions.imageMenu(image);
         }}
-        className={`block overflow-hidden rounded-md border border-line paper-well ${small ? 'shrink-0' : 'max-w-full min-w-0'}`}
+        className={
+          shot
+            ? 'block shrink-0 overflow-hidden rounded-md border border-dashed border-line paper-well p-1.5'
+            : `block overflow-hidden rounded-md border border-line paper-well ${small ? 'shrink-0' : 'max-w-full min-w-0'}`
+        }
       >
         <img
           src={imageUrl(image)}
           alt=""
           draggable={false}
           className={
-            small
-              ? 'h-14 w-auto max-w-40 object-cover'
-              : 'max-h-64 w-auto max-w-full object-contain'
+            shot
+              ? 'block h-20 w-[198px] rounded-[3px] object-cover object-top'
+              : small
+                ? 'h-14 w-auto max-w-40 object-cover'
+                : 'max-h-64 w-auto max-w-full object-contain'
           }
         />
       </button>
@@ -94,6 +113,7 @@ function Enlarged({
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     dialog.current?.showModal();
+    return addCover('window');
   }, []);
   const close = () => {
     dialog.current?.close();

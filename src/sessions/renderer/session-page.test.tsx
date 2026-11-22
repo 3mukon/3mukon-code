@@ -842,3 +842,23 @@ describe('SessionPage', () => {
     expect(bridge.send.mock.calls.at(-1)).toEqual(['s1', 'Thanks', []]);
   });
 });
+
+describe('SessionPage’s lines above the composer', () => {
+  it('shows the lines it is given above the composer’s divider', async () => {
+    const { bridge } = fakeBridge();
+    render(
+      <SessionPage
+        bridge={bridge}
+        folder="/Users/me/web"
+        sessionId={null}
+        onStarted={vi.fn()}
+        aboveComposer={<p>Using example.com</p>}
+      />,
+    );
+    await settle();
+    const line = screen.getByText('Using example.com');
+    expect(
+      line.compareDocumentPosition(composer()) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});

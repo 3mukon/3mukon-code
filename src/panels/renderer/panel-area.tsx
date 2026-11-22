@@ -12,11 +12,12 @@ import {
   type RefObject,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { addCover } from '../../ui/renderer/cover';
 import { Divider } from '../../ui/renderer/divider';
 import { Pane } from '../../ui/renderer/pane';
 import type { Status } from '../../ui/renderer/status-dot';
 import type { PanelContent, PanelsBridge } from '../shared/panels';
-import type { PresentationBridge, ShowOutcome } from '../shared/presentation';
+import type { PresentationBridge, ShowOutcome, UsedContent } from '../shared/presentation';
 import { arrange, neighbour, zoneAt, type Box, type Direction, type Rect } from './geometry';
 import {
   contentOf,
@@ -79,11 +80,13 @@ export interface Press {
 
 // What whoever composes the area may ask of it: to follow a press on an item of the app's lists,
 // which drags the item into the area once the pointer has gone far enough, the ghost that follows the
-// pointer saying the label; and to show one of a session's presentations again, as the user asks from
-// its activity, telling what became of it.
+// pointer saying the label; to show one of a session's presentations again, as the user asks from
+// its activity, and a tab or application the session uses, as the user asks from the line above its
+// composer, telling what became of it.
 export interface PanelAreaHandle {
   dragItem(item: DraggedItem, label: string, press: Press): void;
   show(owner: string, presentationId: string): Promise<ShowOutcome>;
+  showUsed(owner: string, content: UsedContent): Promise<ShowOutcome>;
 }
 
 // What a drag with the pointer carries: a panel moved by its title, or an item from the app's lists,
@@ -165,6 +168,10 @@ export function PanelArea({
   useEffect(() => {
     page.current?.setDragging(dragging !== null || drop !== null);
   }, [page, dragging, drop]);
+  // While something is dragged over the area, the drag lies over the whole window, a web page in a
+  // panel included, which makes way for its ghost and drop zones.
+  const dragged = dragging !== null || drop !== null;
+  useEffect(() => (dragged ? addCover('window') : undefined), [dragged]);
 
   const ordered = panelsOf(panels.layout);
   const arrangement = arrange(panels.layout);
@@ -360,6 +367,8 @@ export function PanelArea({
     },
     show: (owner, presentationId) =>
       page.current?.show(owner, { presentationId }) ?? Promise.resolve('unavailable'),
+    showUsed: (owner, content) =>
+      page.current?.show(owner, { content }) ?? Promise.resolve('unavailable'),
   }));
 
   // Finder items, which come as a drag of the system's.

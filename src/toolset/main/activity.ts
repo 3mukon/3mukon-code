@@ -3,6 +3,9 @@ import type {
   ActivityIncident,
   AutomationCallRecord,
   AutomationEvent,
+  BrowserActionSummary,
+  ComputerActionSummary,
+  Delivery,
   Frame,
   GrantEndRecord,
   HostApproval,
@@ -19,7 +22,7 @@ import {
   AUTOMATION_ACTIVITY_LIMITS,
   AUTOMATION_RESULT_LIMITS,
 } from '../../sessions/shared/automation';
-import { isJson, requestKey } from './execution';
+import { isJson, requestKey, type PlannedAction } from './execution';
 import { referencedIconIds } from '../../sessions/shared/automation-state';
 
 const IMAGE_BUDGET = 16 * 1024 * 1024;
@@ -35,6 +38,24 @@ const refused = (
 interface NoticeDelivery {
   id: string;
   version: number;
+}
+
+function boundedAction<T extends BrowserActionSummary | ComputerActionSummary>(
+  action: T,
+  keepLabel: boolean,
+): T {
+  const summary = { ...action };
+  if ('label' in summary) {
+    const label = keepLabel
+      ? summary.label
+          ?.slice(0, AUTOMATION_ACTIVITY_LIMITS.controlLabelCharacters)
+          .replace(/\s+/g, ' ')
+          .trim()
+      : undefined;
+    if (label) summary.label = label;
+    else delete summary.label;
+  }
+  return summary;
 }
 
 // Bounded session-owned activity. Provider adapters pass already-normalized receipts; this class
@@ -114,12 +135,25 @@ export class Activity {
     if (record.framesState === 'evicted') return refused('result-expired');
     return { status: 'verified', value: structuredClone(this.images.get(id) ?? []) };
   }
-  target(id: string, target: TargetSummary, delivery: 'background' | 'foreground'): void {
+  describe(
+    id: string,
+    target: TargetSummary | undefined,
+    delivery: Delivery,
+    action: PlannedAction,
+    keepLabel: boolean,
+  ): void {
     const record = this.records.get(id);
     if (!record || record.family === 'panel') return;
-    record.target = { state: 'resolved', summary: structuredClone(target) };
-    record.sharing = target.sharing ?? null;
+    if (!target && !action.browserAction && !action.computerAction) return;
+    if (target) {
+      record.target = { state: 'resolved', summary: structuredClone(target) };
+      record.sharing = target.sharing ?? null;
+    }
     record.delivery = delivery;
+    if (record.family === 'browser' && action.browserAction)
+      record.browserAction = boundedAction(action.browserAction, keepLabel);
+    if (record.family === 'computer' && action.computerAction)
+      record.computerAction = boundedAction(action.computerAction, keepLabel);
     this.publish(record);
   }
   phase(
@@ -300,9 +334,14 @@ export class Activity {
       ...frame,
       mediaType: image.mediaType,
     }));
+    const dialogDismissals = record.incidents.flatMap((incident) =>
+      incident.kind === 'dialog-dismissed' ? [incident.dialog] : [],
+    );
     const available =
       AUTOMATION_RESULT_LIMITS.jsonBytes -
-      Buffer.byteLength(JSON.stringify({ outcome: record.outcome, frames: metadata })) -
+      Buffer.byteLength(
+        JSON.stringify({ outcome: record.outcome, frames: metadata, dialogDismissals }),
+      ) -
       1024;
     const notices = this.deliveryNotices(available);
     this.deliveries.set(record.callId, notices.map(deliveryOf));
@@ -311,6 +350,7 @@ export class Activity {
       outcome: record.outcome,
       frames,
       presentationNotices: notices,
+      ...(dialogDismissals.length ? { dialogDismissals } : {}),
     });
   }
   private deliveryNotices(budget: number): PresentationNotice[] {

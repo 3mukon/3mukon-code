@@ -9,6 +9,7 @@ import {
   type SessionState,
   type SessionStatus,
   type TimelineItem,
+  type ToolItem,
 } from '../shared/session-state';
 import { Message } from './message';
 import { FileChangeEntry, ToolCall } from './tool-call';
@@ -22,12 +23,23 @@ export type RenderRequest = (item: RequestItem, place: { oldestWaiting: boolean 
 // what the app's own tools did, or nothing.
 export type RenderToolExtra = (toolId: string) => ReactNode;
 
+// What whoever composes the page shows in place of a tool call's own entry, such as what the app's
+// browser and computer tools did, which the provider's entry names only by the tool; undefined keeps
+// the provider's entry.
+export type RenderToolCall = (item: ToolItem) => ReactNode;
+
 // The extras reach each tool call's entry through the context, so that what they show changing renders
 // only the extras again, never the entries, which render again only as their own items change.
 const ToolExtras = createContext<RenderToolExtra | undefined>(undefined);
+const ToolCalls = createContext<RenderToolCall | undefined>(undefined);
 
 function ToolExtra({ id }: { id: string }) {
   return useContext(ToolExtras)?.(id) ?? null;
+}
+
+function ToolEntry({ item }: { item: ToolItem }) {
+  const own = useContext(ToolCalls)?.(item);
+  return own === undefined ? <ToolCall item={item} /> : own;
 }
 
 // How a session's status shows as a dot: a closed session as done.
@@ -57,13 +69,17 @@ interface TimelineProps {
   agent: string;
   renderRequest?: RenderRequest;
   renderToolExtra?: RenderToolExtra;
+  renderToolCall?: RenderToolCall;
+  // What waits on the user apart from the provider's own requests, such as the approval the app asks
+  // for an operation of its tools, after the activity's items, where the provider's would be.
+  hostRequests?: ReactNode;
 }
 
 // A session's activity, oldest first, as the reference's panes show it: the messages (Message), the
 // user's at the right and the agent's at the left, so that the two never read alike, and the agent's
 // thinking quieter; each tool call as one entry, with the files it changed and their diffs; the
-// approvals and questions, as the page's composer renders them, and under a tool call what whoever
-// composes the page gives it; errors, then the agent's task list
+// approvals and questions, as the page's composer renders them, and under a tool call, or in place of
+// its entry, what whoever composes the page gives it; errors, then the agent's task list
 // with finished rows struck through and the current one bright, and Working while a turn runs, with
 // the provider's retry of a failed request to the model under it while it retries.
 export function Timeline({
@@ -73,45 +89,50 @@ export function Timeline({
   agent,
   renderRequest,
   renderToolExtra,
+  renderToolCall,
+  hostRequests,
 }: TimelineProps) {
   const { t } = useTranslation();
   const working = pending !== undefined || state?.turnRunning === true;
   const oldestWaiting = state === null ? undefined : openRequests(state)[0]?.id;
   return (
     <ToolExtras.Provider value={renderToolExtra}>
-      {state?.timeline.slice(from).map((item, index) => (
-        <Item
-          key={keyOf(item, from + index)}
-          item={item}
-          agent={agent}
-          oldestWaiting={oldestWaiting}
-          {...(renderRequest === undefined ? {} : { renderRequest })}
-        />
-      ))}
-      {pending !== undefined && (
-        <Message role="user" text={pending.text} images={pending.images} agent={agent} />
-      )}
-      {state !== null && state.tasks.length > 0 && (
-        <ul className="my-3">
-          {state.tasks.map((task, index) => (
-            <li
-              key={`${String(index)}:${task.text}`}
-              className={`flex items-baseline gap-3 ${taskLook[task.status]}`}
-            >
-              <span className="-translate-y-0.5">
-                <StatusDot status={taskDots[task.status]} />
-              </span>
-              <span className="min-w-0">{task.text}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {working && (
-        <p className="mt-3 text-faint after:animate-blink after:content-['…'] motion-reduce:after:animate-none">
-          {t('sessions.page.working')}
-        </p>
-      )}
-      {working && state?.retrying !== undefined && <RetryNotice retrying={state.retrying} />}
+      <ToolCalls.Provider value={renderToolCall}>
+        {state?.timeline.slice(from).map((item, index) => (
+          <Item
+            key={keyOf(item, from + index)}
+            item={item}
+            agent={agent}
+            oldestWaiting={oldestWaiting}
+            {...(renderRequest === undefined ? {} : { renderRequest })}
+          />
+        ))}
+        {pending !== undefined && (
+          <Message role="user" text={pending.text} images={pending.images} agent={agent} />
+        )}
+        {hostRequests}
+        {state !== null && state.tasks.length > 0 && (
+          <ul className="my-3">
+            {state.tasks.map((task, index) => (
+              <li
+                key={`${String(index)}:${task.text}`}
+                className={`flex items-baseline gap-3 ${taskLook[task.status]}`}
+              >
+                <span className="-translate-y-0.5">
+                  <StatusDot status={taskDots[task.status]} />
+                </span>
+                <span className="min-w-0">{task.text}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {working && (
+          <p className="mt-3 text-faint after:animate-blink after:content-['…'] motion-reduce:after:animate-none">
+            {t('sessions.page.working')}
+          </p>
+        )}
+        {working && state?.retrying !== undefined && <RetryNotice retrying={state.retrying} />}
+      </ToolCalls.Provider>
     </ToolExtras.Provider>
   );
 }
@@ -168,7 +189,7 @@ const Item = memo(function Item({ item, agent, oldestWaiting, renderRequest }: I
     case 'tool':
       return (
         <>
-          <ToolCall item={item} />
+          <ToolEntry item={item} />
           <ToolExtra id={item.id} />
         </>
       );

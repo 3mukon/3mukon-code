@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Segmented } from '../../ui/renderer/segmented';
 import type { Appearance, AppSettings, LanguageChoice } from '../shared/settings';
@@ -5,12 +6,15 @@ import type { Appearance, AppSettings, LanguageChoice } from '../shared/settings
 interface SettingsPanelProps {
   settings: AppSettings;
   onChange: (change: Partial<AppSettings>) => void;
+  // The settings other modules own, such as browser and computer use, after this module's own.
+  children?: ReactNode;
 }
 
 // The settings, as a panel shows them on the window's paper: the window's language, System taking
 // macOS's preferred languages and each language named in itself, its appearance, and whether its
-// controls show tooltips, off at first, each a row of choices with the chosen one in ink.
-export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
+// controls show tooltips, off at first, each a row of choices with the chosen one in ink; then those
+// whoever composes the panel adds.
+export function SettingsPanel({ settings, onChange, children }: SettingsPanelProps) {
   const { t } = useTranslation();
   return (
     // Positioned, as every scroll area is (L-0001).
@@ -54,6 +58,7 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
             onChange({ tooltips: tooltips === 'on' });
           }}
         />
+        {children}
       </div>
     </div>
   );

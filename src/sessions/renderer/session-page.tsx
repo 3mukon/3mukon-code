@@ -12,7 +12,12 @@ import type {
 import type { RememberedChoice, SessionsBridge, SessionSummary } from '../shared/sessions';
 import { Attachments, useAttachments } from './attachments';
 import { SessionSettings, type Setting } from './session-settings';
-import { Timeline, type RenderRequest, type RenderToolExtra } from './timeline';
+import {
+  Timeline,
+  type RenderRequest,
+  type RenderToolCall,
+  type RenderToolExtra,
+} from './timeline';
 import { TimelineActionsContext, timelineActions } from './timeline-actions';
 import { rememberChoice, useOffers, useRemembered } from './use-offers';
 import { useSession } from './use-session';
@@ -81,6 +86,13 @@ interface SessionPageProps {
   renderRequest?: RenderRequest;
   // Shows, under a tool call in its activity, what the app knows of it, such as a presentation.
   renderToolExtra?: RenderToolExtra;
+  // Shows, in place of a tool call's own entry, what the app knows it did, such as a browser's action.
+  renderToolCall?: RenderToolCall;
+  // Lines above the composer's divider, such as what the session's tools use, with Show and Stop.
+  aboveComposer?: ReactNode;
+  // What waits on the user apart from the provider's own requests, such as the approval the app asks
+  // for an operation of its tools, at the activity's end.
+  hostRequests?: ReactNode;
   // The providers' sign-ins and usage limits.
   accounts?: AccountViews;
 }
@@ -109,6 +121,9 @@ export function SessionPage({
   onStarted,
   renderRequest,
   renderToolExtra,
+  renderToolCall,
+  aboveComposer,
+  hostRequests,
   accounts,
 }: SessionPageProps) {
   const { t } = useTranslation();
@@ -505,6 +520,8 @@ export function SessionPage({
               {...(pending === null ? {} : { pending })}
               {...(renderRequest === undefined ? {} : { renderRequest })}
               {...(renderToolExtra === undefined ? {} : { renderToolExtra })}
+              {...(renderToolCall === undefined ? {} : { renderToolCall })}
+              {...(hostRequests === undefined ? {} : { hostRequests })}
             />
             {startFailed && <p className="my-3 text-del">{t('sessions.page.startFailed')}</p>}
             {resumeFailed && <p className="my-3 text-del">{t('sessions.page.resumeFailed')}</p>}
@@ -515,6 +532,7 @@ export function SessionPage({
           {...attachments.dropZone}
           className={`mx-5 mb-3 rounded-md ${attachments.dropping ? 'outline-2 outline-offset-2 outline-accent outline-dashed' : ''}`}
         >
+          {aboveComposer}
           {/* The divider above the composer, with the provider's notice of its usage limits and the
               context in use near its end. */}
           <div className="flex h-4 items-center gap-2">

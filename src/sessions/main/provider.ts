@@ -122,6 +122,10 @@ export interface ProviderSession {
 export interface Toolset {
   // The name providers list it under.
   readonly name: string;
+  // How long a provider waits on one of the toolset's calls, in milliseconds, where its MCP client
+  // lets the app say: long enough for the user to answer an operation's approval, which the toolset
+  // waits for without a limit of its own, so that no provider ends the call while the user decides.
+  readonly callTimeoutMs: number;
   open(): ToolsetAccess;
 }
 
@@ -166,9 +170,14 @@ export interface SessionAutomation {
   disconnect(): void;
   close(remove?: boolean): Promise<void>;
   // Accepted means a capable provider accepted the context with the turn, not that the renderer
-  // queued it. Old adapters and failed sends leave notices pending. User text stays unchanged.
+  // queued it. Adapters without host context and failed sends leave notices pending. User text
+  // stays unchanged.
   prepareSend(): HostContextDelivery & { context: HostTurnContext };
   linkResult(link: ProviderToolLink): void;
+  // Tells the listener, at once and at each change, since when the session's oldest operation
+  // approval has waited for the user's answer, or undefined while none waits; the function returned
+  // stops it.
+  onWaiting(listener: (since: number | undefined) => void): () => void;
 }
 export interface HostTurnContext {
   presentationNotices: readonly PresentationNotice[];

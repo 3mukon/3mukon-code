@@ -156,6 +156,157 @@
         "unreadable": "无法读取图像。",
         "count": "一条消息最多附带 {{limit}} 张图像。"
       }
+    },
+    "automation": {
+      "line": {
+        "idle": "正在使用 {{target}}",
+        "observing": "正在使用 {{target}}",
+        "acting": "正在使用 {{target}}",
+        "waiting-grant": "等你回应后才能使用 {{target}}",
+        "paused": "已在 {{target}} 中暂停",
+        "stopping": "正在停止使用 {{target}}",
+        "more_other": "等 {{count}} 项",
+        "blank": "空白标签页",
+        "background": "在后台",
+        "foreground": "在前台",
+        "show": "显示",
+        "stop": "停止",
+        "cantShow": "现在无法显示。",
+        "cantStop": "无法停止。"
+      },
+      "sharing": {
+        "none": "不共享",
+        "app": "应用登录",
+        "chrome": "Chrome",
+        "chromeProfile": "Chrome · {{profile}}"
+      },
+      "delivery": {
+        "background": "后台",
+        "foreground": "前台"
+      },
+      "kind": {
+        "browser": "浏览器",
+        "computer": "计算机使用"
+      },
+      "tool": {
+        "browser_open": "打开了一个标签页",
+        "browser_navigate": "打开了 {{target}}",
+        "browser_snapshot": "读取了页面",
+        "browser_screenshot": "截取了页面的画面",
+        "browser_act": "操作了页面",
+        "browser_close": "关闭了 {{target}}",
+        "other": "{{tool}}：{{target}}",
+        "otherAlone": "{{tool}}",
+        "browser_navigateBlank": "打开了一个页面",
+        "browser_closeBlank": "关闭了一个标签页",
+        "computer_targets": "列出了正在运行的应用",
+        "computer_select": "选择了{{name}}",
+        "computer_windows": "查找了{{name}}的窗口",
+        "computer_observe": "查看了{{name}}",
+        "computer_act": "在{{name}}中进行了操作",
+        "computer_release": "停止使用{{name}}"
+      },
+      "action": {
+        "click": "在页面上点按了",
+        "clickControl": "点按了{{target}}",
+        "type": "在页面上输入了",
+        "typeControl": "在{{target}}中输入了",
+        "scroll": "滚动了页面"
+      },
+      "note": {
+        "notChecked": "未确认效果",
+        "cancelled": "开始前已停止",
+        "partial": "已停止，可能已执行",
+        "waitingApproval": "等你回应",
+        "indeterminate": {
+          "cancelled-after-dispatch": "已停止，可能已执行",
+          "timeout": "超时，可能已执行",
+          "backend-lost": "连接中断，可能已执行",
+          "presentation-race": "可能已执行"
+        },
+        "refused": {
+          "wrong-owner": "属于另一个会话",
+          "access-revoked": "访问已结束",
+          "turn-inactive": "这一轮已结束",
+          "operation-ended": "使用已结束",
+          "stale-target": "页面或窗口已变化",
+          "stale-observation": "读取后页面或窗口已变化",
+          "target-paused": "你接管期间已暂停",
+          "sandbox-denied": "当前沙盒级别不允许",
+          "file-scope-unverifiable": "超出会话的文件夹",
+          "approval-required": "需要你的回应",
+          "denied": "已拒绝",
+          "setup-required": "需要设置",
+          "background-unavailable": "无法在后台进行",
+          "image-input-unsupported": "模型无法接收图片",
+          "busy": "正忙",
+          "limit-exceeded": "超出限制",
+          "connection-lost": "连接中断",
+          "renderer-unavailable": "窗口不可用",
+          "layout-conflict": "面板已变化",
+          "request-conflict": "以不同参数重复了请求",
+          "invalid-request": "请求无效",
+          "not-found": "未找到",
+          "result-expired": "已不可用",
+          "needs-user-action": "需要你处理"
+        },
+        "denied": "已拒绝 · “{{message}}”",
+        "sandbox": "{{sandbox}}沙盒下不允许"
+      },
+      "incident": {
+        "dialog": "已关闭页面打开的对话框",
+        "activated": "{{name}}来到了最前面",
+        "activatedUnknown": "某个应用来到了最前面",
+        "takeover": "你接管了",
+        "secureInputOn": "密码输入框占用键盘时已暂停",
+        "secureInputOff": "密码输入框已释放键盘",
+        "openedWindow": "{{control}}打开了它自己的窗口"
+      },
+      "frames": {
+        "evicted": "截图已不再保留",
+        "failed": "无法读取截图"
+      },
+      "appName": "“{{name}}”",
+      "someApp": "某个应用",
+      "quoted": "“{{label}}”",
+      "computer": {
+        "click": "点按了一个控件",
+        "clickControl": "点按了{{target}}",
+        "type": "在输入框中输入了",
+        "typeControl": "在{{target}}中输入了",
+        "scroll": "滚动了窗口",
+        "scrollControl": "滚动了{{target}}",
+        "point-click": "在窗口中点按了",
+        "point-scroll": "滚动了窗口",
+        "drag": "在窗口中拖移了",
+        "press": "按下了按键"
+      },
+      "window": {
+        "raise": "把窗口移到了最前面",
+        "minimize": "最小化了窗口",
+        "restore": "恢复了窗口",
+        "move": "移动了窗口",
+        "resize": "调整了窗口大小"
+      },
+      "grants": {
+        "count_other": "{{count}} 项授权",
+        "chromeTab": "Chrome 标签页 {{site}}",
+        "chromeTabBlank": "一个 Chrome 标签页",
+        "appTab": "应用浏览器中的 {{site}}",
+        "appTabBlank": "应用浏览器中的一个标签页",
+        "background": "后台的{{app}}",
+        "foreground": "前台的{{app}}",
+        "dialog": "{{app}}的对话框",
+        "title": "授权",
+        "scope": {
+          "operation": "本次操作",
+          "session": "此会话"
+        },
+        "dialogTag": "对话框",
+        "end": "结束",
+        "endNamed": "结束：{{grant}}",
+        "endFailed": "无法结束。"
+      }
     }
   },
   "approvals": {
@@ -192,7 +343,49 @@
     "chosen": "已选",
     "hidden": "回答已隐藏",
     "message": "“{{message}}”",
-    "denialMessage": "告诉代理改做什么"
+    "denialMessage": "告诉代理改做什么",
+    "host": {
+      "heading": {
+        "chrome": "在 Chrome 中以你的登录状态操作 {{site}}？",
+        "chromeBlank": "在 Chrome 中以你的登录状态操作？",
+        "app": "在应用的浏览器中以已登录状态操作 {{site}}？",
+        "appBlank": "在应用的浏览器中以已登录状态操作？",
+        "background": "在后台查看并操作{{app}}？",
+        "foreground": "在{{app}}中使用键盘和指针？",
+        "dialog": "使用{{app}}打开的对话框？"
+      },
+      "detail": {
+        "chrome": "{{agent}} 想在它于 Chrome 中打开的标签页里，使用你“{{profile}}”个人资料的登录信息。",
+        "chromeAnyProfile": "{{agent}} 想在它于 Chrome 中打开的标签页里，使用你的 Chrome 登录信息。",
+        "app": "{{agent}} 想使用应用的浏览器与所有会话共用的登录信息。",
+        "background": "{{agent}} 想查看{{app}}的窗口并按下其控件，但不把它带到最前面。",
+        "foreground": "{{agent}} 想把{{app}}带到最前面，并在其中使用键盘和指针。移动鼠标或打字会让它暂停。",
+        "dialog": "{{agent}} 想在{{app}}打开的对话框中做出选择。"
+      },
+      "scope": "“允许一次”持续到 {{agent}} 用完或本轮结束；“在此会话中允许”持续到会话结束或你将其结束。",
+      "mayActivate": {
+        "browser": "页面可能会因点按而把 Chrome 带到最前面。",
+        "app": "{{app}}可能会因操作而来到最前面。"
+      },
+      "ended": {
+        "agent-finished": "{{agent}} 用完后已结束",
+        "turn-ended": "本轮结束时已结束",
+        "session-closed": "会话关闭时已结束",
+        "stopped": "你停止后已结束",
+        "takeover": "你接管后已结束",
+        "user-ended": "已由你结束",
+        "denied": "已结束",
+        "policy-changed": "会话权限更改时已结束",
+        "access-revoked": "代理连接关闭时已结束",
+        "deadline": "到达时限后已结束",
+        "backend-lost": "连接中断时已结束",
+        "tab-closed": "标签页关闭时已结束",
+        "application-quit": "应用退出时已结束"
+      },
+      "end": "结束",
+      "endNamed": "结束：{{question}}",
+      "endFailed": "无法结束。"
+    }
   },
   "panels": {
     "sessionPage": "新建会话",
@@ -392,6 +585,139 @@
       "used": "{{window}}已用 {{share}}",
       "reached": "{{window}}已用尽",
       "open": "显示账户"
+    }
+  },
+  "browser": {
+    "setting": {
+      "label": "浏览器使用",
+      "detail": "代理在应用自带的浏览器中浏览；连接 Chrome 后，也可在其中浏览。"
+    },
+    "app": {
+      "name": "应用的浏览器",
+      "line": "其登录信息，所有会话共用",
+      "clear": "清除登录信息",
+      "cleared": "已清除"
+    },
+    "failed": "未能完成。",
+    "panel": {
+      "back": "后退",
+      "forward": "前进",
+      "reload": "重新载入",
+      "stopLoading": "停止载入",
+      "openChrome": "在 Chrome 中打开",
+      "preview": "网页预览",
+      "blank": "空白标签页",
+      "loading": "正在载入…",
+      "cantReach": "无法访问 {{host}}",
+      "error": {
+        "unreachable": "服务器没有响应。",
+        "timed-out": "响应超时。",
+        "certificate": "它的证书无效。",
+        "blocked": "应用不打开此页面。"
+      },
+      "tryAgain": "重试",
+      "acting": "“{{session}}”正在操作",
+      "stop": "停止",
+      "control": "由你控制",
+      "handBack": "交还",
+      "waiting": "正在等待你在“{{session}}”中回应",
+      "show": "显示",
+      "closed": "此标签页已关闭。",
+      "inUse": "“{{session}}”正在使用",
+      "previewLabel": "预览 · 不可交互",
+      "age": {
+        "seconds": "{{count}} 秒前",
+        "minutes": "{{count}} 分钟前",
+        "hours": "{{count}} 小时前"
+      },
+      "actingIn": "“{{session}}”正在 {{browser}} 中操作",
+      "browserName": {
+        "embedded": "应用的浏览器",
+        "chrome": "Chrome"
+      }
+    },
+    "chrome": {
+      "line": "通过其扩展使用你的登录信息",
+      "connected": "已连接",
+      "connect": "连接",
+      "disconnect": "断开连接",
+      "tooOld": "需要 {{version}} 或更高版本",
+      "profileLine": "“{{profile}}”个人资料，含其登录信息",
+      "connecting": "正在连接",
+      "loadExtension": "请保持设置标签页打开。在该 Chrome 窗口中选择“扩展程序 → 管理扩展程序”，开启“开发者模式”，再选择“加载已解压的扩展程序”，然后按 ⌘⇧G 并粘贴文件夹路径。",
+      "copyExtensionFolder": "复制文件夹路径",
+      "folderCopied": "已复制",
+      "waiting": "正在等待 Chrome",
+      "unavailable": "不可用",
+      "notInstalled": "未安装"
+    },
+    "notice": {
+      "connectTitle": "浏览器使用需要连接 Chrome",
+      "connectDetail": "Chrome 尚未连接。请先连接，然后再请代理试一次。"
+    }
+  },
+  "computer": {
+    "setting": {
+      "label": "计算机使用",
+      "detail": "macOS 允许代理在其他应用中查看和执行的操作。"
+    },
+    "permission": {
+      "accessibility": {
+        "name": "辅助功能",
+        "line": "读取并按下其他应用的控件",
+        "missing": "macOS 尚未允许本应用读取并按下其他应用的控件。"
+      },
+      "screen-recording": {
+        "name": "屏幕录制",
+        "line": "查看其他应用的窗口",
+        "missing": "macOS 尚未允许本应用查看其他应用的窗口。"
+      },
+      "input-monitoring": {
+        "name": "输入监控",
+        "line": "察觉你何时接管鼠标和键盘",
+        "missing": "macOS 尚未允许本应用察觉你何时接管鼠标和键盘。"
+      }
+    },
+    "state": {
+      "granted": "已允许",
+      "restart-required": "重启后生效",
+      "unavailable": "不可用"
+    },
+    "open": "打开系统设置",
+    "restart": "重启辅助程序",
+    "notice": {
+      "needs": "计算机使用需要“{{permission}}”权限",
+      "detail": "{{missing}}{{then}}",
+      "allowThen": "请在“系统设置”中允许，然后再请代理试一次。",
+      "restartTitle": "计算机使用需要重启应用的辅助程序",
+      "restartBody": "你允许的权限会在它重启后生效。"
+    },
+    "failed": "未能完成。",
+    "appName": "“{{name}}”",
+    "stop": "停止",
+    "handBack": "交还",
+    "preview": {
+      "label": "预览 · 不可交互",
+      "seconds": "{{count}} 秒前",
+      "minutes": "{{count}} 分钟前",
+      "hours": "{{count}} 小时前",
+      "switch": "切换到{{name}}",
+      "acting": "“{{session}}”正在{{name}}中操作",
+      "control": "{{name}}由你控制",
+      "loading": "正在载入预览…",
+      "needsScreenRecording": "显示{{name}}需要“屏幕录制”权限",
+      "quit": "{{name}}已退出",
+      "connectionLost": "与应用的辅助程序的连接已中断",
+      "cannotShow": "现在无法显示此窗口",
+      "alt": "“{{name}}”的窗口",
+      "inUse": "“{{session}}”正在使用"
+    },
+    "control": {
+      "using": "“{{session}}”正在使用{{name}}",
+      "user": "{{name}}由你控制",
+      "cameForward": "{{name}}来到了最前面",
+      "secureInput": "密码输入框占用键盘时已暂停",
+      "shortcut": "⌃⌥⌘."
     }
   }
 }

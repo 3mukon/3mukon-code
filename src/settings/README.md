@@ -20,6 +20,7 @@ tags: []
 ## Not responsible for
 
 - Applying the appearance and the main process's language: the app module sets macOS's appearance for the app (`nativeTheme`), which the page and macOS's own panels follow, and picks its translator's language, as the settings change.
+- The settings other modules own, such as browser and computer use, which the app module puts after this module's own as the panel's children.
 - Where the settings show: the app module opens them in a panel of the panels module, with ⌘, or the gear just after the archived sessions' button in the title bar.
 - Taking a change from the window: the app module's bridge accepts one field by field, each to its choices, and refuses any other (`settingsChange` in `src/app/main/bridge.ts`), so a new setting needs its field there as well.
 - Settings for sessions, which their pages hold (the sessions module); the app has no default permission mode or sandbox level.

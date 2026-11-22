@@ -5,7 +5,7 @@ export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type Sharing = 'none' | 'app' | 'global';
 export type Delivery = 'background' | 'foreground';
-export type BrowserKind = 'embedded' | 'chrome' | 'safari';
+export type BrowserKind = 'embedded' | 'chrome';
 export type OperationKind =
   'browser-tab' | 'application-background' | 'application-foreground' | 'system-dialog';
 export interface AutomationPolicy {
@@ -25,6 +25,8 @@ export interface TargetSummary {
   ref: TargetRef;
   owner: string;
   name: string;
+  applicationName?: string;
+  application?: TargetRef;
   iconId?: string;
   address?: string;
   sharing?: Sharing;
@@ -55,20 +57,7 @@ export interface FrameSummary extends Omit<Frame, 'image'> {
   mediaType: MessageImage['mediaType'];
 }
 export type SetupRequirement =
-  | {
-      kind: 'browser';
-      browser: 'chrome' | 'safari';
-      profile: ProfileSummary | null;
-      step: 'install-extension' | 'enable-extension' | 'connect';
-      role?: SafariExtensionSetup['role'];
-    }
-  | {
-      kind: 'site-access';
-      browser: 'safari';
-      profile: ProfileSummary;
-      role: SafariExtensionSetup['role'];
-      origin: string;
-    }
+  | { kind: 'browser'; browser: 'chrome'; step: 'connect' }
   | { kind: 'permission'; permission: 'accessibility' | 'screen-recording' | 'input-monitoring' }
   | { kind: 'restart-helper' };
 export type RefusalDetail =
@@ -80,6 +69,7 @@ export type RefusalDetail =
   | { kind: 'setup'; requirement: SetupRequirement }
   | { kind: 'availability'; reason: AvailabilityReason }
   | { kind: 'denial'; message: string }
+  | { kind: 'sandbox'; level: SandboxLevel }
   | {
       kind: 'presentation';
       reason:
@@ -154,7 +144,9 @@ export interface Operation {
   policyEpoch: number;
   state: 'waiting' | 'active' | 'stopping' | 'ended';
   targetMayActivate: boolean;
-  deadline: number;
+  // When the operation ends, counted from when it was allowed; null while it waits for the user's
+  // answer, which has no time limit.
+  deadline: number | null;
 }
 export interface Grant {
   id: string;
@@ -201,6 +193,7 @@ export const AUTOMATION_ACTIVITY_LIMITS = {
   noticeReceipts: 4096,
   incidentsPerCall: 64,
   denialCharacters: 2048,
+  controlLabelCharacters: 100,
 } as const;
 export const AUTOMATION_ICON_LIMITS = {
   mediaType: 'image/png',
@@ -218,14 +211,7 @@ export type AvailabilityReason =
   | { code: 'transport-unsupported'; transport: 'streamable-http' | 'stdio' }
   | { code: 'image-input-unsupported' }
   | { code: 'os-version-unsupported'; minimumVersion: string; installedVersion: string }
-  | {
-      code: 'browser-version-unsupported';
-      browser: 'chrome' | 'safari';
-      minimumVersion: string;
-      installedVersion: string;
-    }
   | { code: 'backend-unavailable'; backend: BrowserKind | 'native' }
-  | { code: 'extension-required' | 'connection-required'; browser: 'chrome' | 'safari' }
   | { code: 'not-probed' };
 export interface Availability {
   tools: 'ready' | 'unavailable' | 'unknown';
@@ -276,6 +262,11 @@ export interface AutomationCallReceipt {
   schemaVersion: 1;
   callId: string;
 }
+export type BrowserActionSummary = { kind: 'click' | 'type'; label?: string } | { kind: 'scroll' };
+export type ComputerActionSummary =
+  | { kind: 'click' | 'type' | 'scroll'; label?: string }
+  | { kind: 'point-click' | 'point-scroll' | 'drag' | 'press' }
+  | { kind: 'window'; change: 'raise' | 'minimize' | 'restore' | 'move' | 'resize' };
 interface CallRecordBase {
   callId: string;
   sessionId: string;
@@ -299,12 +290,10 @@ interface CallRecordBase {
 }
 export type AutomationCallRecord = CallRecordBase &
   (
-    | {
-        family: 'browser' | 'computer';
-        target: CallTarget;
-        sharing: Sharing | null;
-        delivery: Delivery;
-      }
+    | ({ target: CallTarget; sharing: Sharing | null; delivery: Delivery } & (
+        | { family: 'browser'; browserAction?: BrowserActionSummary }
+        | { family: 'computer'; computerAction?: ComputerActionSummary }
+      ))
     | { family: 'panel'; presentations: readonly PresentationSummary[] }
   );
 // The panels module owns commands/layout; this leaf carries only the notice sent to the agent.
@@ -319,11 +308,9 @@ export interface ToolsetResult {
   outcome: Outcome;
   frames: readonly Frame[];
   presentationNotices: readonly PresentationNotice[];
+  dialogDismissals?: readonly Extract<ActivityIncident, { kind: 'dialog-dismissed' }>['dialog'][];
 }
 export const previewFailureReasons = [
-  'inactive-tab',
-  'page-binding-unverified',
-  'site-access-required',
   'connection-lost',
   'tab-closed',
   'permission-required',
@@ -336,32 +323,16 @@ export type Preview =
   | { status: 'unavailable'; reason: PreviewFailureReason };
 export type PermissionState =
   'unknown' | 'not-granted' | 'granted' | 'restart-required' | 'unavailable';
-export interface SafariExtensionSetup {
-  role: 'web-control' | 'page-preview';
-  installed: boolean;
-  enabled: boolean;
-  websiteAccess: readonly { origin: string; state: 'ask' | 'allowed' | 'denied' }[];
-}
 export interface SetupSnapshot {
   appProfile: { id: string; canClear: boolean };
   chrome: {
     installedVersion: string | null;
     minimumVersion: string;
-    connection: 'disconnected' | 'connected' | 'unavailable';
-    extension: {
-      state: 'unknown' | 'not-installed' | 'disabled' | 'enabled';
-      version: string | null;
-    };
+    connection: 'disconnected' | 'connecting' | 'connected' | 'waiting' | 'unavailable';
     profile: ProfileSummary | null;
-  };
-  safari: {
-    installedVersion: string | null;
-    minimumVersion: string;
-    profiles: readonly {
-      profile: ProfileSummary;
-      extensions: readonly SafariExtensionSetup[];
-      pageBinding: 'verified' | 'unverified';
-    }[];
+    rememberedProfile?: ProfileSummary | null;
+    profiles?: readonly ProfileSummary[];
+    extensionFolder?: string;
   };
   computer: {
     helperName: string;
@@ -371,6 +342,19 @@ export interface SetupSnapshot {
     restartRequired: boolean;
   };
 }
+export type ControlPauseReason = 'user-input' | 'secure-input';
+
+export type ForegroundControl = {
+  sessionId: string;
+  application: TargetSummary;
+  target: TargetRef;
+  operationId: string;
+  stopShortcut: boolean;
+} & (
+  | { state: 'acting' | 'stopping' | 'came-forward'; pauseReason?: never }
+  | { state: 'paused'; pauseReason: ControlPauseReason }
+);
+
 export interface AutomationLiveState {
   sessionId: string;
   policy: AutomationPolicy;
@@ -381,6 +365,8 @@ export interface AutomationLiveState {
   grants: readonly Grant[];
   pendingApprovals: readonly HostApproval[];
   foregroundOwner: string | null;
+  foregroundControl?: ForegroundControl;
+  pausedTargets?: readonly { target: TargetRef; reason: ControlPauseReason }[];
   availability: Availability;
 }
 export interface AutomationSnapshot extends AutomationLiveState {

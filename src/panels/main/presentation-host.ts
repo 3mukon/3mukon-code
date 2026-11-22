@@ -328,6 +328,25 @@ export class PresentationHost implements PanelExecutor {
     }
     return null;
   }
+
+  showsBrowser(owner: string, presentation: string, tabId: string): boolean {
+    return this.showsContent(owner, presentation, { kind: 'browser', tabId });
+  }
+
+  showsComputer(owner: string, presentation: string, targetId: string): boolean {
+    return this.showsContent(owner, presentation, { kind: 'computer', targetId });
+  }
+
+  private showsContent(owner: string, presentation: string, content: PresentedContent): boolean {
+    const entry = this.entries.get(presentation);
+    return (
+      entry?.owner === owner &&
+      !entry.uncertain &&
+      this.ports.hasOwner(owner) &&
+      entry.items.some((item, index) => sameContent(item, content) && !!entry.state.boxes[index])
+    );
+  }
+
   flushNotices(): void {
     for (const [id, notice] of this.notices) {
       if (

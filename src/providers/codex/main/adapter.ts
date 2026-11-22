@@ -151,15 +151,17 @@ process.on('exit', () => {
 });
 
 // The app-server's settings for the app's toolset (ADR-0023): its address, the variable that holds the
-// session's credential, and its tools allowed without asking. Codex starts no thread while it cannot
-// reach the toolset.
-function toolsetLaunch(name: string, access: ToolsetAccess): Launch {
-  const server = `mcp_servers.${name}`;
+// session's credential, its tools allowed without asking, and how long a call may take, as the toolset
+// says, so that Codex's own limit for a tool call never ends one while the user answers its approval.
+// Codex starts no thread while it cannot reach the toolset.
+function toolsetLaunch(toolset: Toolset, access: ToolsetAccess): Launch {
+  const server = `mcp_servers.${toolset.name}`;
   const settings = [
     `${server}.url=${JSON.stringify(access.url)}`,
     `${server}.bearer_token_env_var=${JSON.stringify(TOOLSET_VARIABLE)}`,
     `${server}.default_tools_approval_mode="approve"`,
     `${server}.required=true`,
+    `${server}.tool_timeout_sec=${String(Math.ceil(toolset.callTimeoutMs / 1000))}`,
   ];
   return {
     args: settings.flatMap((setting) => ['-c', setting]),
@@ -756,7 +758,7 @@ class CodexSession implements ProviderSession {
     this.access?.close();
     this.access = this.toolset.open();
     const provider = name === null || gateway === null ? [] : gatewayLaunchArgs(name, gateway);
-    const transport = toolsetLaunch(this.toolset.name, this.access);
+    const transport = toolsetLaunch(this.toolset, this.access);
     const launch = { ...transport, args: [...transport.args, ...provider] };
     const generation = ++this.generations;
     const rpc = await this.connect(cwd, this.handlers(generation), launch).catch(

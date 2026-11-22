@@ -118,6 +118,7 @@ it.each(['auto', 'yolo'] as const)(
     const linked = vi.fn();
     const bound = {
       name: '3mukon-code',
+      callTimeoutMs: 86_400_000,
       open() {
         const access = {
           url: 'http://127.0.0.1:4000/mcp',
@@ -284,6 +285,7 @@ it.each([
           cwd: '/work',
           toolset: {
             name: '3mukon-code',
+            callTimeoutMs: 86_400_000,
             open: () => ({
               url: 'http://127.0.0.1:4000/mcp',
               credential: 'synthetic',
@@ -349,6 +351,7 @@ it('does not auto-approve bare or foreign names, or infer receipts from their ar
         cwd: '/work',
         toolset: {
           name: '3mukon-code',
+          callTimeoutMs: 86_400_000,
           open: () => ({
             url: 'http://127.0.0.1:4000/mcp',
             credential: 'synthetic',
@@ -406,6 +409,7 @@ it('rejects foreign, conflicting and malformed MCP wrappers without falling back
         cwd: '/work',
         toolset: {
           name: '3mukon-code',
+          callTimeoutMs: 86_400_000,
           open: () => ({
             url: 'http://127.0.0.1:4000/mcp',
             credential: 'synthetic',
@@ -477,6 +481,7 @@ it('uses the Grok-only server name on history load without renaming the shared t
   automationCapabilities = true;
   const toolset = {
     name: '3mukon-code',
+    callTimeoutMs: 86_400_000,
     open: () => ({
       url: 'http://127.0.0.1:4000/mcp',
       credential: 'synthetic',
@@ -521,7 +526,11 @@ it('reports unsupported HTTP without disabling ordinary chat', async () => {
   };
   const { session } = await open((onEvent) =>
     provider.resume(
-      { cwd: '/work', sessionId: 'grok-1', toolset: { name: '3mukon-code', open: () => access } },
+      {
+        cwd: '/work',
+        sessionId: 'grok-1',
+        toolset: { name: '3mukon-code', callTimeoutMs: 86_400_000, open: () => access },
+      },
       onEvent,
     ),
   );

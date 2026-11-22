@@ -12,10 +12,16 @@ afterEach(cleanup);
 describe('PresentationEntry', () => {
   it('records what the session showed, offering Show only while none of its panels is open', () => {
     const onShow = vi.fn(() => Promise.resolve<ShowOutcome>('shown'));
-    const { rerender } = render(<PresentationEntry title="Comparison" open onShow={onShow} />);
-    expect(screen.getByText('Showed Comparison beside this session')).toBeTruthy();
+    const { container, rerender } = render(
+      <PresentationEntry title="Comparison" open onShow={onShow} />,
+    );
+    expect(screen.getByText('Showed Comparison beside this session').className).toContain(
+      'text-ink',
+    );
+    expect(container.querySelector('.lucide-panel-right')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Show' })).toBeNull();
     rerender(<PresentationEntry title="Comparison" open={false} onShow={onShow} />);
+    expect(screen.getByRole('button', { name: 'Show' }).className).toContain('border-line');
     fireEvent.click(screen.getByRole('button', { name: 'Show' }));
     expect(onShow).toHaveBeenCalledTimes(1);
   });

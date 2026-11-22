@@ -271,7 +271,10 @@ describe('trusted automation dispatch', () => {
     const target = tab('a', 'global');
     broker.setPolicy('a', { mode: 'yolo', sandbox: 'read-only' });
     const refused = await call(target.ref);
-    expect(refused.outcome).toMatchObject({ code: 'sandbox-denied' });
+    expect(refused.outcome).toMatchObject({
+      code: 'sandbox-denied',
+      detail: { kind: 'sandbox', level: 'read-only' },
+    });
     expect(broker.record('a', refused.automation.callId)).toMatchObject({
       operationId: null,
       outcome: refused.outcome,
@@ -287,7 +290,7 @@ describe('trusted automation dispatch', () => {
     broker.availability('change', {
       tools: 'unavailable',
       images: 'unknown',
-      reason: { code: 'extension-required', browser: 'chrome' },
+      reason: { code: 'backend-unavailable', backend: 'chrome' },
     });
     const unavailable = await call(target.ref);
     expect(unavailable.outcome).toMatchObject({ code: 'setup-required' });
@@ -333,6 +336,34 @@ describe('trusted automation dispatch', () => {
     broker.answer('a', id, { decision: 'deny' });
     expect((await waiting).outcome).toMatchObject({ code: 'denied' });
     expect(execute).not.toHaveBeenCalled();
+  });
+  it('supplies a browser observation signal only for an active operation on the owned tab', async () => {
+    const { ref } = tab('a', 'global');
+    expect(broker.browserObservationSignal('a', ref)).toBeUndefined();
+    const pending = call(ref, 'observe');
+    await vi.waitFor(() => {
+      expect(broker.snapshot('a').value.pendingApprovals).toHaveLength(1);
+    });
+    expect(broker.browserObservationSignal('a', ref)).toBeUndefined();
+    await approve('a', 'allow-for-session');
+    await pending;
+    const first = required(broker.browserObservationSignal('a', ref));
+    expect(first.aborted).toBe(false);
+    expect(broker.browserObservationSignal('b', ref)).toBeUndefined();
+    expect(
+      broker.browserObservationSignal('a', { ...ref, generation: ref.generation + 1 }),
+    ).toBeUndefined();
+    broker.endTurn('a');
+    expect(first.aborted).toBe(true);
+    expect(broker.snapshot('a').value.grants).toHaveLength(1);
+    broker.beginTurn('a');
+    expect(broker.browserObservationSignal('a', ref)).toBeUndefined();
+    await call(ref, 'observe');
+    const second = required(broker.browserObservationSignal('a', ref));
+    expect(second).not.toBe(first);
+    broker.endGrant('a', required(broker.snapshot('a').value.grants[0]).id);
+    expect(second.aborted).toBe(true);
+    expect(broker.browserObservationSignal('a', ref)).toBeUndefined();
   });
   it('retains ended target summaries without transferring a grant to a replacement', async () => {
     const target = tab('a', 'app');
@@ -407,6 +438,7 @@ describe('trusted automation dispatch', () => {
     ])
       expect((await call(target.ref, 'change', a, undefined, { path })).outcome).toMatchObject({
         code: 'sandbox-denied',
+        detail: { kind: 'sandbox', level: 'workspace-write' },
       });
     expect(
       (
@@ -445,6 +477,35 @@ describe('cancellation and scheduling', () => {
     expect((await waiting).outcome.status).toBe('cancelled-before-dispatch');
     expect(broker.snapshot('a').value.pendingApprovals).toEqual([]);
     expect(execute).not.toHaveBeenCalled();
+  });
+  it('waits for the user’s answer past the call’s deadline, and gives the call its time once allowed', async () => {
+    const target = tab('a', 'global');
+    const waiting = broker.dispatch(
+      a,
+      'change',
+      { target: target.ref },
+      { actionId: 'asked', timeoutMs: 15 },
+    );
+    await vi.waitFor(() => {
+      expect(broker.snapshot('a').value.pendingApprovals).toHaveLength(1);
+    });
+    expect(broker.snapshot('a').value.operations[0]?.deadline).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 45));
+    expect(broker.snapshot('a').value.pendingApprovals).toHaveLength(1);
+    expect(execute).not.toHaveBeenCalled();
+    const slow = deferred<ExecutionResult>();
+    execute.mockImplementationOnce(() => slow.promise);
+    await approve('a', 'allow-once');
+    await vi.waitFor(() => {
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+    expect(broker.snapshot('a').value.operations[0]?.deadline).toBeGreaterThan(Date.now());
+    expect((await waiting).outcome).toEqual({
+      status: 'indeterminate',
+      reason: 'timeout',
+      exclusionHeld: true,
+    });
+    slow.resolve(result());
   });
   it('holds the target lane after timeout until actual backend settlement, without replay', async () => {
     const target = tab();
@@ -673,13 +734,7 @@ describe('activity contracts', () => {
     };
   }
   it('returns the per-call setup requirement without leaving a settled session waiting for setup', async () => {
-    const requirement: SetupRequirement = {
-      kind: 'site-access',
-      browser: 'safari',
-      profile: { id: 'fixture', name: 'Synthetic profile' },
-      role: 'page-preview',
-      origin: 'http://127.0.0.1',
-    };
+    const requirement: SetupRequirement = { kind: 'browser', browser: 'chrome', step: 'connect' };
     const setup = new AutomationBroker([
       tool('setup_fixture', { effect: 'metadata', operation: null, setup: requirement }),
     ]);

@@ -241,6 +241,7 @@ class FakeToolset implements Toolset {
   readonly result = vi.fn();
   readonly availability = vi.fn();
   readonly name = '3mukon-code';
+  readonly callTimeoutMs = 86_400_000;
   readonly opened: { access: ToolsetAccess; closed: boolean }[] = [];
 
   open(): ToolsetAccess {
@@ -647,6 +648,7 @@ describe('the Codex provider', () => {
         `${server}.bearer_token_env_var="TOOLSET_3MUKON_CODE_TOKEN"`,
         `${server}.default_tools_approval_mode="approve"`,
         `${server}.required=true`,
+        `${server}.tool_timeout_sec=86400`,
       ].flatMap((setting) => ['-c', setting]),
       env: { TOOLSET_3MUKON_CODE_TOKEN: 'credential-1' },
     });

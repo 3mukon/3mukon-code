@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown } from '../../ui/renderer/icons';
+import { addCover } from '../../ui/renderer/cover';
 import { Select, type SelectOption } from '../../ui/renderer/select';
 
 // One of a session page's settings: a choice, or text for what the page cannot choose, such as a
@@ -19,6 +20,14 @@ export function SessionSettings({ settings }: { settings: Setting[] }) {
   const row = useRef<HTMLDivElement>(null);
   const [fits, setFits] = useState(true);
   const dropdown = useId();
+  // While the dropdown shows, it lies over whatever is under it, a web page in a panel included.
+  const uncover = useRef<(() => void) | null>(null);
+  useLayoutEffect(
+    () => () => {
+      uncover.current?.();
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
     const [areaElement, rowElement] = [area.current, row.current];
@@ -67,6 +76,10 @@ export function SessionSettings({ settings }: { settings: Setting[] }) {
           <div
             id={dropdown}
             popover="auto"
+            onToggle={(event) => {
+              uncover.current?.();
+              uncover.current = event.newState === 'open' ? addCover(event.currentTarget) : null;
+            }}
             role="group"
             aria-label={t('sessions.page.settings')}
             className="inset-auto m-0 mb-1 w-max max-w-[calc(100vw-16px)] rounded-md border border-dashed border-menu-line paper px-2 py-1.5 [position-area:top_span-right] [position-try-fallbacks:flip-block,flip-inline,flip-block_flip-inline]"

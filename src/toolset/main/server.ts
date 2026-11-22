@@ -12,11 +12,22 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { SessionAutomationHost, ToolsetAccess } from '../../sessions/main/provider';
+import type { HostApproval } from '../../sessions/shared/automation';
 import { AutomationBroker, type BrokerAccess } from './broker';
 import { MAX_ARGUMENT_BYTES, type AutomationTool } from './execution';
 
 export const TOOLSET_NAME = '3mukon-code';
+// How long the providers are told to wait on one of the toolset's calls: a day, which an approval
+// waiting for the user's answer needs and the backends' own deadlines never come near.
+export const TOOLSET_CALL_TIMEOUT_MS = 24 * 60 * 60_000;
 const PATH = '/mcp';
+const instructions = [
+  'Use browser tools for websites and computer tools for native apps.',
+  "Prefer the app's own browser, with sharing none for public pages or isolated work and app for the shared app profile's sign-ins. Use global for the connected Chrome profile. Respect the user's requested browser and ask if it is unavailable.",
+  'Keep work in the background by default. Use panel tools when the user needs to inspect, compare, decide, or take over.',
+  'In auto mode the app requests approval once per operation on a shared or native target. Group related actions on that target within the same turn. A session grant applies to later operations on that target until it ends.',
+  'Respect setup requirements, refusals and stopped operations. Ask before broadening sharing or switching identities after a refusal.',
+].join(' ');
 export interface RunningToolset {
   readonly name: string;
   readonly broker: AutomationBroker;
@@ -29,11 +40,13 @@ export interface RunningToolset {
 export async function startToolset({
   version,
   tools = [],
+  onOwnerClosed,
   onOwnerRemoved,
   onDeliveryOpportunity,
 }: {
   version: string;
   tools?: readonly AutomationTool[];
+  onOwnerClosed?: (id: string) => Promise<void>;
   onOwnerRemoved?: (id: string) => void;
   onDeliveryOpportunity?: () => void;
 }): Promise<RunningToolset> {
@@ -132,6 +145,7 @@ export async function startToolset({
       return {
         toolset: {
           name: TOOLSET_NAME,
+          callTimeoutMs: TOOLSET_CALL_TIMEOUT_MS,
           open: () => {
             if (!active()) throw new Error('access-revoked');
             return open(id);
@@ -161,8 +175,27 @@ export async function startToolset({
           binding.active = false;
           forgetOwner(id);
           await broker.closeOwner(id, remove);
+          if (owns()) {
+            try {
+              await onOwnerClosed?.(id);
+            } catch {
+              console.error('Session resource cleanup failed.');
+            }
+          }
           if (remove) onOwnerRemoved?.(id);
           if (remove && owns()) bindings.delete(id);
+        },
+        onWaiting(listener) {
+          let since = oldestRequest(broker.snapshot(id).value.pendingApprovals);
+          const stop = broker.subscribe(id, (envelope) => {
+            if (envelope.value.kind !== 'state') return;
+            const now = oldestRequest(envelope.value.state.pendingApprovals);
+            if (now === since) return;
+            since = now;
+            listener(since);
+          });
+          listener(since);
+          return stop;
         },
         prepareSend() {
           if (!active()) throw new Error('access-revoked');
@@ -213,7 +246,7 @@ export async function startToolset({
       reply(response, 405, 'This toolset takes POST requests only.');
       return;
     }
-    const mcp = new McpServer({ name: TOOLSET_NAME, version });
+    const mcp = new McpServer({ name: TOOLSET_NAME, version }, { instructions });
     mcp.server.registerCapabilities({ tools: {} });
     mcp.server.setRequestHandler(ListToolsRequestSchema, () => {
       broker.discovered(access);
@@ -263,6 +296,7 @@ export async function startToolset({
           outcome: result.outcome,
           presentationNotices: result.presentationNotices,
           frames,
+          ...(result.dialogDismissals ? { dialogDismissals: result.dialogDismissals } : {}),
         };
         return {
           content: [
@@ -333,4 +367,13 @@ function reply(response: ServerResponse, status: number, message: string): void 
   response.statusCode = status;
   response.setHeader('Content-Type', 'application/json');
   response.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message }, id: null }));
+}
+
+// When the oldest of these approvals was asked for, or undefined where there is none.
+function oldestRequest(approvals: readonly HostApproval[]): number | undefined {
+  return approvals.reduce<number | undefined>(
+    (first, approval) =>
+      first === undefined || approval.requestedAt < first ? approval.requestedAt : first,
+    undefined,
+  );
 }

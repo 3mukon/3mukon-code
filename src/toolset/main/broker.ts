@@ -9,9 +9,11 @@ import type {
   AutomationSnapshot,
   Availability,
   AutomationCallReceipt,
+  ControlPauseReason,
   EndReason,
   Envelope,
   FailureCode,
+  ForegroundControl,
   Grant,
   GrantEndRecord,
   HostApproval,
@@ -68,7 +70,8 @@ interface BoundAccess {
 interface PendingOperation {
   fact: Operation;
   controller: AbortController;
-  timer: ReturnType<typeof setTimeout>;
+  // Runs out the operation's deadline once it is allowed; none while it waits for the user.
+  timer?: ReturnType<typeof setTimeout>;
   permission: Promise<boolean>;
   resolve: (allowed: boolean) => void;
   approval?: HostApproval;
@@ -79,6 +82,8 @@ interface PendingOperation {
 interface Work {
   callId: string;
   controller: AbortController;
+  // The call's deadline, held while the call waits for the user's answer to its approval.
+  deadline: { arm(): void; hold(): void };
   generation: number;
   turn: string;
   target?: TargetRef;
@@ -103,7 +108,7 @@ interface Owner {
   ends: GrantEndRecord[];
   actions: Map<string, { hash: string; callId: string; evictable: boolean }>;
   calls: Set<Work>;
-  paused: Set<string>;
+  paused: Map<string, ControlPauseReason>;
 }
 
 export class AutomationBroker {
@@ -116,6 +121,9 @@ export class AutomationBroker {
   private readonly scheduler = new Scheduler();
   private readonly tools = new Map<string, AutomationTool>();
   private foreground: string | null = null;
+  private control: ForegroundControl | undefined;
+  private readonly controlListeners = new Set<(control: ForegroundControl | undefined) => void>();
+  private stopShortcut = false;
   private closed = false;
   constructor(
     tools: readonly AutomationTool[] = [],
@@ -183,7 +191,7 @@ export class AutomationBroker {
       ends: [],
       actions: new Map(),
       calls: new Set(),
-      paused: new Set(),
+      paused: new Map(),
     };
     this.owners.set(id, owner);
     this.state(owner);
@@ -247,6 +255,12 @@ export class AutomationBroker {
   }
   stop(id: string, reason: EndReason = 'stopped'): void {
     const owner = this.owner(id);
+    if (this.control?.sessionId === id) {
+      if (this.control.state === 'paused') {
+        owner.paused.delete(this.control.application.ref.id);
+        this.setControl(undefined);
+      }
+    }
     for (const work of owner.calls) work.controller.abort(reason);
     for (const op of [...owner.operations.values()]) this.finishOperation(owner, op, reason);
     this.state(owner);
@@ -268,21 +282,55 @@ export class AutomationBroker {
   observation(id: string, ref: TargetRef): string {
     return this.resources.observe(id, ref);
   }
+  browserObservationSignal(id: string, ref: TargetRef): AbortSignal | undefined {
+    const owner = this.owners.get(id);
+    if (
+      this.closed ||
+      !owner?.open ||
+      ref.kind !== 'browser-tab' ||
+      owner.paused.has(ref.id) ||
+      !this.resources.resolve(id, ref)
+    )
+      return;
+    return [...owner.operations.values()].find(
+      ({ fact, controller }) =>
+        fact.kind === 'browser-tab' &&
+        fact.state === 'active' &&
+        fact.target.id === ref.id &&
+        fact.target.generation === ref.generation &&
+        fact.turn === owner.turn &&
+        fact.accessGeneration === owner.generation &&
+        fact.policyEpoch === owner.policyEpoch &&
+        fact.deadline !== null &&
+        fact.deadline > this.now() &&
+        !controller.signal.aborted,
+    )?.controller.signal;
+  }
   targetChanged(id: string, ref: TargetRef, kind: 'document' | 'geometry'): void {
     this.resources.changed(id, ref, kind);
+  }
+  describeBrowserTab(id: string, ref: TargetRef, name: string, address: string | null): void {
+    if (this.resources.describeBrowserTab(id, ref, name, address)) this.state(this.owner(id));
   }
   async targetEnded(
     id: string,
     ref: TargetRef,
     reason: 'tab-closed' | 'application-quit' | 'backend-lost',
+    reportedBy?: string,
   ): Promise<void> {
     const owner = this.owner(id);
     const removed = this.resources.remove(id, ref);
     const ids = new Set(removed.map((r) => r.target.ref.id));
+    if (
+      this.control &&
+      (ids.has(this.control.application.ref.id) || ids.has(this.control.target.id))
+    )
+      this.setControl(undefined);
     for (const work of owner.calls)
-      if (work.target && ids.has(work.target.id)) work.controller.abort(reason);
+      if (work.target && ids.has(work.target.id) && work.callId !== reportedBy)
+        work.controller.abort(reason);
     for (const op of [...owner.operations.values()])
-      if (ids.has(op.fact.target.id)) this.finishOperation(owner, op, reason);
+      if (ids.has(op.fact.target.id)) this.finishOperation(owner, op, reason, reportedBy);
     for (const grant of [...owner.grants.values()])
       if (ids.has(grant.target.ref.id)) this.finishGrant(owner, grant, reason);
     for (const r of removed) owner.paused.delete(r.target.ref.id);
@@ -300,24 +348,47 @@ export class AutomationBroker {
         .map((target) => this.targetEnded(target.owner, target.ref, 'backend-lost')),
     );
   }
-  takeover(id: string, target: TargetRef): Outcome<null> {
+  takeover(
+    id: string,
+    target: TargetRef,
+    source: 'human' | 'unclassified-input' = 'human',
+  ): Outcome<null> {
+    return this.pause(id, target, 'user-input', source);
+  }
+  pauseForSecureInput(id: string, target: TargetRef): Outcome<null> {
+    return this.pause(id, target, 'secure-input');
+  }
+  private pause(
+    id: string,
+    target: TargetRef,
+    reason: ControlPauseReason,
+    source?: 'human' | 'unclassified-input',
+  ): Outcome<null> {
     const failure = this.resources.failure(id, target);
     if (failure) return refuse(failure);
     const owner = this.owner(id);
     const root = this.resources.resolve(id, target)?.application ?? target;
-    owner.paused.add(root.id);
+    if (owner.paused.get(root.id) === 'secure-input') return refuse('target-paused');
+    owner.paused.set(root.id, reason);
+    const control = this.control;
+    if (control?.sessionId === id && control.application.ref.id === root.id) {
+      if (control.state === 'came-forward') this.setControl(undefined);
+      else this.setControl({ ...control, state: 'paused', pauseReason: reason });
+    }
     for (const op of [...owner.operations.values()]) {
       if (op.fact.target.id !== root.id) continue;
-      const incident: ActivityIncident = {
-        kind: 'takeover',
-        at: this.now(),
-        operationId: op.fact.id,
-        target: { ...target },
-        source: 'human',
-      };
-      const call = owner.activity.list().findLast((record) => record.operationId === op.fact.id);
-      if (call) this.recordIncident(id, call.callId, incident);
-      this.finishOperation(owner, op, 'takeover');
+      if (source) {
+        const call = owner.activity.list().findLast((record) => record.operationId === op.fact.id);
+        if (call)
+          this.recordIncident(id, call.callId, {
+            kind: 'takeover',
+            at: this.now(),
+            operationId: op.fact.id,
+            target: { ...target },
+            source,
+          });
+      }
+      this.finishOperation(owner, op, reason === 'secure-input' ? 'stopped' : 'takeover');
     }
     this.state(owner);
     return okay();
@@ -325,8 +396,17 @@ export class AutomationBroker {
   handBack(id: string, target: TargetRef): Outcome<null> {
     const failure = this.resources.failure(id, target);
     if (failure) return refuse(failure);
-    this.owner(id).paused.delete((this.resources.resolve(id, target)?.application ?? target).id);
-    this.state(this.owner(id));
+    const root = this.resources.resolve(id, target)?.application ?? target;
+    const owner = this.owner(id);
+    if (owner.paused.get(root.id) === 'secure-input') return refuse('target-paused');
+    if (
+      this.control?.sessionId === id &&
+      this.control.application.ref.id === root.id &&
+      this.control.state === 'paused'
+    )
+      this.setControl(undefined);
+    owner.paused.delete(root.id);
+    this.state(owner);
     return okay();
   }
   endOperation(id: string, operationId: string): Outcome<null> {
@@ -335,6 +415,46 @@ export class AutomationBroker {
     if (!op) return refuse('not-found');
     this.finishOperation(owner, op, 'user-ended');
     return okay();
+  }
+  finishApplicationOperations(id: string, target: TargetRef): Outcome<null> {
+    const failure = this.resources.failure(id, target);
+    if (failure) return refuse(failure);
+    if (target.kind !== 'application') return refuse('invalid-request');
+    const owner = this.owner(id);
+    for (const operation of [...owner.operations.values()]) {
+      if (operation.fact.target.id === target.id)
+        this.finishOperation(owner, operation, 'agent-finished');
+    }
+    return okay();
+  }
+  configureStopShortcut(available: boolean): void {
+    this.stopShortcut = available;
+  }
+  foregroundSession(): string | null {
+    return this.foreground ?? this.control?.sessionId ?? null;
+  }
+  stopForeground(): void {
+    const id = this.foregroundSession();
+    if (id && this.hasOwner(id)) this.stop(id);
+  }
+  subscribeForegroundControl(
+    listener: (control: ForegroundControl | undefined) => void,
+  ): () => void {
+    this.controlListeners.add(listener);
+    listener(this.control && structuredClone(this.control));
+    return () => {
+      this.controlListeners.delete(listener);
+    };
+  }
+  private setControl(control: ForegroundControl | undefined): void {
+    this.control = control;
+    for (const listener of this.controlListeners) {
+      try {
+        listener(control && structuredClone(control));
+      } catch {
+        console.error('A foreground control listener failed.');
+      }
+    }
   }
   endGrant(id: string, grantId: string): Outcome<null> {
     const owner = this.owner(id);
@@ -382,6 +502,7 @@ export class AutomationBroker {
       op.grantId = grant.id;
       owner.activity.approvalAnswered(requestId, answer, at, grant.id);
       op.fact.state = 'active';
+      this.startDeadline(owner, op);
       op.resolve(true);
     }
     this.emit(id, { kind: 'approval-answered', id: requestId, at, answer });
@@ -463,6 +584,11 @@ export class AutomationBroker {
   }
   private liveState(owner: Owner): AutomationLiveState {
     const operations = [...owner.operations.values()].map((op) => structuredClone(op.fact));
+    const resources = this.resources.list(owner.id);
+    const pausedTargets = resources.flatMap(({ ref }) => {
+      const reason = owner.paused.get(ref.id);
+      return reason ? [{ target: ref, reason }] : [];
+    });
     const phase = operations.some((op) => op.state === 'stopping')
       ? 'stopping'
       : [...owner.operations.values()].some((op) => op.approval)
@@ -477,13 +603,17 @@ export class AutomationBroker {
       policy: { ...owner.policy },
       policyEpoch: owner.policyEpoch,
       phase,
-      resources: this.resources.list(owner.id),
+      resources,
       operations,
       grants: structuredClone([...owner.grants.values()]),
       pendingApprovals: [...owner.operations.values()].flatMap((op) =>
         op.approval ? [structuredClone(op.approval)] : [],
       ),
       foregroundOwner: this.foreground,
+      ...(this.control?.sessionId === owner.id
+        ? { foregroundControl: structuredClone(this.control) }
+        : {}),
+      ...(pausedTargets.length ? { pausedTargets } : {}),
       availability: { ...owner.providerAvailability, images: owner.imageInput },
     };
   }
@@ -553,6 +683,28 @@ export class AutomationBroker {
     if (!tool) throw new Error('Unknown tool.');
     const record = owner.activity.start(access.generation, owner.turn, name, tool.family);
     const finish = (outcome: Outcome) => owner.activity.settle(record.callId, outcome);
+    let request: { key: string; args: Record<string, unknown>; plan: ExecutionPlan } | undefined;
+    let invalidInput = refuse('invalid-request');
+    try {
+      const key = requestKey(input);
+      if (Buffer.byteLength(key, 'utf8') > (tool.maxArgumentBytes ?? DEFAULT_ARGUMENT_BYTES)) {
+        invalidInput = refuse('limit-exceeded');
+      } else {
+        const args = tool.inputSchema.parse(JSON.parse(key));
+        request = { key, args, plan: tool.plan(args, owner.id) };
+      }
+    } catch {
+      // Keep the argument refusal if the caller's turn and action ID are valid.
+    }
+    if (request) {
+      const { plan } = request;
+      const resource = plan.target && this.resources.resolve(owner.id, plan.target);
+      const keepLabel =
+        !!resource &&
+        !!plan.observationId &&
+        this.resources.current(owner.id, resource.target.ref, plan.observationId);
+      owner.activity.describe(record.callId, resource?.target, plan.delivery, plan, keepLabel);
+    }
     if (owner.calls.size >= 32) return finish(refuse('limit-exceeded'));
     if (!owner.turn) return finish(refuse('turn-inactive'));
     const actionId = options.actionId;
@@ -572,22 +724,8 @@ export class AutomationBroker {
         }),
       );
     }
-    let key: string;
-    let args: Record<string, unknown>;
-    let plan: ExecutionPlan;
-    try {
-      key = requestKey(input);
-      if (Buffer.byteLength(key, 'utf8') > (tool.maxArgumentBytes ?? DEFAULT_ARGUMENT_BYTES))
-        return finish(refuse('limit-exceeded'));
-      args = tool.inputSchema.parse(JSON.parse(key));
-      plan = tool.plan(args);
-    } catch {
-      return finish(refuse('invalid-request'));
-    }
-    if (plan.target) {
-      const resource = this.resources.resolve(owner.id, plan.target);
-      if (resource) owner.activity.target(record.callId, resource.target, plan.delivery);
-    }
+    if (!request) return finish(invalidInput);
+    const { key, args, plan } = request;
     const hash = createHash('sha256').update(name).update('\0').update(key).digest('hex');
     const previous = owner.actions.get(actionId);
     if (previous) {
@@ -596,8 +734,14 @@ export class AutomationBroker {
       if (!known || known.framesState === 'evicted') return finish(refuse('result-expired'));
       const retained = owner.activity.frames(previous.callId);
       if (retained.status !== 'verified') return finish(refuse('result-expired'));
-      if (known.family !== 'panel' && known.target.state === 'resolved')
-        owner.activity.target(record.callId, known.target.summary, known.delivery);
+      if (known.family !== 'panel')
+        owner.activity.describe(
+          record.callId,
+          known.target.state === 'resolved' ? known.target.summary : undefined,
+          known.delivery,
+          known,
+          true,
+        );
       return owner.activity.settle(
         record.callId,
         known.outcome ??
@@ -616,9 +760,25 @@ export class AutomationBroker {
     const action = { hash, callId: record.callId, evictable: false };
     owner.actions.set(actionId, action);
     const controller = new AbortController();
+    const timeout = Math.max(1, Math.min(options.timeoutMs ?? CALL_TIMEOUT, CALL_TIMEOUT));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = {
+      arm: () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          controller.abort('deadline');
+        }, timeout);
+        timer.unref();
+      },
+      hold: () => {
+        clearTimeout(timer);
+        timer = undefined;
+      },
+    };
     const work: Work = {
       callId: record.callId,
       controller,
+      deadline,
       generation: access.generation,
       turn: owner.turn,
       ...(plan.target ? { target: { ...plan.target } } : {}),
@@ -631,25 +791,22 @@ export class AutomationBroker {
     };
     options.signal?.addEventListener('abort', cancelFromRequest, { once: true });
     if (options.signal?.aborted) cancelFromRequest();
-    const timeout = Math.max(1, Math.min(options.timeoutMs ?? CALL_TIMEOUT, CALL_TIMEOUT));
-    const timer = setTimeout(() => {
-      controller.abort('deadline');
-    }, timeout);
-    timer.unref();
+    deadline.arm();
     try {
+      // Policy changes abort in-flight work. Bind the refusal detail to the policy that ran it.
+      const sandbox = owner.policy.sandbox;
       const result = await this.perform(owner, access, tool, args, plan, work);
+      const outcome: Outcome =
+        result.outcome.status === 'refused' && result.outcome.code === 'sandbox-denied'
+          ? { ...result.outcome, detail: { kind: 'sandbox', level: sandbox } }
+          : result.outcome;
       // Recent settled requests are a rolling replay window. Running and uncertain effects stay
       // pinned even if their activity record expires; reconnecting must not repeat those effects.
       action.evictable =
-        result.outcome.status === 'verified' ||
-        result.outcome.status === 'refused' ||
-        result.outcome.status === 'cancelled-before-dispatch';
-      return owner.activity.settle(
-        record.callId,
-        result.outcome,
-        result.frames,
-        result.presentations,
-      );
+        outcome.status === 'verified' ||
+        outcome.status === 'refused' ||
+        outcome.status === 'cancelled-before-dispatch';
+      return owner.activity.settle(record.callId, outcome, result.frames, result.presentations);
     } finally {
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', cancelFromRequest);
@@ -671,7 +828,6 @@ export class AutomationBroker {
     if (failure) return { outcome: failure };
     if (aborted()) return { outcome: cancelled() };
     const resource = plan.target && this.resources.resolve(owner.id, plan.target);
-    if (resource) owner.activity.target(work.callId, resource.target, plan.delivery);
     const files = await checkFiles(
       owner.policy,
       owner.scope,
@@ -696,6 +852,7 @@ export class AutomationBroker {
         authorizationTarget,
         plan.operation,
         work.callId,
+        plan.browserAddress,
       );
       const stopWithOperation = () => {
         work.controller.abort(work.operation?.controller.signal.reason);
@@ -704,7 +861,12 @@ export class AutomationBroker {
       op.controller.signal.addEventListener('abort', stopWithOperation, { once: true });
       if (op.controller.signal.aborted) stopWithOperation();
       owner.activity.phase(work.callId, 'waiting', op.fact.id, op.grantId ?? null);
+      // Waiting for the user's answer takes none of the call's time: an approval waits until the
+      // user answers it, or the operation, the turn or the call is otherwise ended.
+      const asking = op.fact.state === 'waiting';
+      if (asking) work.deadline.hold();
       const allowed = await untilAbort(op.permission, work.controller.signal, () => false);
+      if (asking) work.deadline.arm();
       op.controller.signal.removeEventListener('abort', stopWithOperation);
       if (!allowed)
         return {
@@ -726,7 +888,9 @@ export class AutomationBroker {
       ? this.resources.resolve(owner.id, resource.application)
       : resource;
     const keys = [
-      ...(mutates && lane ? [`target:${lane.backend}:${lane.key}`] : []),
+      ...((mutates || plan.operation === 'browser-tab') && lane
+        ? [`target:${lane.backend}:${lane.key}`]
+        : []),
       ...(desktop ? ['desktop'] : []),
     ];
     const release = await this.scheduler.acquire(keys, work.controller.signal);
@@ -760,13 +924,19 @@ export class AutomationBroker {
       work.operation?.fact.id ?? null,
       work.operation?.grantId ?? null,
     );
-    if (foreground) this.foreground = owner.id;
+    const nativeApplication =
+      lane?.kind === 'application' && lane.backend === 'native' ? lane.target : undefined;
+    if (foreground) {
+      this.foreground = owner.id;
+      if (nativeApplication) this.showControl(owner, work, nativeApplication, 'acting');
+    }
     this.state(owner);
     // Subscribers can stop synchronously while the dispatch event is emitted.
     if (aborted()) {
       work.dispatched = false;
       release();
       if (foreground && this.foreground === owner.id) this.foreground = null;
+      this.settleControl(owner, work, foreground);
       return { outcome: cancelled() };
     }
     let running: Promise<ExecutionResult>;
@@ -785,10 +955,23 @@ export class AutomationBroker {
           };
           if (fact.kind === 'secure-input') return this.recordIncident(owner.id, work.callId, fact);
           if (!plan.target) return refuse('invalid-request');
-          return this.recordIncident(owner.id, work.callId, {
+          const saved = this.recordIncident(owner.id, work.callId, {
             ...fact,
             target: { ...plan.target },
           });
+          if (
+            saved.status === 'verified' &&
+            fact.kind === 'target-self-activated' &&
+            nativeApplication &&
+            work.operation?.fact.kind === 'application-background' &&
+            !aborted() &&
+            this.foreground === null &&
+            (!this.control || this.control.state === 'came-forward')
+          ) {
+            this.showControl(owner, work, nativeApplication, 'came-forward');
+            this.state(owner);
+          }
+          return saved;
         },
         ...(plan.target ? { target: { ...plan.target } } : {}),
         paths: checkedFiles.paths,
@@ -808,18 +991,26 @@ export class AutomationBroker {
         work.settled = true;
         release();
         if (foreground && this.foreground === owner.id) this.foreground = null;
+        this.settleControl(owner, work, foreground);
         owner.activity.settledExclusion(work.callId);
         this.forgetWork(owner, work);
         this.state(owner);
       });
-    return untilAbort(execution, work.controller.signal, () => ({
-      outcome: {
-        status: 'indeterminate',
-        reason:
-          work.controller.signal.reason === 'deadline' ? 'timeout' : 'cancelled-after-dispatch',
-        exclusionHeld: keys.length > 0,
-      },
-    }));
+    return untilAbort(execution, work.controller.signal, () => {
+      const reason: unknown = work.controller.signal.reason;
+      return {
+        outcome: {
+          status: 'indeterminate',
+          reason:
+            reason === 'deadline'
+              ? 'timeout'
+              : reason === 'backend-lost'
+                ? 'backend-lost'
+                : 'cancelled-after-dispatch',
+          exclusionHeld: keys.length > 0,
+        },
+      };
+    });
   }
   private check(
     owner: Owner,
@@ -833,6 +1024,8 @@ export class AutomationBroker {
     const denied = policyFailure(owner.policy, plan.effect);
     if (denied || (owner.policy.sandbox === 'read-only' && plan.delivery === 'foreground'))
       return refuse(denied ?? 'sandbox-denied');
+    if (plan.delivery === 'foreground' && this.control?.state === 'paused')
+      return refuse('target-paused');
     if (plan.setup) return refuse('setup-required', { kind: 'setup', requirement: plan.setup });
     if (tool.availability.tools !== 'ready')
       return refuse('setup-required', {
@@ -896,7 +1089,7 @@ export class AutomationBroker {
       (op.controller.signal.aborted ||
         op.fact.policyEpoch !== owner.policyEpoch ||
         op.fact.turn !== owner.turn ||
-        op.fact.deadline <= this.now())
+        (op.fact.deadline !== null && op.fact.deadline <= this.now()))
     )
       return refuse('operation-ended');
     return null;
@@ -907,6 +1100,7 @@ export class AutomationBroker {
     resource: Resource,
     kind: Operation['kind'],
     callId: string,
+    browserAddress?: string,
   ): PendingOperation {
     const turn = owner.turn;
     if (!turn) throw new Error('No active turn.');
@@ -933,18 +1127,14 @@ export class AutomationBroker {
       policyEpoch: owner.policyEpoch,
       state: 'active',
       targetMayActivate: resource.mayActivate,
-      deadline: this.now() + OPERATION_TIMEOUT,
+      deadline: null,
     };
     const op: PendingOperation = {
       fact,
       controller: new AbortController(),
       permission,
       resolve,
-      timer: setTimeout(() => {
-        this.finishOperation(owner, op, 'deadline');
-      }, OPERATION_TIMEOUT),
     };
-    op.timer.unref();
     owner.operations.set(fact.id, op);
     const covered = [...owner.grants.values()].find(
       (grant) =>
@@ -960,28 +1150,49 @@ export class AutomationBroker {
         callId,
         source: 'host',
         operation: structuredClone(fact),
-        target: structuredClone(resource.target),
+        target: {
+          ...structuredClone(resource.target),
+          ...(kind === 'browser-tab' && browserAddress ? { address: browserAddress } : {}),
+        },
         canAllowForSession: true,
         requestedAt: this.now(),
       };
       owner.activity.approvalRequested(op.approval);
     } else {
       if (covered) op.grantId = covered.id;
+      this.startDeadline(owner, op);
       resolve(true);
     }
     this.state(owner);
     return op;
   }
-  private finishOperation(owner: Owner, op: PendingOperation, reason: EndReason): void {
+  // An allowed operation's time starts: it ends at its deadline unless it ends before.
+  private startDeadline(owner: Owner, op: PendingOperation): void {
+    op.fact.deadline = this.now() + OPERATION_TIMEOUT;
+    op.timer = setTimeout(() => {
+      this.finishOperation(owner, op, 'deadline');
+    }, OPERATION_TIMEOUT);
+    op.timer.unref();
+  }
+  private finishOperation(
+    owner: Owner,
+    op: PendingOperation,
+    reason: EndReason,
+    reportedBy?: string,
+  ): void {
     if (op.controller.signal.aborted) return;
     clearTimeout(op.timer);
     op.controller.abort(reason);
     op.resolve(false);
     delete op.approval;
-    for (const work of owner.calls) if (work.operation === op) work.controller.abort(reason);
+    for (const work of owner.calls)
+      if (work.operation === op && work.callId !== reportedBy) work.controller.abort(reason);
     const running = [...owner.calls].some(
       (work) => work.operation === op && work.dispatched && !work.settled,
     );
+    const control = this.control;
+    if (control?.operationId === op.fact.id && control.state !== 'paused')
+      this.setControl(running ? { ...control, state: 'stopping' } : undefined);
     op.fact.state = running ? 'stopping' : 'ended';
     if (!running) owner.operations.delete(op.fact.id);
     for (const grant of [...owner.grants.values()])
@@ -1011,6 +1222,32 @@ export class AutomationBroker {
     if (op?.controller.signal.aborted && ![...owner.calls].some((w) => w.operation === op))
       owner.operations.delete(op.fact.id);
   }
+  private showControl(
+    owner: Owner,
+    work: Work,
+    application: TargetSummary,
+    state: 'acting' | 'came-forward',
+  ): void {
+    if (!work.operation || !work.target) return;
+    this.setControl({
+      sessionId: owner.id,
+      application: structuredClone(application),
+      target: { ...work.target },
+      operationId: work.operation.fact.id,
+      state,
+      stopShortcut: this.stopShortcut,
+    });
+  }
+  private settleControl(owner: Owner, work: Work, foreground: boolean): void {
+    const control = this.control;
+    if (!control || control.operationId !== work.operation?.fact.id || control.state === 'paused')
+      return;
+    const running = [...owner.calls].some(
+      (call) =>
+        call !== work && call.operation === work.operation && call.dispatched && !call.settled,
+    );
+    if (foreground || (control.state === 'stopping' && !running)) this.setControl(undefined);
+  }
   async closeOwner(id: string, remove = false): Promise<void> {
     const owner = this.owner(id);
     owner.open = false;
@@ -1032,6 +1269,7 @@ export class AutomationBroker {
     await Promise.all([...this.owners.keys()].map((id) => this.closeOwner(id)));
     for (const id of this.owners.keys()) this.icons.release(id);
     this.listeners.clear();
+    this.controlListeners.clear();
   }
   private caller(access: BrokerAccess): Owner {
     const bound = this.accesses.get(access);

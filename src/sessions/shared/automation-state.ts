@@ -18,6 +18,8 @@ export function liveAutomationState(state: AutomationLiveState): AutomationLiveS
     grants: state.grants,
     pendingApprovals: state.pendingApprovals,
     foregroundOwner: state.foregroundOwner,
+    ...(state.foregroundControl ? { foregroundControl: state.foregroundControl } : {}),
+    ...(state.pausedTargets?.length ? { pausedTargets: state.pausedTargets } : {}),
     availability: state.availability,
   };
 }
@@ -36,6 +38,8 @@ export function foldAutomationEvent(
   switch (event.value.kind) {
     case 'state':
       if (event.value.state.sessionId !== before.sessionId) return null;
+      delete value.foregroundControl;
+      delete value.pausedTargets;
       return {
         ...event,
         value: { ...value, ...structuredClone(liveAutomationState(event.value.state)) },

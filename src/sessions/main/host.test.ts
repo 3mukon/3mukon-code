@@ -1103,9 +1103,12 @@ describe('SessionHost search', () => {
 function automationFixture() {
   const accepted = vi.fn();
   const failed = vi.fn();
+  // Reports since when an operation approval has waited, as the toolset's binding does.
+  const waiting = new Set<(since: number | undefined) => void>();
   const session = {
     toolset: {
       name: 'fixture',
+      callTimeoutMs: 86_400_000,
       open: () => ({ url: 'http://127.0.0.1/fixture', credential: 'synthetic', close: vi.fn() }),
     },
     turnStarted: vi.fn(),
@@ -1116,14 +1119,62 @@ function automationFixture() {
     close: vi.fn<import('./provider').SessionAutomation['close']>(() => Promise.resolve()),
     prepareSend: vi.fn(() => ({ context: { presentationNotices: [] }, accepted, failed })),
     linkResult: vi.fn(),
+    onWaiting: (listener: (since: number | undefined) => void) => {
+      waiting.add(listener);
+      listener(undefined);
+      return () => {
+        waiting.delete(listener);
+      };
+    },
   } satisfies import('./provider').SessionAutomation;
   const bind = vi.fn<import('./provider').SessionAutomationHost['bind']>(() =>
     Promise.resolve(session),
   );
-  return { session, bind, accepted, failed };
+  const approvalsSince = (since: number | undefined) => {
+    for (const listener of waiting) listener(since);
+  };
+  return { session, bind, accepted, failed, approvalsSince, waiting };
 }
 
 describe('session automation lifecycle', () => {
+  it('lists a session as waiting while an operation approval waits for the user, since the oldest request', async () => {
+    const fake = fakeProvider('codex');
+    const automation = automationFixture();
+    const host = new SessionHost(
+      [fake.provider],
+      memoryRecords().records,
+      memoryTextStorage(),
+      automation,
+    );
+    const lists: SessionList[] = [];
+    host.onChange((list) => lists.push(list));
+    const id = await host.start('codex', { cwd: folder('web') });
+    fake.listeners[0]?.({ type: 'turn-started' });
+    const summary = () => lists.at(-1)?.sessions.find((session) => session.id === id);
+    expect(summary()?.status).toBe('running');
+    automation.approvalsSince(500);
+    expect(summary()).toMatchObject({ status: 'waiting', waitingSince: 500 });
+    fake.listeners[0]?.({
+      type: 'approval-requested',
+      request: {
+        id: 'r1',
+        action: 'command',
+        command: 'pnpm test',
+        canAllowForSession: true,
+        denyByDefault: false,
+        requestedAt: 900,
+      },
+    });
+    expect(summary()).toMatchObject({ status: 'waiting', waitingSince: 500 });
+    automation.approvalsSince(undefined);
+    expect(summary()).toMatchObject({ status: 'waiting', waitingSince: 900 });
+    fake.listeners[0]?.({ type: 'request-resolved', requestId: 'r1', outcome: 'answered' });
+    expect(summary()?.status).toBe('running');
+    expect(summary()?.waitingSince).toBeUndefined();
+    await host.closeAll();
+    expect(automation.waiting.size).toBe(0);
+  });
+
   it('sends the user message and by-message answer even when supplemental context cannot be prepared', async () => {
     const fake = fakeProvider('codex');
     const automation = automationFixture();
@@ -1273,7 +1324,7 @@ describe('session automation lifecycle', () => {
   });
 });
 
-it('does not retire host notices when a legacy adapter cannot accept separate turn context', async () => {
+it('does not retire host notices when an adapter cannot accept separate turn context', async () => {
   const fake = fakeProvider('codex');
   const automation = automationFixture();
   const original = fake.provider.start.bind(fake.provider);

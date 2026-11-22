@@ -203,6 +203,7 @@ describe('the Claude Code provider', () => {
       const resultLink = vi.fn();
       const bound = {
         name: '3mukon-code',
+        callTimeoutMs: 86_400_000,
         open() {
           const access = {
             url: 'http://127.0.0.1:4000/mcp',
@@ -228,6 +229,7 @@ describe('the Claude Code provider', () => {
           url: accesses[0]?.url,
           headers: { Authorization: 'Bearer synthetic-0' },
           alwaysLoad: true,
+          timeout: 86_400_000,
         },
       });
       const ask = first.params.options.canUseTool as CanUseTool;

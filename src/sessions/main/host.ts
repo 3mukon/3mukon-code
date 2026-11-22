@@ -98,6 +98,10 @@ interface Hosted {
   // The provider's session, from the session's latest start or resume.
   session?: ProviderSession;
   automation?: SessionAutomation;
+  // Since when the session's oldest operation approval has waited for the user's answer, as its
+  // automation reports it, and what stops that report.
+  approvalsSince?: number;
+  stopWaiting?: () => void;
   // The read of a session of an earlier run from its provider's history, once it has begun.
   reading?: Promise<void>;
   // The window has asked for the session's snapshot in this run, so that the lists give the session
@@ -237,6 +241,7 @@ export class SessionHost {
         mode: hosted.chosen.mode,
         sandbox: hosted.chosen.sandbox,
       });
+      this.followWaiting(hosted);
       if (this.isClosing()) throw new Error('The app is closing.');
       hosted.session = await provider.start(
         { ...options, ...(hosted.automation ? { toolset: hosted.automation.toolset } : {}) },
@@ -310,6 +315,11 @@ export class SessionHost {
 
   has(id: string): boolean {
     return this.sessions.has(id);
+  }
+
+  title(id: string): string | undefined {
+    const hosted = this.sessions.get(id);
+    return hosted && (titleOf(hosted.state) ?? hosted.summary?.title);
   }
 
   interrupt(id: string): Promise<void> {
@@ -616,6 +626,9 @@ export class SessionHost {
 
   private async close(hosted: Hosted): Promise<void> {
     await hosted.automation?.close();
+    hosted.stopWaiting?.();
+    delete hosted.stopWaiting;
+    delete hosted.approvalsSince;
     if (hosted.session !== undefined && !hosted.state.closed) await hosted.session.close();
   }
 
@@ -656,6 +669,7 @@ export class SessionHost {
       mode,
       sandbox,
     });
+    this.followWaiting(hosted);
     if (this.closing || this.sessions.get(hosted.id) !== hosted) {
       await hosted.automation?.close(true);
       throw new Error('The session is no longer open.');
@@ -838,6 +852,25 @@ export class SessionHost {
     for (const listener of this.listeners) listener(list);
   }
 
+  // Follows whether the session's automation waits for the user's answer to an operation's approval,
+  // which the lists show as the session waiting, as a provider's own request does. A newer binding
+  // replaces the one before it.
+  private followWaiting(hosted: Hosted): void {
+    hosted.stopWaiting?.();
+    delete hosted.approvalsSince;
+    const automation = hosted.automation;
+    if (automation === undefined) {
+      delete hosted.stopWaiting;
+      return;
+    }
+    hosted.stopWaiting = automation.onWaiting((since) => {
+      if (hosted.automation !== automation) return;
+      if (since === undefined) delete hosted.approvalsSince;
+      else hosted.approvalsSince = since;
+      this.report(hosted);
+    });
+  }
+
   // Whether the Sessions list holds the session: one that is not archived, while the records keep it
   // or it is open, so that beyond the sessions running it holds no more than the 1,000 the records
   // keep.
@@ -852,9 +885,14 @@ export class SessionHost {
   // records kept.
   private summaryOf(hosted: Hosted, sessionId: string): SessionSummary {
     const title = titleOf(hosted.state) ?? this.records.get(hosted.id)?.title;
-    const status = sessionStatus(hosted.state);
+    const own = sessionStatus(hosted.state);
+    const asked = own === 'waiting' ? openRequests(hosted.state)[0]?.requestedAt : undefined;
+    const approved = own === 'closed' ? undefined : hosted.approvalsSince;
+    const status = approved === undefined ? own : 'waiting';
     const waitingSince =
-      status === 'waiting' ? openRequests(hosted.state)[0]?.requestedAt : undefined;
+      asked === undefined || approved === undefined
+        ? (asked ?? approved)
+        : Math.min(asked, approved);
     return {
       id: hosted.id,
       provider: hosted.provider,

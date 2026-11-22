@@ -139,6 +139,29 @@ describe('Timeline', () => {
     expect(screen.queryByText('Working')).toBeNull();
   });
 
+  it('shows what waits on the user apart from the provider after the activity’s items, before the tasks and Working', () => {
+    const state: SessionState = {
+      ...initialSessionState(),
+      turnRunning: true,
+      timeline: [{ type: 'message', id: 'm1', role: 'agent', text: 'Opening the inbox' }],
+      tasks: [{ text: 'Read the invoices', status: 'in_progress' }],
+    };
+    render(
+      <Timeline state={state} agent="Codex" hostRequests={<p>Work on mail.example.com?</p>} />,
+    );
+    const order = [
+      screen.getByText('Opening the inbox'),
+      screen.getByText('Work on mail.example.com?'),
+      screen.getByText('Read the invoices'),
+      screen.getByText('Working'),
+    ];
+    for (const [index, element] of order.entries()) {
+      const next = order[index + 1];
+      if (next === undefined) break;
+      expect(element.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
   it('shows a message on its way after the activity, and Working, while the session starts or resumes', () => {
     const { rerender } = render(
       <Timeline state={null} pending={{ text: 'Hello', images: [] }} agent="Codex CLI" />,
@@ -257,5 +280,17 @@ describe('Timeline', () => {
       />,
     );
     expect(screen.getAllByText('Shown under each')).toHaveLength(2);
+    // In place of a call's own entry, what whoever composes the page gives for it; undefined keeps
+    // the entry.
+    rerender(
+      <Timeline
+        state={state}
+        agent="Codex"
+        renderToolCall={(item) => (item.id === 't1' ? <span>In place of t1</span> : undefined)}
+      />,
+    );
+    expect(screen.getByText('In place of t1')).toBeDefined();
+    expect(screen.queryByText('Present')).toBeNull();
+    expect(screen.getByText('List')).toBeDefined();
   });
 });

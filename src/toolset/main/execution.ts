@@ -1,6 +1,8 @@
 import type { z } from 'zod';
 import type {
   Availability,
+  BrowserActionSummary,
+  ComputerActionSummary,
   Delivery,
   Frame,
   JsonValue,
@@ -18,7 +20,11 @@ export const MAX_ARGUMENT_BYTES = 16 * 1024 * 1024;
 
 // Only trusted, app-composed tool implementations build plans. Effects and lanes never come
 // straight from model booleans. No backend process is started by registering or discovering a tool.
-export interface ExecutionPlan {
+export interface PlannedAction {
+  browserAction?: BrowserActionSummary;
+  computerAction?: ComputerActionSummary;
+}
+export interface ExecutionPlan extends PlannedAction {
   target?: TargetRef;
   operation: OperationKind | null;
   effect: Effect;
@@ -29,6 +35,8 @@ export interface ExecutionPlan {
   requiresImages?: boolean;
   files?: readonly FileIntent[];
   destinationKnown?: boolean;
+  // Sanitized address of a browser navigation, shown when the call first asks for a tab grant.
+  browserAddress?: string;
   // An unmet per-call setup requirement from cached feature facts, not model-supplied authority.
   setup?: SetupRequirement;
 }
@@ -60,7 +68,7 @@ export interface AutomationTool {
   inputSchema: z.ZodObject;
   availability: Availability;
   maxArgumentBytes?: number;
-  plan(args: Readonly<Record<string, unknown>>): ExecutionPlan;
+  plan(args: Readonly<Record<string, unknown>>, owner: string): ExecutionPlan;
   execute(
     args: Readonly<Record<string, unknown>>,
     context: ExecutionContext,

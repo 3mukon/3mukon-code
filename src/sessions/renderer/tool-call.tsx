@@ -13,6 +13,7 @@ import {
   Trash,
   Wrench,
 } from '../../ui/renderer/icons';
+import { Tag } from '../../ui/renderer/tag';
 import type { FileChange, ToolKind, ToolStatus } from '../shared/events';
 import type { ToolItem } from '../shared/session-state';
 import { DiffView, linesChanged } from './diff-view';
@@ -108,10 +109,16 @@ interface EntryProps {
   // The kind in words, and the state, which VoiceOver reads with the title.
   kind: string;
   status: ToolStatus;
-  title: string;
+  // Where what came of the entry wants the user's eye more than its state does, as a call refused or
+  // stopped part-way: its icon in the wait colour, its title as any other's, and its note.
+  attention?: boolean;
+  // The title, in words, or in words some of which are drawn apart, such as a page's address.
+  title: ReactNode;
   // The title in the ink colour, as for a call still running and for files changed.
   bright: boolean;
   counts?: { added: number; removed: number };
+  // Short facts after the title, each in a dashed tag, such as how a page is shared.
+  tags?: readonly string[];
   // What came of it, in words after the title, in place of the state.
   note?: string;
   // What the entry shows opened; without it, the entry does not open.
@@ -121,19 +128,33 @@ interface EntryProps {
 // An entry's line, which opens and closes the entry from the pointer and the keyboard, with a chevron
 // at its end shown while the entry is open or the pointer or the focus is on it. Tool calls and file
 // changes are entries, and so are the approvals module's answered requests.
-export function Entry({ icon: Icon, kind, status, title, bright, counts, note, body }: EntryProps) {
+export function Entry({
+  icon: Icon,
+  kind,
+  status,
+  attention = false,
+  title,
+  bright,
+  counts,
+  tags,
+  note,
+  body,
+}: EntryProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const failed = status === 'failed';
+  const failed = status === 'failed' && !attention;
   const line = (
     <>
-      <Icon className={`size-3.5 shrink-0 ${iconLooks[status]}`} />
+      <Icon className={`size-3.5 shrink-0 ${attention ? 'text-wait' : iconLooks[status]}`} />
       <span className="sr-only">{t('sessions.tool.named', { kind })}</span>
       <span className={`min-w-0 truncate ${failed ? 'text-del' : bright ? 'text-ink' : ''}`}>
         {title}
       </span>
       {counts !== undefined && <Counts {...counts} />}
+      {tags?.map((tag) => (
+        <Tag key={tag}>{tag}</Tag>
+      ))}
       {note !== undefined ? (
         <span className="shrink-0 text-faint">{note}</span>
       ) : failed ? (

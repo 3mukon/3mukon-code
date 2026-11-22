@@ -27,21 +27,13 @@ export interface AutomationBridge {
 }
 export type SetupAction =
   | {
-      kind: 'open-extension-settings';
-      browser: 'chrome' | 'safari';
-      profileId: string | null;
-      role?: 'web-control' | 'page-preview';
-    }
-  | {
-      kind: 'open-site-access';
-      browser: 'safari';
+      kind: 'connect-browser';
+      browser: 'chrome';
       profileId: string;
-      role: 'web-control' | 'page-preview';
-      origin: string;
     }
   | {
-      kind: 'connect-browser' | 'disconnect-browser';
-      browser: 'chrome' | 'safari';
+      kind: 'disconnect-browser';
+      browser: 'chrome';
       profileId: string;
     }
   | {

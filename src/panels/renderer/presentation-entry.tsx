@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '../../ui/renderer/button';
+import { PanelRight } from '../../ui/renderer/icons';
 import type { ShowOutcome } from '../shared/presentation';
 
-// A presentation as its session's activity records it, under the tool call that made it: what the
-// session showed, by the presentation's title, with Show while none of its panels is open, which asks
-// to see it again. Where it cannot be shown, the line says why; once shown, nothing more.
+// A presentation as its session's activity records it, in place of the tool call that made it, as a
+// tool call's line: a panel's sign, what the session showed, by the presentation's title, in the ink,
+// with Show while none of its panels is open, which asks to see it again. Where it cannot be shown,
+// the line says why; once shown, nothing more.
 export function PresentationEntry({
   title,
   open,
@@ -36,19 +39,12 @@ export function PresentationEntry({
   };
   const outcome = attempt?.outcome;
   return (
-    <p className="my-1 flex min-w-0 items-baseline gap-2 text-[12.5px] text-muted">
-      <span className="min-w-0 truncate" title={title}>
+    <p className="my-0.5 flex min-w-0 items-center gap-2 text-muted">
+      <PanelRight className="size-3.5 shrink-0 text-faint" />
+      <span className="min-w-0 truncate text-ink" title={title}>
         {t('panels.showed', { title })}
       </span>
-      {!open && (
-        <button
-          type="button"
-          onClick={show}
-          className="shrink-0 rounded-sm px-1 text-faint hover:bg-hover hover:text-ink"
-        >
-          {t('panels.show')}
-        </button>
-      )}
+      {!open && <Button small label={t('panels.show')} onClick={show} />}
       <span role="status" className="min-w-0 truncate">
         {outcome !== undefined && outcome !== 'shown' && t(`panels.showOutcome.${outcome}`)}
       </span>

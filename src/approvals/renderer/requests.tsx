@@ -63,37 +63,78 @@ interface ApprovalBlockProps {
   focusKey?: number;
 }
 
-// An approval waiting in the activity, as the reference's question block: what the agent wants to do,
-// in the window's language, with the request's details under it, then Allow Once, Allow for This
-// Session where the provider can remember it, and Deny. The default answer is drawn in ink, Deny when
-// the provider asks for it to be. Where the provider passes a denial's message on to the agent, a
-// field under the buttons takes one, which Deny sends.
+// A provider's approval waiting in the activity: what the agent wants to do, in the window's
+// language, with the request's details under it, answered as AnswerBlock answers.
+export function ApprovalBlock({ request, onAnswer, focusKey }: ApprovalBlockProps) {
+  const { t } = useTranslation();
+  const heading = approvalHeading(request, t);
+  return (
+    <AnswerBlock
+      heading={heading}
+      details={<ApprovalDetails request={request} heading={heading} />}
+      canAllowForSession={request.canAllowForSession}
+      denyByDefault={request.denyByDefault}
+      denialMessage={request.denialMessage === true}
+      {...(onAnswer === undefined ? {} : { onAnswer })}
+      {...(focusKey === undefined ? {} : { focusKey })}
+    />
+  );
+}
+
+interface AnswerBlockProps {
+  // What the agent wants to do, as a question.
+  heading: string;
+  // What more the block says under the heading.
+  details: ReactNode;
+  // Whether Allow for This Session is offered.
+  canAllowForSession: boolean;
+  // Whether Deny is the default answer, with no one-key approval.
+  denyByDefault: boolean;
+  // Whether a denial can carry the user's message to the agent.
+  denialMessage: boolean;
+  // Sends the answer; left out where the session cannot be answered from here.
+  onAnswer?: (answer: ApprovalAnswer) => Promise<void>;
+  focusKey?: number;
+}
+
+// An approval waiting in the activity, as the reference's question block, whether the provider asks
+// or the app does for an operation of its tools: the heading and the details under it, then Allow
+// Once, Allow for This Session where it can be remembered, and Deny. The default answer is drawn in
+// ink, Deny when it is asked to be. Where a denial's message reaches the agent, a field under the
+// buttons takes one, which Deny sends.
 //
 // While the block has the focus, as macOS's dialogs: Return gives the default answer, ⌥Return allows
-// for the session, unless the provider wants no approval from one key, and Escape denies. In the
-// message's field, Return denies with the message and Escape leaves the field. A focused button keeps
-// its own Return and Space.
-export function ApprovalBlock({ request, onAnswer, focusKey }: ApprovalBlockProps) {
+// for the session, unless it wants no approval from one key, and Escape denies. In the message's
+// field, Return denies with the message and Escape leaves the field. A focused button keeps its own
+// Return and Space.
+export function AnswerBlock({
+  heading,
+  details,
+  canAllowForSession,
+  denyByDefault,
+  denialMessage,
+  onAnswer,
+  focusKey,
+}: AnswerBlockProps) {
   const { t } = useTranslation();
   const { sending, failed, send } = useSending(onAnswer);
   const block = useFocusOn(focusKey);
   const [message, setMessage] = useState('');
-  const heading = approvalHeading(request, t);
   const deny = (): ApprovalAnswer => {
     const typed = message.trim();
-    return typed === '' || request.denialMessage !== true
+    return typed === '' || !denialMessage
       ? { decision: 'deny' }
       : { decision: 'deny', message: typed };
   };
-  const forSession = request.canAllowForSession && !request.denyByDefault;
+  const forSession = canAllowForSession && !denyByDefault;
   const choices: { answer: () => ApprovalAnswer; key: string; label: string; keys?: string }[] = [
     {
       answer: () => ({ decision: 'allow-once' }),
       key: 'allow-once',
       label: t('approvals.allowOnce'),
-      ...(request.denyByDefault ? {} : { keys: '↩' }),
+      ...(denyByDefault ? {} : { keys: '↩' }),
     },
-    ...(request.canAllowForSession
+    ...(canAllowForSession
       ? [
           {
             answer: (): ApprovalAnswer => ({ decision: 'allow-for-session' }),
@@ -107,10 +148,10 @@ export function ApprovalBlock({ request, onAnswer, focusKey }: ApprovalBlockProp
       answer: deny,
       key: 'deny',
       label: t('approvals.deny'),
-      keys: request.denyByDefault ? '↩ ⎋' : '⎋',
+      keys: denyByDefault ? '↩ ⎋' : '⎋',
     },
   ];
-  const primary = request.denyByDefault ? 'deny' : 'allow-once';
+  const primary = denyByDefault ? 'deny' : 'allow-once';
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (onAnswer === undefined || sending || event.metaKey || event.ctrlKey) return;
     const inField = event.target instanceof HTMLInputElement;
@@ -130,13 +171,13 @@ export function ApprovalBlock({ request, onAnswer, focusKey }: ApprovalBlockProp
       send({ decision: 'allow-for-session' });
     } else if (event.target === event.currentTarget) {
       event.preventDefault();
-      send(request.denyByDefault ? deny() : { decision: 'allow-once' });
+      send(denyByDefault ? deny() : { decision: 'allow-once' });
     }
   };
   return (
     <Block label={heading} ref={block} onKeyDown={onKeyDown}>
       <Heading text={heading} />
-      <ApprovalDetails request={request} heading={heading} />
+      {details}
       {onAnswer !== undefined && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {choices.map(({ answer, key, label, keys }) => (
@@ -153,7 +194,7 @@ export function ApprovalBlock({ request, onAnswer, focusKey }: ApprovalBlockProp
           ))}
         </div>
       )}
-      {onAnswer !== undefined && request.denialMessage === true && (
+      {onAnswer !== undefined && denialMessage && (
         <input
           type="text"
           aria-label={t('approvals.denialMessage')}

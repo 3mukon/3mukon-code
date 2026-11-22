@@ -34,7 +34,7 @@ tags: []
 ## Not responsible for
 
 - Signing in: Claude Code signs in through its own `claude auth login`, which the app runs in a terminal, or `/login`, and keeps its credentials itself; this module never reads or passes them (ADR-0028, ADR-0016). Without a sign-in, a turn fails with Claude Code's own message.
-- Host execution policy: the shared broker authorizes operations independently of Claude Code's permissions. The adapter connects its bound HTTP toolset through SDK MCP configuration, forwards only registered native tool names without an extra approval, and rotates access when replacing the process. AskUserQuestion remains Claude Code's own.
+- Host execution policy: the shared broker authorizes operations independently of Claude Code's permissions. The adapter connects its bound HTTP toolset through SDK MCP configuration, with the toolset's `callTimeoutMs` as the server's `timeout`, which overrides an `MCP_TOOL_TIMEOUT` the user's environment may set, forwards only registered native tool names without an extra approval, and rotates access when replacing the process. AskUserQuestion remains Claude Code's own.
 - Subagents' activity and Claude Code's background tasks: not shown in this version.
 - Hosting: the main process runs the adapter. A packaged app opened from the Finder takes the login shell's PATH as it starts (ADR-0019), which Claude Code's commands need; electron-builder.yml unpacks the binary beside the app's archive.
 

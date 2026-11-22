@@ -7,7 +7,9 @@ export interface ResourceSpec {
   // Backend-provided identity, never a model-selected lane or a public native ID.
   key: string;
   mayActivate: boolean;
-  summary: Omit<TargetSummary, 'ref' | 'owner' | 'iconId'> & { icon?: MessageImage };
+  summary: Omit<TargetSummary, 'ref' | 'owner' | 'iconId' | 'applicationName' | 'application'> & {
+    icon?: MessageImage;
+  };
   kind: TargetRef['kind'];
   application?: TargetRef;
   documentGeneration?: number;
@@ -41,10 +43,14 @@ export class Resources {
       )
     )
       throw new Error('This tab already has an owner.');
-    if (spec.application && this.resolve(owner, spec.application)?.kind !== 'application')
+    const application = spec.application && this.resolve(owner, spec.application);
+    if (spec.application && application?.kind !== 'application')
       throw new Error('A window needs its owner’s current application.');
     const summary: Resource['summary'] = {
       name: spec.summary.name,
+      ...(application
+        ? { applicationName: application.target.name, application: { ...application.target.ref } }
+        : {}),
       ...(spec.summary.address !== undefined ? { address: spec.summary.address } : {}),
       ...(spec.summary.sharing ? { sharing: spec.summary.sharing } : {}),
       ...(spec.summary.browser ? { browser: spec.summary.browser } : {}),
@@ -112,6 +118,16 @@ export class Resources {
     if (!r) return;
     if (change === 'document') r.documentGeneration += 1;
     else r.geometryGeneration += 1;
+  }
+  describeBrowserTab(owner: string, ref: TargetRef, name: string, address: string | null): boolean {
+    const resource = this.resolve(owner, ref);
+    if (resource?.kind !== 'browser-tab') return false;
+    if (resource.target.name === name && resource.target.address === (address ?? undefined))
+      return false;
+    resource.target.name = name;
+    if (address === null) delete resource.target.address;
+    else resource.target.address = address;
+    return true;
   }
   remove(owner: string, ref: TargetRef): Resource[] {
     const root = this.resolve(owner, ref);

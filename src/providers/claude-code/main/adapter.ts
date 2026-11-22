@@ -671,6 +671,10 @@ class ClaudeCodeSession implements ProviderSession {
                     url: access.url,
                     headers: { Authorization: `Bearer ${access.credential}` },
                     alwaysLoad: true,
+                    // As long as the toolset says a call may take, whatever MCP_TOOL_TIMEOUT the
+                    // user's environment sets, so that no call ends while the user answers its
+                    // approval.
+                    timeout: settings.toolset.callTimeoutMs,
                   },
                 },
                 allowedTools: access.tools?.map(

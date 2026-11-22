@@ -84,6 +84,9 @@ describe('the toolset', () => {
     const client = await connect(await open());
     expect(client.getServerVersion()).toMatchObject({ name: TOOLSET_NAME, version: '1.2.3' });
     expect(client.getServerCapabilities()?.tools).toBeDefined();
+    expect(client.getInstructions()).toContain("Prefer the app's own browser");
+    expect(client.getInstructions()).toContain('Use global for the connected Chrome profile.');
+    expect(client.getInstructions()).toContain('once per operation');
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
       'automation_capabilities',
     ]);
@@ -267,4 +270,62 @@ it('records invalid arguments and shares cancellation across separate MCP POST i
     resolve({ outcome: { status: 'verified', value: null } });
     await waiting;
   }
+});
+
+it('reports since when a session’s oldest operation approval has waited, and when none waits', async () => {
+  toolset = await startToolset({
+    version: 'fixture',
+    tools: [
+      {
+        name: 'fixture_change',
+        description: 'Synthetic shared-tab fixture.',
+        family: 'browser',
+        inputSchema: z.object({ target: z.unknown() }),
+        availability: { tools: 'ready', images: 'unknown' },
+        plan: (raw) => ({
+          operation: 'browser-tab',
+          effect: 'mutate',
+          delivery: 'background',
+          mayActivate: false,
+          target: (raw as { target: { id: string; kind: 'browser-tab'; generation: number } })
+            .target,
+        }),
+        execute: () => Promise.resolve({ outcome: { status: 'verified', value: null } }),
+      },
+    ],
+  });
+  const owner = await toolset.sessions.bind({
+    id: 'fixture-waiting',
+    cwd: process.cwd(),
+    mode: 'auto',
+    sandbox: 'workspace-write',
+  });
+  owner.turnStarted();
+  const heard: (number | undefined)[] = [];
+  const stop = owner.onWaiting((since) => heard.push(since));
+  expect(heard).toEqual([undefined]);
+  const target = toolset.broker.register('fixture-waiting', {
+    backend: 'fixture-browser',
+    key: 'tab-1',
+    kind: 'browser-tab',
+    mayActivate: false,
+    summary: { name: 'Synthetic site', address: 'https://example.test/', sharing: 'app' },
+  });
+  const access = toolset.broker.openAccess('fixture-waiting');
+  const call = toolset.broker.dispatch(
+    access,
+    'fixture_change',
+    { target: target.ref },
+    { actionId: 'asked' },
+  );
+  await vi.waitFor(() => {
+    expect(heard).toHaveLength(2);
+  });
+  const [request] = toolset.broker.snapshot('fixture-waiting').value.pendingApprovals;
+  if (request === undefined) throw new Error('The fixture did not ask.');
+  expect(heard[1]).toBe(request.requestedAt);
+  toolset.broker.answer('fixture-waiting', request.id, { decision: 'allow-once' });
+  await call;
+  expect(heard).toEqual([undefined, request.requestedAt, undefined]);
+  stop();
 });

@@ -158,6 +158,159 @@
         "unreadable": "An image couldn’t be read.",
         "count": "A message takes at most {{limit}} images."
       }
+    },
+    "automation": {
+      "line": {
+        "idle": "Using {{target}}",
+        "observing": "Using {{target}}",
+        "acting": "Using {{target}}",
+        "waiting-grant": "Waiting for your answer to use {{target}}",
+        "paused": "Paused in {{target}}",
+        "stopping": "Stopping in {{target}}",
+        "more_one": "and {{count}} more",
+        "more_other": "and {{count}} more",
+        "blank": "a blank tab",
+        "background": "in the background",
+        "foreground": "in the foreground",
+        "show": "Show",
+        "stop": "Stop",
+        "cantShow": "It can’t be shown now.",
+        "cantStop": "It couldn’t be stopped."
+      },
+      "sharing": {
+        "none": "No sharing",
+        "app": "App sign-ins",
+        "chrome": "Chrome",
+        "chromeProfile": "Chrome · {{profile}}"
+      },
+      "delivery": {
+        "background": "Background",
+        "foreground": "Foreground"
+      },
+      "kind": {
+        "browser": "Browser",
+        "computer": "Computer use"
+      },
+      "tool": {
+        "browser_open": "Opened a tab",
+        "browser_navigate": "Opened {{target}}",
+        "browser_snapshot": "Read the page",
+        "browser_screenshot": "Took a screenshot of the page",
+        "browser_act": "Acted on the page",
+        "browser_close": "Closed {{target}}",
+        "other": "{{tool}}: {{target}}",
+        "otherAlone": "{{tool}}",
+        "browser_navigateBlank": "Opened a page",
+        "browser_closeBlank": "Closed a tab",
+        "computer_targets": "Listed the running apps",
+        "computer_select": "Chose {{name}}",
+        "computer_windows": "Looked for {{name}}’s windows",
+        "computer_observe": "Looked at {{name}}",
+        "computer_act": "Acted in {{name}}",
+        "computer_release": "Stopped using {{name}}"
+      },
+      "action": {
+        "click": "Clicked on the page",
+        "clickControl": "Clicked {{target}}",
+        "type": "Typed on the page",
+        "typeControl": "Typed in {{target}}",
+        "scroll": "Scrolled the page"
+      },
+      "note": {
+        "notChecked": "Effect not checked",
+        "cancelled": "Stopped before it began",
+        "partial": "Stopped, may have happened",
+        "waitingApproval": "Waiting for your answer",
+        "indeterminate": {
+          "cancelled-after-dispatch": "Stopped, may have happened",
+          "timeout": "Timed out, may have happened",
+          "backend-lost": "Connection lost, may have happened",
+          "presentation-race": "May have happened"
+        },
+        "refused": {
+          "wrong-owner": "Another session’s",
+          "access-revoked": "Access ended",
+          "turn-inactive": "The turn had ended",
+          "operation-ended": "Its use had ended",
+          "stale-target": "The page or window had changed",
+          "stale-observation": "The page or window had changed since it was read",
+          "target-paused": "Paused while you have it",
+          "sandbox-denied": "Not allowed at this sandbox level",
+          "file-scope-unverifiable": "Outside the session’s folders",
+          "approval-required": "Needs your answer",
+          "denied": "Denied",
+          "setup-required": "Needs setup",
+          "background-unavailable": "Not available in the background",
+          "image-input-unsupported": "The model can’t take images",
+          "busy": "Busy",
+          "limit-exceeded": "Over a limit",
+          "connection-lost": "Connection lost",
+          "renderer-unavailable": "The window wasn’t available",
+          "layout-conflict": "The panels had changed",
+          "request-conflict": "Repeated with other arguments",
+          "invalid-request": "Not a valid request",
+          "not-found": "Not found",
+          "result-expired": "No longer available",
+          "needs-user-action": "Needs you"
+        },
+        "denied": "Denied · “{{message}}”",
+        "sandbox": "Not allowed in {{sandbox}}"
+      },
+      "incident": {
+        "dialog": "Dismissed a dialog the page opened",
+        "activated": "{{name}} came to the front",
+        "activatedUnknown": "An app came to the front",
+        "takeover": "You took over",
+        "secureInputOn": "Paused while a password field has the keyboard",
+        "secureInputOff": "The password field let go of the keyboard",
+        "openedWindow": "{{control}} opened its own window"
+      },
+      "frames": {
+        "evicted": "Its screenshots are no longer kept",
+        "failed": "Its screenshots couldn’t be read"
+      },
+      "appName": "{{name}}",
+      "someApp": "an app",
+      "quoted": "“{{label}}”",
+      "computer": {
+        "click": "Clicked a control",
+        "clickControl": "Clicked {{target}}",
+        "type": "Typed in a field",
+        "typeControl": "Typed in {{target}}",
+        "scroll": "Scrolled the window",
+        "scrollControl": "Scrolled {{target}}",
+        "point-click": "Clicked in the window",
+        "point-scroll": "Scrolled the window",
+        "drag": "Dragged in the window",
+        "press": "Pressed keys"
+      },
+      "window": {
+        "raise": "Brought the window forward",
+        "minimize": "Minimized the window",
+        "restore": "Restored the window",
+        "move": "Moved the window",
+        "resize": "Resized the window"
+      },
+      "grants": {
+        "count_one": "{{count}} grant",
+        "count_other": "{{count}} grants",
+        "chromeTab": "Chrome tab {{site}}",
+        "chromeTabBlank": "a Chrome tab",
+        "appTab": "{{site}} in the app’s browser",
+        "appTabBlank": "a tab of the app’s browser",
+        "background": "{{app}} in the background",
+        "foreground": "{{app}} in the foreground",
+        "dialog": "a dialog in {{app}}",
+        "title": "Grants",
+        "scope": {
+          "operation": "this operation",
+          "session": "this session"
+        },
+        "dialogTag": "Dialog",
+        "end": "End",
+        "endNamed": "End: {{grant}}",
+        "endFailed": "It couldn’t be ended."
+      }
     }
   },
   "approvals": {
@@ -194,7 +347,49 @@
     "chosen": "chosen",
     "hidden": "Hidden answer",
     "message": "“{{message}}”",
-    "denialMessage": "Tell the agent what to do instead"
+    "denialMessage": "Tell the agent what to do instead",
+    "host": {
+      "heading": {
+        "chrome": "Work on {{site}} in Chrome, signed in as you?",
+        "chromeBlank": "Work in Chrome, signed in as you?",
+        "app": "Work on {{site}} in the app’s browser, signed in?",
+        "appBlank": "Work in the app’s browser, signed in?",
+        "background": "Observe and operate {{app}} in the background?",
+        "foreground": "Use the keyboard and pointer in {{app}}?",
+        "dialog": "Use the dialog {{app}} opened?"
+      },
+      "detail": {
+        "chrome": "{{agent}} wants to use the sign-ins of your {{profile}} profile, in a tab it opens in Chrome.",
+        "chromeAnyProfile": "{{agent}} wants to use your Chrome sign-ins, in a tab it opens in Chrome.",
+        "app": "{{agent}} wants to use the sign-ins the app’s browser shares with every session.",
+        "background": "{{agent}} wants to see {{app}}’s windows and press its controls, without bringing it to the front.",
+        "foreground": "{{agent}} wants to bring {{app}} to the front and use the keyboard and pointer in it. Moving the mouse or typing pauses it.",
+        "dialog": "{{agent}} wants to make a choice in the dialog {{app}} opened."
+      },
+      "scope": "Allow Once lasts until {{agent}} is done with it or the turn ends; Allow for This Session lasts until the session ends or you end it.",
+      "mayActivate": {
+        "browser": "The page may bring Chrome to the front in response to a click.",
+        "app": "{{app}} may come to the front in response to an action."
+      },
+      "ended": {
+        "agent-finished": "ended when {{agent}} was done with it",
+        "turn-ended": "ended as the turn ended",
+        "session-closed": "ended as the session closed",
+        "stopped": "ended when you stopped it",
+        "takeover": "ended when you took over",
+        "user-ended": "ended by you",
+        "denied": "ended",
+        "policy-changed": "ended as the session’s permissions changed",
+        "access-revoked": "ended as the agent’s connection closed",
+        "deadline": "ended at its time limit",
+        "backend-lost": "ended as the connection was lost",
+        "tab-closed": "ended as the tab closed",
+        "application-quit": "ended as the app quit"
+      },
+      "end": "End",
+      "endNamed": "End: {{question}}",
+      "endFailed": "It couldn’t be ended."
+    }
   },
   "panels": {
     "sessionPage": "New session",
@@ -396,6 +591,139 @@
       "used": "{{window}} {{share}} used",
       "reached": "{{window}} reached",
       "open": "Show the accounts"
+    }
+  },
+  "browser": {
+    "setting": {
+      "label": "Browser use",
+      "detail": "Agents browse in the app’s own browser and in Chrome once you connect it."
+    },
+    "app": {
+      "name": "App’s browser",
+      "line": "Its sign-ins, shared by every session",
+      "clear": "Clear Sign-Ins",
+      "cleared": "Cleared"
+    },
+    "failed": "That didn’t work.",
+    "panel": {
+      "back": "Back",
+      "forward": "Forward",
+      "reload": "Reload",
+      "stopLoading": "Stop Loading",
+      "openChrome": "Open in Chrome",
+      "preview": "Page preview",
+      "blank": "A blank tab",
+      "loading": "Loading…",
+      "cantReach": "Can’t reach {{host}}",
+      "error": {
+        "unreachable": "The server didn’t respond.",
+        "timed-out": "It took too long to answer.",
+        "certificate": "Its certificate isn’t valid.",
+        "blocked": "The app doesn’t open this page."
+      },
+      "tryAgain": "Try Again",
+      "acting": "{{session}} is acting",
+      "stop": "Stop",
+      "control": "You have control",
+      "handBack": "Hand Back",
+      "waiting": "Waiting for your answer in {{session}}",
+      "show": "Show",
+      "closed": "This tab has closed.",
+      "inUse": "In use by {{session}}",
+      "previewLabel": "Preview · not interactive",
+      "age": {
+        "seconds": "{{count}} s ago",
+        "minutes": "{{count}} min ago",
+        "hours": "{{count}} h ago"
+      },
+      "actingIn": "{{session}} is acting in {{browser}}",
+      "browserName": {
+        "embedded": "the app’s browser",
+        "chrome": "Chrome"
+      }
+    },
+    "chrome": {
+      "line": "Your sign-ins, through its extension",
+      "connected": "Connected",
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "tooOld": "Needs version {{version}} or later",
+      "profileLine": "{{profile}} profile, with its sign-ins",
+      "connecting": "Connecting",
+      "loadExtension": "Keep the setup tab open. In that Chrome window, choose Extensions → Manage Extensions. Turn on Developer mode and choose Load unpacked, then press ⌘⇧G and paste the folder path.",
+      "copyExtensionFolder": "Copy Folder Path",
+      "folderCopied": "Copied",
+      "waiting": "Waiting for Chrome",
+      "unavailable": "Unavailable",
+      "notInstalled": "Not installed"
+    },
+    "notice": {
+      "connectTitle": "Browser use needs Chrome connected",
+      "connectDetail": "Chrome isn’t connected yet. Connect it, then ask again."
+    }
+  },
+  "computer": {
+    "setting": {
+      "label": "Computer use",
+      "detail": "What macOS lets agents see and do in other apps."
+    },
+    "permission": {
+      "accessibility": {
+        "name": "Accessibility",
+        "line": "Reading and pressing other apps’ controls",
+        "missing": "macOS hasn’t allowed the app to read and press other apps’ controls."
+      },
+      "screen-recording": {
+        "name": "Screen Recording",
+        "line": "Seeing other apps’ windows",
+        "missing": "macOS hasn’t allowed the app to see other apps’ windows."
+      },
+      "input-monitoring": {
+        "name": "Input Monitoring",
+        "line": "Noticing when you take over the mouse and keyboard",
+        "missing": "macOS hasn’t allowed the app to notice when you take over the mouse and keyboard."
+      }
+    },
+    "state": {
+      "granted": "Allowed",
+      "restart-required": "Takes effect after a restart",
+      "unavailable": "Unavailable"
+    },
+    "open": "Open System Settings",
+    "restart": "Restart Helper",
+    "notice": {
+      "needs": "Computer use needs {{permission}}",
+      "detail": "{{missing}} {{then}}",
+      "allowThen": "Allow it in System Settings, then ask again.",
+      "restartTitle": "Computer use needs the app’s helper to restart",
+      "restartBody": "A permission you allowed takes effect once it restarts."
+    },
+    "failed": "That didn’t work.",
+    "appName": "{{name}}",
+    "stop": "Stop",
+    "handBack": "Hand Back",
+    "preview": {
+      "label": "Preview · not interactive",
+      "seconds": "{{count}} s ago",
+      "minutes": "{{count}} min ago",
+      "hours": "{{count}} h ago",
+      "switch": "Switch to {{name}}",
+      "acting": "{{session}} is acting in {{name}}",
+      "control": "You have control of {{name}}",
+      "loading": "Loading preview…",
+      "needsScreenRecording": "Showing {{name}} needs Screen Recording",
+      "quit": "{{name}} has quit",
+      "connectionLost": "The connection to the app’s helper was lost",
+      "cannotShow": "This window can’t be shown now",
+      "alt": "{{name}}’s window",
+      "inUse": "In use by {{session}}"
+    },
+    "control": {
+      "using": "{{session}} is using {{name}}",
+      "user": "You have control of {{name}}",
+      "cameForward": "{{name}} came to the front",
+      "secureInput": "Paused while a password field has the keyboard",
+      "shortcut": "⌃⌥⌘."
     }
   }
 }
