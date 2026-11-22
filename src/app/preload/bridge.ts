@@ -1,4 +1,7 @@
 import type { AccountsList, ResetOutcome } from '../../accounts/shared/accounts';
+import type { BrowserTabState } from '../../browser/shared/browser';
+import type { BrowserBridge } from '../../browser/shared/view';
+import type { ComputerBridge } from '../../computer/shared/computer';
 import type { CloseAnswer, FileImage, OpenedFile, SaveResult } from '../../files/shared/files';
 import type { DroppedItem } from '../../panels/shared/panels';
 import type { ModelOption, ProviderId, SessionEvent } from '../../sessions/shared/events';
@@ -21,7 +24,7 @@ import type {
 } from '../../workspaces/shared/workspaces';
 import { channels, type Bridge } from '../shared/bridge';
 import type { Artifact, PresentationHostMessage } from '../../panels/shared/presentation';
-import type { AutomationBridge } from '../../toolset/shared/automation';
+import type { AutomationBridge, UserSetupBridge } from '../../toolset/shared/automation';
 import type { AutomationEvent, Envelope } from '../../sessions/shared/automation';
 
 type Listener = (event: unknown, ...values: unknown[]) => void;
@@ -54,6 +57,68 @@ export function createBridge(
     };
   }
   return {
+    browser: {
+      tabRef: (owner, tab) =>
+        invoke(channels.browser.tabRef, owner, tab) as ReturnType<BrowserBridge['tabRef']>,
+      snapshot: (owner, tab) =>
+        invoke(channels.browser.snapshot, owner, tab) as ReturnType<BrowserBridge['snapshot']>,
+      command: (owner, tab, command) =>
+        invoke(channels.browser.command, owner, tab, command) as ReturnType<
+          BrowserBridge['command']
+        >,
+      subscribe(owner, tab, listener) {
+        const subscription = globalThis.crypto.randomUUID();
+        const detach = subscribe(channels.browser.state, (value) => {
+          const message = value as { subscription: string; state: BrowserTabState | null };
+          if (
+            message.subscription === subscription &&
+            (message.state === null ||
+              (message.state.owner === owner &&
+                message.state.ref.id === tab.id &&
+                message.state.ref.generation === tab.generation))
+          )
+            listener(message.state);
+        });
+        const ready = invoke(channels.browser.subscribe, owner, tab, subscription);
+        void ready.catch(detach);
+        let stopped = false;
+        return () => {
+          if (stopped) return;
+          stopped = true;
+          detach();
+          void ready
+            .then(() => invoke(channels.browser.unsubscribe, subscription))
+            .catch(() => undefined);
+        };
+      },
+      bind: (owner, presentation, tab) =>
+        invoke(channels.browser.bind, owner, presentation, tab) as ReturnType<
+          BrowserBridge['bind']
+        >,
+      place: (binding, revision, placement) =>
+        invoke(channels.browser.place, binding, revision, placement) as ReturnType<
+          BrowserBridge['place']
+        >,
+      release: (binding) => invoke(channels.browser.release, binding) as Promise<void>,
+      onFocus: (listener) =>
+        subscribe(channels.browser.focus, (value) => {
+          listener(value as string);
+        }),
+      onFileDrag: (listener) =>
+        subscribe(channels.browser.fileDrag, (value) => {
+          if (typeof value === 'string') listener(value);
+        }),
+    },
+    computer: {
+      preview: (owner, presentation, target) =>
+        invoke(channels.computer.preview, owner, presentation, target) as ReturnType<
+          ComputerBridge['preview']
+        >,
+      command: (owner, presentation, target, command) =>
+        invoke(channels.computer.command, owner, presentation, target, command) as ReturnType<
+          ComputerBridge['command']
+        >,
+    },
     automation: {
       snapshot: (id) =>
         invoke(channels.automation.snapshot, id) as ReturnType<AutomationBridge['snapshot']>,
@@ -200,6 +265,14 @@ export function createBridge(
         invoke(channels.approvals.answerApproval, sessionId, requestId, answer) as Promise<void>,
       answerQuestion: (sessionId, requestId, answer) =>
         invoke(channels.approvals.answerQuestion, sessionId, requestId, answer) as Promise<void>,
+    },
+    setup: {
+      snapshot: () => invoke(channels.setup.snapshot) as ReturnType<UserSetupBridge['snapshot']>,
+      act: (action) => invoke(channels.setup.act, action) as ReturnType<UserSetupBridge['act']>,
+      subscribe: (listener) =>
+        subscribe(channels.setup.changed, (value) => {
+          listener(value as Awaited<ReturnType<UserSetupBridge['snapshot']>>);
+        }),
     },
     settings: {
       initial: initialSettings,

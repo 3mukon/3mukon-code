@@ -8,6 +8,10 @@ import type { FilesUi } from '../../files/main/native';
 import { MAX_EDITABLE_BYTES } from '../../files/shared/files';
 import { droppedItems } from '../../panels/main/items';
 import type { PresentationHost } from '../../panels/main/presentation-host';
+import type { EmbeddedBrowser } from '../../browser/main/embedded';
+import type { BrowserViewHost } from '../../browser/main/view-host';
+import type { NativeComputer } from '../../computer/main/computer';
+import type { ComputerBridge, ComputerCommand } from '../../computer/shared/computer';
 import { presentationRendererSchema } from '../../panels/main/presentation-validation';
 import type { RememberedChoices } from '../../sessions/main/choices';
 import type { SessionHost } from '../../sessions/main/host';
@@ -18,7 +22,7 @@ import type { Settings } from '../../settings/main/settings';
 import type { AppSettings } from '../../settings/shared/settings';
 import type { TerminalUi } from '../../terminal/main/native';
 import type { TerminalViewer, Terminals } from '../../terminal/main/terminals';
-import type { AutomationBridge } from '../../toolset/shared/automation';
+import type { AutomationBridge, UserSetupBridge } from '../../toolset/shared/automation';
 import { MAX_COLUMNS, MAX_ROWS } from '../../terminal/shared/terminal';
 import type { Workspaces, WorkspacesUi } from '../../workspaces/main/workspaces';
 import { channels } from '../shared/bridge';
@@ -28,7 +32,18 @@ import { AutomationSubscriptions } from './automation-ui';
 
 interface BridgeServices {
   presentations: PresentationHost;
+  browser: EmbeddedBrowser;
+  browserViews: BrowserViewHost;
+  computer: Pick<NativeComputer, 'preview'> & {
+    command(
+      owner: string,
+      target: string,
+      command: ComputerCommand,
+    ): ReturnType<ComputerBridge['command']>;
+  };
   automation: AutomationBridge;
+  isAuxiliary?: (contents: WebContents) => boolean;
+  setup: UserSetupBridge;
   workspaces: Workspaces;
   sessions: SessionHost;
   // The settings each folder's sessions last used.
@@ -153,13 +168,76 @@ const typed = z.string().max(4_000_000);
 const columns = z.number().int().min(1).max(MAX_COLUMNS);
 const rows = z.number().int().min(1).max(MAX_ROWS);
 const url = z.string().max(8_192);
+// A step of browser or computer use's setup, which the user's own click asks for.
+const chrome = z.literal('chrome');
+const setupAction = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('connect-browser'),
+      browser: chrome,
+      profileId: id,
+    })
+    .strict(),
+  z.strictObject({
+    kind: z.literal('disconnect-browser'),
+    browser: chrome,
+    profileId: id,
+  }),
+  z
+    .object({
+      kind: z.literal('open-permission'),
+      permission: z.enum(['accessibility', 'screen-recording', 'input-monitoring']),
+    })
+    .strict(),
+  z.object({ kind: z.enum(['clear-app-sign-ins', 'restart-helper']) }).strict(),
+]);
+
+const browserTab = z.strictObject({
+  id: z.uuid(),
+  generation: z.int().positive(),
+  kind: z.literal('browser-tab'),
+});
+const browserCommand = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('navigate'), url: z.string().max(4096) }),
+  z.strictObject({
+    kind: z.enum([
+      'back',
+      'forward',
+      'reload',
+      'stop-loading',
+      'take-control',
+      'hand-back',
+      'open-external',
+    ]),
+  }),
+]);
+const browserPlacement = z.strictObject({
+  bounds: z
+    .strictObject({
+      x: z.number().min(-32768).max(32768),
+      y: z.number().min(-32768).max(32768),
+      width: z.number().positive().max(16384),
+      height: z.number().positive().max(16384),
+    })
+    .nullable(),
+  covered: z.boolean(),
+  dim: z
+    .string()
+    .regex(/^#[0-9a-f]{6}$/i)
+    .nullable(),
+});
 
 // Answers the preload bridge's calls and sends it what changes. Every call must come from the main
 // frame of an app window showing the app's own page, and its values must have the shapes the call
 // takes; anything else is refused.
 export function serveBridge({
   presentations,
+  browser,
+  browserViews,
+  computer,
   automation,
+  isAuxiliary,
+  setup,
   workspaces,
   sessions,
   choices,
@@ -179,9 +257,15 @@ export function serveBridge({
     values: z.ZodType<Values>,
     answer: (window: BrowserWindow, ...values: Values) => unknown,
   ): void {
-    ipcMain.handle(channel, (event, ...given: unknown[]) =>
-      answer(callerWindow(event, page), ...values.parse(given)),
-    );
+    ipcMain.handle(channel, (event, ...given: unknown[]) => {
+      if (isAuxiliary?.(event.sender)) throw Error('The bridge answers only the app’s own page.');
+      return answer(callerWindow(event, page), ...values.parse(given));
+    });
+  }
+
+  function broadcast(channel: string, value: unknown): void {
+    for (const { webContents } of BrowserWindow.getAllWindows())
+      if (!isAuxiliary?.(webContents)) webContents.send(channel, value);
   }
 
   const subscriptions = new AutomationSubscriptions(automation);
@@ -240,6 +324,120 @@ export function serveBridge({
 
   let presentationWindow: WebContents | undefined;
   const presentationWindows = new Set<number>();
+  const browserPages = new Map<number, Map<string, () => void>>();
+  function browserPage(contents: WebContents): Map<string, () => void> {
+    const pageId = contents.id;
+    const known = browserPages.get(pageId);
+    if (known) return known;
+    const stops = new Map<string, () => void>();
+    const lost = () => {
+      for (const stop of stops.values()) stop();
+      stops.clear();
+      browserViews.disconnect(pageId);
+    };
+    contents.on('did-start-navigation', (event) => {
+      if (event.isMainFrame && !event.isSameDocument) lost();
+    });
+    contents.on('render-process-gone', lost);
+    contents.once('destroyed', () => {
+      browserPages.delete(pageId);
+      lost();
+    });
+    browserPages.set(pageId, stops);
+    return stops;
+  }
+  handle(channels.browser.tabRef, z.tuple([id, z.uuid()]), (_window, owner, tab) =>
+    browser.tabRef(owner, tab),
+  );
+  handle(channels.browser.snapshot, z.tuple([id, browserTab]), (_window, owner, tab) =>
+    browser.snapshot(owner, tab),
+  );
+  handle(
+    channels.browser.command,
+    z.tuple([id, browserTab, browserCommand]),
+    (_window, owner, tab, command) => browser.command(owner, tab, command),
+  );
+  handle(
+    channels.browser.subscribe,
+    z.tuple([id, browserTab, z.uuid()]),
+    (window, owner, tab, subscription) => {
+      const contents = window.webContents;
+      const stops = browserPage(contents);
+      if (stops.has(subscription) || stops.size >= 128)
+        throw new Error('Browser subscription unavailable.');
+      stops.set(
+        subscription,
+        browser.subscribe(owner, tab, (state) => {
+          if (!contents.isDestroyed())
+            contents.send(channels.browser.state, { subscription, state });
+        }),
+      );
+    },
+  );
+  handle(channels.browser.unsubscribe, z.tuple([z.uuid()]), (window, subscription) => {
+    const stops = browserPages.get(window.webContents.id);
+    stops?.get(subscription)?.();
+    stops?.delete(subscription);
+  });
+  handle(
+    channels.browser.bind,
+    z.tuple([id, id, browserTab]),
+    (window, owner, presentation, tab) => {
+      const contents = window.webContents;
+      if (contents !== presentationWindow)
+        return { status: 'refused', code: 'not-found', dispatched: false };
+      browserPage(contents);
+      return browserViews.bind(
+        window,
+        owner,
+        presentation,
+        tab,
+        (binding) => {
+          if (!contents.isDestroyed()) contents.send(channels.browser.focus, binding);
+        },
+        (binding) => {
+          if (!contents.isDestroyed()) contents.send(channels.browser.fileDrag, binding);
+        },
+      );
+    },
+  );
+  handle(
+    channels.browser.place,
+    z.tuple([z.uuid(), z.int().positive(), browserPlacement]),
+    (window, binding, revision, placement) =>
+      browserViews.place(window, binding, revision, placement),
+  );
+  handle(channels.browser.release, z.tuple([z.uuid()]), (window, binding) => {
+    browserViews.release(window.webContents.id, binding);
+  });
+  const showsComputer = (
+    contents: WebContents,
+    owner: string,
+    presentation: string,
+    target: string,
+  ) => contents === presentationWindow && presentations.showsComputer(owner, presentation, target);
+  handle(
+    channels.computer.preview,
+    z.tuple([id, id, z.uuid()]),
+    async (window, owner, presentation, target) => {
+      const contents = window.webContents;
+      const allowed = () => showsComputer(contents, owner, presentation, target);
+      if (allowed()) {
+        const result = await computer.preview(owner, target);
+        if (allowed()) return result;
+      }
+      return { status: 'refused', code: 'not-found', dispatched: false };
+    },
+  );
+  handle(
+    channels.computer.command,
+    z.tuple([id, id, z.uuid(), z.enum(['reveal', 'take-over', 'hand-back'])]),
+    (window, owner, presentation, target, command) =>
+      showsComputer(window.webContents, owner, presentation, target)
+        ? computer.command(owner, target, command)
+        : { status: 'refused', code: 'not-found', dispatched: false },
+  );
+
   handle(
     channels.presentations.report,
     z.tuple([presentationRendererSchema]),
@@ -270,7 +468,9 @@ export function serveBridge({
           lost();
         });
       }
-      return presentations.receive(message);
+      const applied = presentations.receive(message);
+      if (applied) browserViews.reconcile(contents.id);
+      return applied;
     },
   );
   handle(channels.presentations.artifact, z.tuple([path.min(1)]), (window, id) =>
@@ -429,6 +629,8 @@ export function serveBridge({
     filesUi(window).confirmClose(file),
   );
   handle(channels.files.image, z.tuple([path]), (_window, file) => files.image(file));
+  handle(channels.setup.snapshot, z.tuple([]), () => setup.snapshot());
+  handle(channels.setup.act, z.tuple([setupAction]), (_window, action) => setup.act(action));
   handle(channels.settings.get, z.tuple([]), () => settings.get());
   handle(channels.settings.set, z.tuple([settingsChange]), (_window, given) => {
     const change: Partial<AppSettings> = {};
@@ -527,6 +729,9 @@ export function serveBridge({
   settings.onChange((current) => {
     broadcast(channels.settings.changed, current);
   });
+  setup.subscribe((snapshot) => {
+    broadcast(channels.setup.changed, snapshot);
+  });
   accounts.onChange((list) => {
     broadcast(channels.accounts.changed, list);
   });
@@ -567,8 +772,4 @@ function callerWindow(event: IpcMainInvokeEvent, page: string): BrowserWindow {
     throw new Error('The bridge answers only the app’s own page.');
   }
   return window;
-}
-
-function broadcast(channel: string, value: unknown): void {
-  for (const window of BrowserWindow.getAllWindows()) window.webContents.send(channel, value);
 }

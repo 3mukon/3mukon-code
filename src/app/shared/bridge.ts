@@ -1,12 +1,14 @@
 import type { AccountsBridge } from '../../accounts/shared/accounts';
 import type { ApprovalsBridge } from '../../approvals/shared/approvals';
+import type { BrowserBridge } from '../../browser/shared/view';
+import type { ComputerBridge } from '../../computer/shared/computer';
 import type { FilesBridge } from '../../files/shared/files';
 import type { PanelsBridge } from '../../panels/shared/panels';
 import type { PresentationBridge } from '../../panels/shared/presentation';
 import type { SessionsBridge } from '../../sessions/shared/sessions';
 import type { SettingsBridge } from '../../settings/shared/settings';
 import type { TerminalBridge } from '../../terminal/shared/terminal';
-import type { AutomationBridge } from '../../toolset/shared/automation';
+import type { AutomationBridge, UserSetupBridge } from '../../toolset/shared/automation';
 import type { Prompt } from '../../ui/shared/prompts';
 import type { WorkspacesBridge } from '../../workspaces/shared/workspaces';
 
@@ -18,6 +20,11 @@ export interface Bridge {
   panels: PanelsBridge;
   presentations: PresentationBridge;
   automation: AutomationBridge;
+  browser: BrowserBridge;
+  computer: ComputerBridge;
+  // What the settings and the sessions' setup notices show of browser and computer use, with the
+  // steps the user's click takes there.
+  setup: UserSetupBridge;
   files: FilesBridge;
   approvals: ApprovalsBridge;
   settings: SettingsBridge;
@@ -41,6 +48,23 @@ export const settingsSwitch = '--app-settings=';
 
 // The bridge's IPC channels: one per call the main process answers, and one per notification it sends.
 export const channels = {
+  browser: {
+    tabRef: 'browser:tab-ref',
+    snapshot: 'browser:snapshot',
+    subscribe: 'browser:subscribe',
+    unsubscribe: 'browser:unsubscribe',
+    state: 'browser:state',
+    command: 'browser:command',
+    bind: 'browser:bind',
+    place: 'browser:place',
+    release: 'browser:release',
+    focus: 'browser:focus',
+    fileDrag: 'browser:file-drag',
+  },
+  computer: {
+    preview: 'computer:preview',
+    command: 'computer:command',
+  },
   automation: {
     snapshot: 'automation:snapshot',
     subscribe: 'automation:subscribe',
@@ -119,6 +143,11 @@ export const channels = {
     get: 'settings:get',
     set: 'settings:set',
     changed: 'settings:changed',
+  },
+  setup: {
+    snapshot: 'setup:snapshot',
+    act: 'setup:act',
+    changed: 'setup:changed',
   },
   terminal: {
     open: 'terminal:open',

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { FakeBrowserTabs } from '../../browser/shared/browser-fake';
 import { initI18n } from '../../i18n/renderer/i18n';
 import { initialSessionState } from '../../sessions/shared/session-state';
 import type { SessionList, SessionSummary } from '../../sessions/shared/sessions';
@@ -10,10 +11,24 @@ import type {
   PresentationHostMessage,
   PresentationRendererMessage,
 } from '../../panels/shared/presentation';
-import type { AutomationSnapshot } from '../../sessions/shared/automation';
+import type { BrowserViewPlacement } from '../../browser/shared/view';
+import type {
+  AutomationSnapshot,
+  HostApproval,
+  SetupSnapshot,
+  TargetSummary,
+} from '../../sessions/shared/automation';
 import type { Bridge } from '../shared/bridge';
 import { App } from './app';
-import { FakeAutomationBridge } from '../../toolset/shared/automation-fake';
+import { FakeAutomationBridge, FakeUserSetupBridge } from '../../toolset/shared/automation-fake';
+
+// Finds a line whose words are drawn in parts, such as a call's title, by all its words.
+function textOf(words: string) {
+  return (_: string, element: Element | null) =>
+    element instanceof HTMLElement &&
+    element.classList.contains('truncate') &&
+    element.textContent === words;
+}
 
 beforeAll(() => {
   initI18n(['en-US']);
@@ -21,6 +36,24 @@ beforeAll(() => {
 afterEach(cleanup);
 
 // A bridge whose main process has these workspaces and sessions, the archived ones apart.
+// What the setup reports before anything is connected or checked.
+const NO_SETUP: SetupSnapshot = {
+  appProfile: { id: 'embedded-app', canClear: true },
+  chrome: {
+    installedVersion: null,
+    minimumVersion: '',
+    connection: 'unavailable',
+    profile: null,
+  },
+  computer: {
+    helperName: 'Automation Helper',
+    accessibility: 'unknown',
+    screenRecording: 'unknown',
+    inputMonitoring: { required: false, state: 'unknown' },
+    restartRequired: false,
+  },
+};
+
 function fakeBridge(
   list: WorkspaceList = { workspaces: [], selectedId: null },
   sessions: SessionSummary[] = [],
@@ -31,8 +64,25 @@ function fakeBridge(
     archived: archived.length,
     shown: [],
   };
+  const tabs = new FakeBrowserTabs();
   return {
+    browser: {
+      tabRef: () => Promise.resolve(null),
+      snapshot: tabs.snapshot.bind(tabs),
+      command: tabs.command.bind(tabs),
+      subscribe: tabs.subscribe.bind(tabs),
+      bind: () => Promise.resolve({ status: 'refused', code: 'not-found', dispatched: false }),
+      place: () => Promise.resolve({ status: 'verified', value: { kind: 'paper' } }),
+      release: () => Promise.resolve(),
+      onFocus: () => () => undefined,
+      onFileDrag: () => () => undefined,
+    },
+    computer: {
+      preview: () => Promise.resolve({ status: 'refused', code: 'not-found', dispatched: false }),
+      command: () => Promise.resolve({ status: 'refused', code: 'not-found', dispatched: false }),
+    },
     automation: new FakeAutomationBridge(),
+    setup: new FakeUserSetupBridge(NO_SETUP),
     presentations: {
       onMessage: () => () => undefined,
       send: () => undefined,
@@ -365,6 +415,80 @@ describe('App', () => {
     ]);
   });
 
+  it('shows a session waiting on an operation’s approval with the focus on that approval', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/web',
+        title: 'Read my invoices',
+        status: 'waiting',
+        activeAt: 1,
+        waitingSince: 2,
+      },
+    ]);
+    const tab: TargetSummary = {
+      ref: { id: 't1', kind: 'browser-tab', generation: 1 },
+      owner: 's1',
+      name: 'Billing',
+      address: 'https://acme.test/billing',
+      sharing: 'app',
+      browser: 'embedded',
+    };
+    const automation = new FakeAutomationBridge();
+    automation.seed({
+      sessionId: 's1',
+      policy: { mode: 'auto', sandbox: 'workspace-write' },
+      policyEpoch: 1,
+      phase: 'waiting-grant',
+      resources: [tab],
+      operations: [],
+      grants: [],
+      pendingApprovals: [
+        {
+          id: 'host:1',
+          callId: 'call-1',
+          source: 'host',
+          operation: {
+            id: 'op-1',
+            owner: 's1',
+            turn: 'turn-1',
+            accessGeneration: 1,
+            target: tab.ref,
+            kind: 'browser-tab',
+            policyEpoch: 1,
+            state: 'waiting',
+            targetMayActivate: false,
+            deadline: null,
+          },
+          target: tab,
+          canAllowForSession: true,
+          requestedAt: 2,
+        },
+      ],
+      foregroundOwner: null,
+      availability: { tools: 'ready', images: 'supported' },
+      endedGrants: [],
+      presentationNotices: [],
+      recentCalls: [],
+    });
+    bridge.automation = automation;
+    await renderApp(bridge);
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+    fireEvent.click(
+      within(sidebar).getByRole('button', {
+        name: 'Sessions waiting on you: 1. Show the one waiting longest (⇧⌘A).',
+      }),
+    );
+    const block = await within(screen.getByRole('main')).findByRole('region', {
+      name: 'Work on acme.test in the app’s browser, signed in?',
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(block);
+    });
+  });
+
   it('lists archived sessions apart, in a panel the button beside the window buttons opens, which shows one and acts on it', async () => {
     const summary = (id: string, title: string, archived: boolean): SessionSummary => ({
       id,
@@ -405,6 +529,480 @@ describe('App', () => {
     // Its row unarchives it without its menu.
     fireEvent.click(within(archived).getByRole('button', { name: 'Unarchive' }));
     expect(act.mock.calls).toEqual([['s2', 'unarchive']]);
+  });
+
+  it('leaves a notice under a call refused until something is set up, whose step goes to main only from its click', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/web',
+        title: 'Reply to invoices',
+        status: 'idle',
+        activeAt: 1,
+      },
+    ]);
+    bridge.sessions.snapshot = () =>
+      Promise.resolve({
+        seq: 0,
+        state: {
+          ...initialSessionState(),
+          timeline: [
+            {
+              type: 'tool',
+              id: 'tool-1',
+              kind: 'other',
+              title: 'computer_observe',
+              status: 'failed',
+              output: '',
+              changes: [],
+            },
+          ],
+        },
+      });
+    const automation = new FakeAutomationBridge();
+    automation.seed({
+      sessionId: 's1',
+      policy: { mode: 'auto', sandbox: 'workspace-write' },
+      policyEpoch: 1,
+      phase: 'idle',
+      resources: [],
+      operations: [],
+      grants: [],
+      pendingApprovals: [],
+      foregroundOwner: null,
+      availability: { tools: 'ready', images: 'supported' },
+      endedGrants: [],
+      presentationNotices: [],
+      recentCalls: [
+        {
+          callId: 'call-1',
+          sessionId: 's1',
+          turnId: 'turn-1',
+          accessGeneration: 1,
+          revision: 1,
+          toolName: 'computer_observe',
+          operationId: null,
+          operationEnd: null,
+          grantId: null,
+          grantEnd: null,
+          approval: null,
+          incidents: [],
+          startedAt: 1,
+          completedAt: 2,
+          phase: 'settled',
+          outcome: {
+            status: 'refused',
+            code: 'setup-required',
+            dispatched: false,
+            detail: {
+              kind: 'setup',
+              requirement: { kind: 'permission', permission: 'screen-recording' },
+            },
+          },
+          frames: [],
+          framesState: 'available',
+          providerEntry: {
+            callId: 'call-1',
+            sessionId: 's1',
+            turnId: 'turn-1',
+            accessGeneration: 1,
+            toolName: 'computer_observe',
+            providerToolId: 'tool-1',
+          },
+          family: 'computer',
+          target: {
+            state: 'resolved',
+            summary: {
+              ref: { id: 'app-1', kind: 'application', generation: 1 },
+              owner: 's1',
+              name: 'Mail',
+            },
+          },
+          sharing: null,
+          delivery: 'background',
+        },
+      ],
+    });
+    bridge.automation = automation;
+    const setup = new FakeUserSetupBridge(NO_SETUP);
+    setup.outcome = { status: 'verified', value: null };
+    bridge.setup = setup;
+    await renderApp(bridge);
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Reply to invoices/,
+      }),
+    );
+    const panel = within(screen.getByRole('main')).getByRole('region', {
+      name: 'Reply to invoices',
+    });
+    await waitFor(() => {
+      expect(within(panel).getByText('Computer use needs Screen Recording')).toBeTruthy();
+    });
+    expect(within(panel).getByText('Needs setup')).toBeTruthy();
+    expect(setup.commands).toEqual([]);
+    fireEvent.click(within(panel).getByRole('button', { name: 'Open System Settings' }));
+    await waitFor(() => {
+      expect(setup.commands).toEqual([{ kind: 'open-permission', permission: 'screen-recording' }]);
+    });
+  });
+
+  it('leaves a notice that browser use needs Chrome connected, whose Connect connects its profile from the click', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/web',
+        title: 'Read my invoices',
+        status: 'idle',
+        activeAt: 1,
+      },
+    ]);
+    bridge.sessions.snapshot = () =>
+      Promise.resolve({
+        seq: 0,
+        state: {
+          ...initialSessionState(),
+          timeline: [
+            {
+              type: 'tool',
+              id: 'tool-1',
+              kind: 'other',
+              title: 'browser_open',
+              status: 'failed',
+              output: '',
+              changes: [],
+            },
+          ],
+        },
+      });
+    const automation = new FakeAutomationBridge();
+    automation.seed({
+      sessionId: 's1',
+      policy: { mode: 'auto', sandbox: 'workspace-write' },
+      policyEpoch: 1,
+      phase: 'idle',
+      resources: [],
+      operations: [],
+      grants: [],
+      pendingApprovals: [],
+      foregroundOwner: null,
+      availability: { tools: 'ready', images: 'supported' },
+      endedGrants: [],
+      presentationNotices: [],
+      recentCalls: [
+        {
+          callId: 'call-1',
+          sessionId: 's1',
+          turnId: 'turn-1',
+          accessGeneration: 1,
+          revision: 1,
+          toolName: 'browser_open',
+          operationId: null,
+          operationEnd: null,
+          grantId: null,
+          grantEnd: null,
+          approval: null,
+          incidents: [],
+          startedAt: 1,
+          completedAt: 2,
+          phase: 'settled',
+          outcome: {
+            status: 'refused',
+            code: 'setup-required',
+            dispatched: false,
+            detail: {
+              kind: 'setup',
+              requirement: { kind: 'browser', browser: 'chrome', step: 'connect' },
+            },
+          },
+          frames: [],
+          framesState: 'available',
+          providerEntry: {
+            callId: 'call-1',
+            sessionId: 's1',
+            turnId: 'turn-1',
+            accessGeneration: 1,
+            toolName: 'browser_open',
+            providerToolId: 'tool-1',
+          },
+          family: 'browser',
+          target: { state: 'unresolved' },
+          sharing: 'global',
+          delivery: 'background',
+        },
+      ],
+    });
+    bridge.automation = automation;
+    const chrome: SetupSnapshot['chrome'] = {
+      ...NO_SETUP.chrome,
+      installedVersion: '158.0.8127.18',
+      minimumVersion: '158.0.8127.2',
+      connection: 'disconnected',
+      profiles: [{ id: 'Default', name: 'Personal' }],
+    };
+    const setup = new FakeUserSetupBridge({ ...NO_SETUP, chrome });
+    setup.outcome = { status: 'verified', value: null };
+    bridge.setup = setup;
+    await renderApp(bridge);
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Read my invoices/,
+      }),
+    );
+    const panel = within(screen.getByRole('main')).getByRole('region', {
+      name: 'Read my invoices',
+    });
+    await waitFor(() => {
+      expect(within(panel).getByText('Browser use needs Chrome connected')).toBeTruthy();
+    });
+    expect(setup.commands).toEqual([]);
+    fireEvent.click(within(panel).getByRole('button', { name: 'Connect' }));
+    await waitFor(() => {
+      expect(setup.commands).toEqual([
+        { kind: 'connect-browser', browser: 'chrome', profileId: 'Default' },
+      ]);
+    });
+    act(() => {
+      setup.publish({
+        ...NO_SETUP,
+        chrome: {
+          ...chrome,
+          connection: 'connected',
+          profile: { id: 'Default', name: 'Personal' },
+        },
+      });
+    });
+    expect(within(panel).getByText('Connected')).toBeTruthy();
+    expect(within(panel).getByText('Personal profile, with its sign-ins')).toBeTruthy();
+    expect(within(panel).queryByRole('button', { name: 'Connect' })).toBeNull();
+    expect(within(panel).queryByText(/choose the tab/i)).toBeNull();
+  });
+
+  it('asks for an operation’s approval at the end of the activity, lists the grants above the composer and ends them, and keeps the answered approval before its call', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/web',
+        title: 'Read my invoices',
+        status: 'running',
+        activeAt: 1,
+      },
+    ]);
+    bridge.sessions.snapshot = () =>
+      Promise.resolve({
+        seq: 0,
+        state: {
+          ...initialSessionState(),
+          turnRunning: true,
+          timeline: [
+            {
+              type: 'tool',
+              id: 'tool-1',
+              kind: 'other',
+              title: 'browser_navigate',
+              status: 'completed',
+              output: '',
+              changes: [],
+            },
+          ],
+        },
+      });
+    const tab: TargetSummary = {
+      ref: { id: 't1', kind: 'browser-tab', generation: 1 },
+      owner: 's1',
+      name: 'Inbox',
+      address: 'https://mail.example.com/inbox',
+      sharing: 'global',
+      browser: 'chrome',
+      profile: { id: 'Default', name: 'Personal' },
+    };
+    const operation = {
+      owner: 's1',
+      turn: 'turn-1',
+      accessGeneration: 1,
+      target: tab.ref,
+      kind: 'browser-tab' as const,
+      policyEpoch: 1,
+      targetMayActivate: true,
+      deadline: 0,
+    };
+    const asked: HostApproval = {
+      id: 'host:2',
+      callId: 'call-2',
+      source: 'host',
+      operation: { ...operation, id: 'op-2', state: 'waiting' },
+      target: tab,
+      canAllowForSession: true,
+      requestedAt: 2,
+    };
+    const automation = new FakeAutomationBridge();
+    automation.seed({
+      sessionId: 's1',
+      policy: { mode: 'auto', sandbox: 'workspace-write' },
+      policyEpoch: 1,
+      phase: 'waiting-grant',
+      resources: [tab],
+      operations: [],
+      grants: [
+        {
+          id: 'g1',
+          target: tab,
+          summaryAt: 1,
+          operationKind: 'browser-tab',
+          scope: 'session',
+          issuedAt: 1,
+        },
+      ],
+      pendingApprovals: [asked],
+      foregroundOwner: null,
+      availability: { tools: 'ready', images: 'supported' },
+      endedGrants: [],
+      presentationNotices: [],
+      recentCalls: [
+        {
+          callId: 'call-1',
+          sessionId: 's1',
+          turnId: 'turn-1',
+          accessGeneration: 1,
+          revision: 1,
+          toolName: 'browser_navigate',
+          operationId: 'op-1',
+          operationEnd: null,
+          grantId: 'g1',
+          grantEnd: null,
+          approval: {
+            request: {
+              ...asked,
+              id: 'host:1',
+              callId: 'call-1',
+              operation: { ...operation, id: 'op-1', state: 'active' },
+            },
+            answer: { decision: 'allow-for-session' },
+            answeredAt: 1,
+            grantId: 'g1',
+          },
+          incidents: [],
+          startedAt: 1,
+          completedAt: 2,
+          phase: 'settled',
+          outcome: { status: 'dispatched', evidence: 'not-verified' },
+          frames: [],
+          framesState: 'available',
+          providerEntry: {
+            callId: 'call-1',
+            sessionId: 's1',
+            turnId: 'turn-1',
+            accessGeneration: 1,
+            toolName: 'browser_navigate',
+            providerToolId: 'tool-1',
+          },
+          family: 'browser',
+          target: { state: 'resolved', summary: tab },
+          sharing: 'global',
+          delivery: 'background',
+        },
+      ],
+    });
+    automation.outcome = { status: 'verified', value: null };
+    bridge.automation = automation;
+    await renderApp(bridge);
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Read my invoices/,
+      }),
+    );
+    const panel = within(screen.getByRole('main')).getByRole('region', {
+      name: 'Read my invoices',
+    });
+    const block = await within(panel).findByRole('region', {
+      name: 'Work on mail.example.com in Chrome, signed in as you?',
+    });
+    within(block).getByText(
+      'Codex CLI wants to use the sign-ins of your Personal profile, in a tab it opens in Chrome.',
+    );
+    fireEvent.click(within(block).getByRole('button', { name: 'Allow Once' }));
+    await waitFor(() => {
+      expect(automation.commands).toContainEqual({
+        kind: 'answer',
+        sessionId: 's1',
+        id: 'host:2',
+        answer: { decision: 'allow-once' },
+      });
+    });
+
+    const answered = within(panel).getByText('Allowed for this session');
+    const call = within(panel).getByText('Opened');
+    expect(answered.compareDocumentPosition(call) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const line = answered.closest('p');
+    if (line === null) throw new Error('The answered approval has no line.');
+    fireEvent.click(
+      within(line).getByRole('button', {
+        name: 'End: Work on mail.example.com in Chrome, signed in as you?',
+      }),
+    );
+    await waitFor(() => {
+      expect(automation.commands).toContainEqual({ kind: 'end-grant', sessionId: 's1', id: 'g1' });
+    });
+
+    within(panel).getByText('1 grant');
+    within(panel).getByText(/· Chrome tab mail\.example\.com$/);
+  });
+
+  it('reads setup automatically while Settings is open and takes setup actions from clicks', async () => {
+    const bridge = fakeBridge();
+    const setup = new FakeUserSetupBridge({
+      ...NO_SETUP,
+      computer: { ...NO_SETUP.computer, accessibility: 'granted', screenRecording: 'not-granted' },
+    });
+    setup.outcome = { status: 'verified', value: null };
+    const read = vi.spyOn(setup, 'snapshot');
+    bridge.setup = setup;
+    await renderApp(bridge);
+    expect(read).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const main = within(screen.getByRole('main'));
+    await waitFor(() => {
+      expect(main.getByText('Allowed')).toBeTruthy();
+    });
+    expect(main.getByRole('region', { name: 'Browser use' })).toBeTruthy();
+    expect(read).toHaveBeenCalledOnce();
+    expect(setup.commands).toEqual([]);
+    expect(main.queryByRole('button', { name: 'Check Permissions' })).toBeNull();
+    fireEvent.click(main.getByRole('button', { name: 'Clear Sign-Ins' }));
+    fireEvent.click(main.getByRole('button', { name: 'Open System Settings' }));
+    await waitFor(() => {
+      expect(setup.commands).toEqual([
+        { kind: 'clear-app-sign-ins' },
+        { kind: 'open-permission', permission: 'screen-recording' },
+      ]);
+    });
+    // A permission update can reach the panel ahead of an older reply to its focus read.
+    const cached = await setup.snapshot();
+    read.mockClear();
+    let reply!: (snapshot: SetupSnapshot) => void;
+    read.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          reply = resolve;
+        }),
+    );
+    fireEvent.focus(window);
+    expect(read).toHaveBeenCalledOnce();
+    act(() => {
+      setup.publish({ ...cached, computer: { ...cached.computer, screenRecording: 'granted' } });
+    });
+    await act(async () => {
+      reply(cached);
+      await Promise.resolve();
+    });
+    expect(main.getAllByText('Allowed')).toHaveLength(2);
+    expect(main.queryByRole('button', { name: 'Open System Settings' })).toBeNull();
   });
 
   it('opens the settings in a panel of their own with the gear or ⌘,, and the window takes the language they choose', async () => {
@@ -902,6 +1500,8 @@ describe('App', () => {
     await waitFor(() => {
       expect(within(panel).getByText('Showed comparison.md beside this session')).toBeTruthy();
     });
+    // The presentation's line stands in the provider's entry's place.
+    expect(within(panel).queryByText('panel_present')).toBeNull();
     fireEvent.click(within(panel).getByRole('button', { name: 'Show' }));
     const request = sent.at(-1);
     if (request?.kind !== 'show' || !('presentationId' in request)) {
@@ -918,6 +1518,424 @@ describe('App', () => {
     });
     await waitFor(() => {
       expect(within(panel).getByText('It’s no longer available.')).toBeTruthy();
+    });
+  });
+
+  it('shows a browser call in place of its tool call, and what the session uses above its composer, with Show and Stop', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/web',
+        title: 'Compare pricing pages',
+        status: 'running',
+        activeAt: 1,
+      },
+    ]);
+    bridge.sessions.snapshot = () =>
+      Promise.resolve({
+        seq: 0,
+        state: {
+          ...initialSessionState(),
+          timeline: [
+            {
+              type: 'tool',
+              id: 'tool-1',
+              kind: 'other',
+              title: 'browser_navigate',
+              status: 'completed',
+              output: '',
+              changes: [],
+            },
+          ],
+        },
+      });
+    const tab = {
+      ref: { id: 'tab-1', kind: 'browser-tab' as const, generation: 1 },
+      owner: 's1',
+      name: 'Pricing · Example',
+      address: 'https://example.com/pricing',
+      sharing: 'none' as const,
+      browser: 'embedded' as const,
+    };
+    const automation = new FakeAutomationBridge();
+    automation.seed({
+      sessionId: 's1',
+      policy: { mode: 'auto', sandbox: 'workspace-write' },
+      policyEpoch: 1,
+      phase: 'acting',
+      resources: [tab],
+      operations: [
+        {
+          id: 'op-1',
+          owner: 's1',
+          turn: 'turn-1',
+          accessGeneration: 1,
+          target: tab.ref,
+          kind: 'browser-tab',
+          policyEpoch: 1,
+          state: 'active',
+          targetMayActivate: false,
+          deadline: 0,
+        },
+      ],
+      grants: [],
+      pendingApprovals: [],
+      foregroundOwner: null,
+      availability: { tools: 'ready', images: 'supported' },
+      endedGrants: [],
+      presentationNotices: [],
+      recentCalls: [
+        {
+          callId: 'call-1',
+          sessionId: 's1',
+          turnId: 'turn-1',
+          accessGeneration: 1,
+          revision: 1,
+          toolName: 'browser_navigate',
+          operationId: 'op-1',
+          operationEnd: null,
+          grantId: null,
+          grantEnd: null,
+          approval: null,
+          incidents: [],
+          startedAt: 1,
+          completedAt: 2,
+          phase: 'settled',
+          outcome: { status: 'verified', value: null },
+          frames: [],
+          framesState: 'available',
+          providerEntry: {
+            callId: 'call-1',
+            sessionId: 's1',
+            turnId: 'turn-1',
+            accessGeneration: 1,
+            toolName: 'browser_navigate',
+            providerToolId: 'tool-1',
+          },
+          family: 'browser',
+          target: { state: 'resolved', summary: tab },
+          sharing: 'none',
+          delivery: 'background',
+        },
+      ],
+    });
+    bridge.automation = automation;
+    const sent: PresentationRendererMessage[] = [];
+    bridge.presentations = {
+      onMessage: () => () => undefined,
+      send: (message) => {
+        sent.push(message);
+      },
+      artifact: () => Promise.resolve(null),
+    };
+    await renderApp(bridge);
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Compare pricing pages/,
+      }),
+    );
+    const panel = within(screen.getByRole('main')).getByRole('region', {
+      name: 'Compare pricing pages',
+    });
+    await waitFor(() => {
+      expect(within(panel).getByText(textOf('Opened example.com/pricing'))).toBeTruthy();
+    });
+    expect(within(panel).queryByText('browser_navigate')).toBeNull();
+    expect(
+      within(panel).getByText(textOf('Using example.com · No sharing · in the background')),
+    ).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Show' }));
+    const request = sent.at(-1);
+    if (request?.kind !== 'show' || !('content' in request)) {
+      throw new Error('The window asked main to show nothing.');
+    }
+    expect(request).toMatchObject({ owner: 's1', content: { kind: 'browser', tabId: 'tab-1' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Stop' }));
+    await waitFor(() => {
+      expect(automation.commands).toContainEqual({ kind: 'stop', sessionId: 's1' });
+    });
+  });
+
+  it('shows a tab its session presents as its live page, in a panel named by the page, with its sharing and what the session does with it', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/web',
+        title: 'Compare pricing pages',
+        status: 'running',
+        activeAt: 1,
+      },
+    ]);
+    const ref = { id: 'tab-1', kind: 'browser-tab' as const, generation: 1 };
+    const automation = new FakeAutomationBridge();
+    automation.seed({
+      sessionId: 's1',
+      policy: { mode: 'auto', sandbox: 'workspace-write' },
+      policyEpoch: 1,
+      phase: 'acting',
+      resources: [
+        {
+          ref,
+          owner: 's1',
+          name: 'Pricing · Example',
+          address: 'https://example.com/pricing',
+          sharing: 'none',
+          browser: 'embedded',
+        },
+      ],
+      operations: [
+        {
+          id: 'op-1',
+          owner: 's1',
+          turn: 'turn-1',
+          accessGeneration: 1,
+          target: ref,
+          kind: 'browser-tab',
+          policyEpoch: 1,
+          state: 'active',
+          targetMayActivate: false,
+          deadline: 0,
+        },
+      ],
+      grants: [],
+      pendingApprovals: [],
+      foregroundOwner: null,
+      availability: { tools: 'ready', images: 'supported' },
+      endedGrants: [],
+      presentationNotices: [],
+      recentCalls: [],
+    });
+    bridge.automation = automation;
+    const tabs = new FakeBrowserTabs();
+    tabs.show({
+      ref,
+      owner: 's1',
+      browser: 'embedded',
+      sharing: 'none',
+      profile: null,
+      title: 'Pricing · Example',
+      address: 'https://example.com/pricing',
+      documentGeneration: 1,
+      geometryGeneration: 1,
+      loading: false,
+      error: null,
+      signIn: 'unknown',
+      canGoBack: true,
+      canGoForward: false,
+      control: 'agent',
+    });
+    const placements: BrowserViewPlacement[] = [];
+    let focused: ((binding: string) => void) | undefined;
+    const bind = vi.fn(() => Promise.resolve({ status: 'verified' as const, value: 'b1' }));
+    bridge.browser = {
+      tabRef: (owner, id) => Promise.resolve(owner === 's1' && id === 'tab-1' ? ref : null),
+      snapshot: tabs.snapshot.bind(tabs),
+      command: tabs.command.bind(tabs),
+      subscribe: tabs.subscribe.bind(tabs),
+      bind,
+      place: (_binding, _revision, placement) => {
+        placements.push(placement);
+        return Promise.resolve({ status: 'verified', value: { kind: 'live' } });
+      },
+      release: () => Promise.resolve(),
+      onFocus: (listener) => {
+        focused = listener;
+        return () => {
+          focused = undefined;
+        };
+      },
+      onFileDrag: () => () => undefined,
+    };
+    let deliver: ((message: PresentationHostMessage) => void) | undefined;
+    const sent: PresentationRendererMessage[] = [];
+    bridge.presentations = {
+      onMessage: (listener) => {
+        deliver = listener;
+        return () => {
+          deliver = undefined;
+        };
+      },
+      send: (message) => {
+        sent.push(message);
+      },
+      artifact: () => Promise.resolve(null),
+    };
+    await renderApp(bridge);
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Compare pricing pages/,
+      }),
+    );
+    const epoch = sent.find((message) => message.kind === 'snapshot')?.epoch ?? '';
+    act(() => {
+      deliver?.({
+        kind: 'present',
+        commandId: 'c1',
+        epoch,
+        owner: 's1',
+        presentationId: 'p1',
+        version: 0,
+        title: 'Pricing · Example',
+        items: [{ kind: 'browser', tabId: 'tab-1' }],
+        placement: { side: 'right', direction: 'row' },
+      });
+    });
+    const browser = await waitFor(() =>
+      within(screen.getByRole('main')).getByRole('region', { name: 'Pricing · Example' }),
+    );
+    await waitFor(() => {
+      expect(within(browser).getByText('example.com/pricing')).toBeTruthy();
+    });
+    // The header names the page by its title and host, with how it is shared.
+    expect(within(browser).getByText('example.com')).toBeTruthy();
+    expect(within(browser).getByText('No sharing')).toBeTruthy();
+    expect(within(browser).getByText('Compare pricing pages is acting')).toBeTruthy();
+    await waitFor(() => {
+      expect(bind).toHaveBeenCalledWith('s1', 'p1', ref);
+    });
+    // Presented without the focus, the page dims; the click main reports focuses its panel.
+    await waitFor(() => {
+      expect(placements.at(-1)?.dim).not.toBeNull();
+    });
+    act(() => {
+      focused?.('b1');
+    });
+    await waitFor(() => {
+      expect(placements.at(-1)?.dim).toBeNull();
+    });
+    fireEvent.click(within(browser).getByRole('button', { name: 'Back' }));
+    await waitFor(() => {
+      expect(tabs.commands).toContainEqual({ kind: 'back' });
+    });
+    fireEvent.click(within(browser).getByRole('button', { name: 'Stop' }));
+    await waitFor(() => {
+      expect(automation.commands).toContainEqual({ kind: 'stop', sessionId: 's1' });
+    });
+  });
+
+  it('shows a window its session presents as a preview named by its application, with Switch to and what the session does with it', async () => {
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
+      {
+        id: 's1',
+        provider: 'codex',
+        sessionId: 'thread-1',
+        cwd: '/Users/me/notes',
+        title: 'Reply to invoices',
+        status: 'running',
+        activeAt: 1,
+      },
+    ]);
+    const app = { id: 'app-1', kind: 'application' as const, generation: 1 };
+    const window = { id: 'window-1', kind: 'window' as const, generation: 1 };
+    const automation = new FakeAutomationBridge();
+    automation.seed({
+      sessionId: 's1',
+      policy: { mode: 'auto', sandbox: 'workspace-write' },
+      policyEpoch: 1,
+      phase: 'acting',
+      resources: [
+        { ref: { ...app, id: 'other-app', generation: 2 }, owner: 's1', name: 'Mail' },
+        { ref: app, owner: 's1', name: 'Mail' },
+        { ref: window, owner: 's1', name: 'Inbox', applicationName: 'Mail', application: app },
+      ],
+      operations: [
+        {
+          id: 'op-1',
+          owner: 's1',
+          turn: 'turn-1',
+          accessGeneration: 1,
+          target: app,
+          kind: 'application-background',
+          policyEpoch: 1,
+          state: 'active',
+          targetMayActivate: true,
+          deadline: 0,
+        },
+      ],
+      grants: [],
+      pendingApprovals: [],
+      foregroundOwner: null,
+      availability: { tools: 'ready', images: 'supported' },
+      endedGrants: [],
+      presentationNotices: [],
+      recentCalls: [],
+    });
+    bridge.automation = automation;
+    const preview = vi.fn(() =>
+      Promise.resolve({
+        status: 'verified' as const,
+        value: { status: 'unavailable' as const, reason: 'permission-required' as const },
+      }),
+    );
+    const command = vi.fn(() => Promise.resolve({ status: 'verified' as const, value: null }));
+    bridge.computer = { preview, command };
+    const setup = new FakeUserSetupBridge(NO_SETUP);
+    bridge.setup = setup;
+    let deliver: ((message: PresentationHostMessage) => void) | undefined;
+    const sent: PresentationRendererMessage[] = [];
+    bridge.presentations = {
+      onMessage: (listener) => {
+        deliver = listener;
+        return () => {
+          deliver = undefined;
+        };
+      },
+      send: (message) => {
+        sent.push(message);
+      },
+      artifact: () => Promise.resolve(null),
+    };
+    await renderApp(bridge);
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
+        name: /Reply to invoices/,
+      }),
+    );
+    const epoch = sent.find((message) => message.kind === 'snapshot')?.epoch ?? '';
+    act(() => {
+      deliver?.({
+        kind: 'present',
+        commandId: 'c1',
+        epoch,
+        owner: 's1',
+        presentationId: 'p1',
+        version: 0,
+        title: 'Inbox',
+        items: [{ kind: 'computer', targetId: 'window-1' }],
+        placement: { side: 'right', direction: 'row' },
+      });
+    });
+    const panel = await waitFor(() =>
+      within(screen.getByRole('main')).getByRole('region', { name: 'Mail' }),
+    );
+    // The header names the application and the session, with whether the work runs in the background.
+    expect(within(panel).getByText('Reply to invoices')).toBeTruthy();
+    expect(within(panel).getByText('Background')).toBeTruthy();
+    await waitFor(() => {
+      expect(preview).toHaveBeenCalledWith('s1', 'p1', 'window-1');
+    });
+    await waitFor(() => {
+      expect(within(panel).getByText('Showing Mail needs Screen Recording')).toBeTruthy();
+    });
+    expect(within(panel).getByText('Reply to invoices is acting in Mail')).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Open System Settings' }));
+    await waitFor(() => {
+      expect(setup.commands).toContainEqual({
+        kind: 'open-permission',
+        permission: 'screen-recording',
+      });
+    });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Switch to Mail' }));
+    await waitFor(() => {
+      expect(command).toHaveBeenCalledWith('s1', 'p1', 'window-1', 'reveal');
+    });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Stop' }));
+    await waitFor(() => {
+      expect(automation.commands).toContainEqual({ kind: 'stop', sessionId: 's1' });
     });
   });
 });

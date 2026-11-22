@@ -59,6 +59,8 @@ export function launch(data: string, ...args: string[]): Promise<ElectronApplica
 // such as those that send a provider's requests to a test's own service; and `colorScheme: null`, for
 // a page that follows macOS's appearance as the app sets it, which Playwright otherwise holds at light.
 export interface LaunchOptions {
+  // The executable of a packaged test copy. The default is the development build.
+  executablePath?: string;
   args?: readonly string[];
   env?: Readonly<Record<string, string>>;
   colorScheme?: null;
@@ -68,7 +70,12 @@ export interface LaunchOptions {
 export function launchWith(data: string, options: LaunchOptions): Promise<ElectronApplication> {
   return shielded(
     electron.launch({
-      args: ['.', `--user-data-dir=${data}`, ...(options.args ?? [])],
+      executablePath: options.executablePath,
+      args: [
+        ...(options.executablePath ? [] : ['.']),
+        `--user-data-dir=${data}`,
+        ...(options.args ?? []),
+      ],
       env: { ...isolatedEnvironment(data), ...options.env },
       ...(options.colorScheme === null ? { colorScheme: null } : {}),
     }),

@@ -2,6 +2,7 @@
 appId: io.github.3mukon.3mukon-code
 files:
   - out/**
+  - '!out/native/**'
   # node-pty's prebuilt modules for other systems, which the app never loads.
   - '!**/node_modules/node-pty/prebuilds/!(darwin-arm64)/**'
 # What the app runs as programs, which macOS cannot run from inside the app's archive: the Claude Code
@@ -13,6 +14,7 @@ asarUnpack:
   - '**/node_modules/@openai/codex-darwin-arm64/vendor/**'
   - '**/node_modules/node-pty/prebuilds/darwin-arm64/**'
 npmRebuild: false
+afterPack: scripts/stage-native-helper.mjs
 mac:
   target:
     - target: dir
@@ -23,6 +25,9 @@ mac:
   # The app's icon, which scripts/app-icon.sh makes from a picture.
   icon: resources/icon.icns
   identity: '-'
+  # The optional computer-use helper keeps its independent signature and designated requirement.
+  signIgnore:
+    - '/Contents/Helpers/Computer Use Helper\.app(/|$)'
   # Hardened runtime would make library validation reject the ad-hoc signed Electron framework; it
   # only matters for notarization, which a local build skips.
   hardenedRuntime: false

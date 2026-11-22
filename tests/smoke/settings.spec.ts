@@ -30,7 +30,7 @@ test('the settings open in a panel of their own, and their language, appearance 
         .toBe('dark');
       await expect.poll(() => window.evaluate(dark)).toBe(true);
       // The tooltips start off: the gear's shows only once they are turned on (ADR-0021).
-      const gear = window.getByRole('button', { name: 'Settings' });
+      const gear = window.getByRole('button', { name: 'Settings', exact: true });
       const tooltip = window.locator('[data-tooltip]');
       await gear.hover();
       await window.waitForTimeout(800);
@@ -46,7 +46,7 @@ test('the settings open in a panel of their own, and their language, appearance 
       await expect(window.getByRole('heading', { name: '会话' })).toBeVisible();
       await expect(window.locator('html')).toHaveAttribute('lang', 'zh-Hans');
       // The gear just after the archived sessions' button shows the same panel, which stays one.
-      await window.getByRole('button', { name: '设置' }).click();
+      await window.getByRole('button', { name: '设置', exact: true }).click();
       await expect(main.getByRole('region', { name: '设置' })).toHaveCount(1);
     } finally {
       await app.close();
@@ -58,7 +58,7 @@ test('the settings open in a panel of their own, and their language, appearance 
       await expect(window.getByRole('heading', { name: '会话' })).toBeVisible();
       expect(await again.evaluate(({ nativeTheme }) => nativeTheme.themeSource)).toBe('dark');
       await expect.poll(() => window.evaluate(dark)).toBe(true);
-      await window.getByRole('button', { name: '设置' }).hover();
+      await window.getByRole('button', { name: '设置', exact: true }).hover();
       await expect(window.locator('[data-tooltip]')).toHaveText('设置');
     } finally {
       await again.close();

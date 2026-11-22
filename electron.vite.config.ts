@@ -14,13 +14,26 @@ export default defineConfig({
   // A sandboxed page's preload script runs as one CommonJS file.
   preload: {
     build: {
-      lib: { entry: resolve(app, 'preload/index.ts'), formats: ['cjs'] },
+      lib: {
+        entry: {
+          index: resolve(app, 'preload/index.ts'),
+          'control-window': resolve(app, 'preload/control-window.ts'),
+        },
+        formats: ['cjs'],
+      },
       rolldownOptions: { output: { entryFileNames: '[name].cjs' } },
     },
   },
   renderer: {
     root: resolve(app, 'renderer'),
-    build: { rolldownOptions: { input: resolve(app, 'renderer/index.html') } },
+    build: {
+      rolldownOptions: {
+        input: {
+          index: resolve(app, 'renderer/index.html'),
+          'control-window': resolve(app, 'renderer/control-window.html'),
+        },
+      },
+    },
     plugins: [react(), tailwindcss()],
   },
 });

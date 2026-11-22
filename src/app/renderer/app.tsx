@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccountsButton, AccountsPanel } from '../../accounts/renderer/accounts-panel';
 import { SignInPrompt, UsageNotice } from '../../accounts/renderer/session-notes';
 import { useAccounts } from '../../accounts/renderer/use-accounts';
 import { mostUsed } from '../../accounts/shared/accounts';
+import {
+  AnsweredHostApproval,
+  HostApprovalBlock,
+  type GrantStanding,
+} from '../../approvals/renderer/host-approval';
 import { Request } from '../../approvals/renderer/requests';
 import { WaitingButton } from '../../approvals/renderer/waiting-button';
 import { nextWaiting } from '../../approvals/shared/waiting';
@@ -19,12 +24,42 @@ import { PanelArea, type PanelAreaHandle, type PanelView } from '../../panels/re
 import { PresentationEntry } from '../../panels/renderer/presentation-entry';
 import { usePanels } from '../../panels/renderer/use-panels';
 import type { PanelContent } from '../../panels/shared/panels';
-import type { ProviderId } from '../../sessions/shared/events';
+import type { UsedContent } from '../../panels/shared/presentation';
+import type {
+  AutomationLiveState,
+  GrantEndRecord,
+  HostApproval,
+  SetupRequirement,
+  SetupSnapshot,
+  TargetSummary,
+} from '../../sessions/shared/automation';
+import type { SetupAction } from '../../toolset/shared/automation';
+import type { MessageImage, ProviderId } from '../../sessions/shared/events';
 import type { SessionAction, SessionSummary } from '../../sessions/shared/sessions';
+import { BrowserSetupNotice, type BrowserSetupSteps } from '../../browser/renderer/browser-notice';
+import { BrowserPageView } from '../../browser/renderer/browser-page-view';
+import { BrowserPanel, NO_USE, type TabUse } from '../../browser/renderer/browser-panel';
+import { BrowserUseSetting } from '../../browser/renderer/browser-use';
+import { useBrowserTabs } from '../../browser/renderer/use-browser-tabs';
+import type { BrowserTabRef } from '../../browser/shared/browser';
+import {
+  ComputerPreviewView,
+  NO_APPLICATION_USE,
+  type ApplicationUse,
+} from '../../computer/renderer/computer-preview';
+import {
+  ComputerSetupNotice,
+  ComputerUseSetting,
+  type ComputerSteps,
+} from '../../computer/renderer/computer-use';
 import { ArchivedButton, ArchivedPanel } from '../../sessions/renderer/archived-panel';
+import { AutomationCall } from '../../sessions/renderer/automation-call';
+import { deliveryOn, sharingTag, sharingWords } from '../../sessions/renderer/automation-labels';
+import { GrantsLine } from '../../sessions/renderer/automation-grants';
+import { AutomationLine } from '../../sessions/renderer/automation-line';
 import { SessionPage, type AccountViews } from '../../sessions/renderer/session-page';
 import { SessionsSection } from '../../sessions/renderer/sessions-section';
-import { statusDots } from '../../sessions/renderer/timeline';
+import { statusDots, type RenderToolCall } from '../../sessions/renderer/timeline';
 import { preloadOffers } from '../../sessions/renderer/use-offers';
 import { useSessions } from '../../sessions/renderer/use-sessions';
 import { SettingsPanel } from '../../settings/renderer/settings-panel';
@@ -32,6 +67,7 @@ import { useSettings } from '../../settings/renderer/use-settings';
 import { TerminalPanel } from '../../terminal/renderer/terminal-panel';
 import { TerminalViews } from '../../terminal/renderer/terminal-views';
 import { Gear } from '../../ui/renderer/icons';
+import { Tag } from '../../ui/renderer/tag';
 import { TooltipHost } from '../../ui/renderer/tooltip';
 import { useWorkspaces } from '../../workspaces/renderer/use-workspaces';
 import type { TreeItem } from '../../workspaces/renderer/workspace-tree';
@@ -39,6 +75,7 @@ import { WorkspacesSection } from '../../workspaces/renderer/workspaces-section'
 import type { Bridge } from '../shared/bridge';
 import { ArtifactView, Notice, useArtifacts } from './artifact-view';
 import { useAutomation } from './use-automation';
+import { useUserSetup } from './use-user-setup';
 import { PromptHost } from './prompt-host';
 
 // The window shell: a full-height sidebar, which ⌘B shows and hides, beside the main area. The
@@ -248,13 +285,47 @@ export function App({ bridge }: { bridge: Bridge }) {
     ),
   );
 
-  // The automation of the sessions the panels show, whose activity records what the app's tools did.
+  // The automation of the sessions the panels show, whose activity records what the app's tools did,
+  // and of the sessions that own the tabs and applications the panels show, which say how they use
+  // them.
   const automation = useAutomation(
     bridge.automation,
     panelsOf(panels.layout).flatMap((panel) =>
-      panel.content.kind === 'session' ? [panel.content.id] : [],
+      panel.content.kind === 'session'
+        ? [panel.content.id]
+        : (panel.content.kind === 'browser' || panel.content.kind === 'computer') &&
+            panel.presented !== undefined
+          ? [panel.presented.owner]
+          : [],
     ),
   );
+  // The tabs the browser panels show, each by the session that owns it.
+  const shownTab = useBrowserTabs(
+    bridge.browser,
+    panelsOf(panels.layout).flatMap((panel) =>
+      panel.content.kind === 'browser' && panel.presented !== undefined
+        ? [{ owner: panel.presented.owner, tabId: panel.content.tabId }]
+        : [],
+    ),
+  );
+  // What a tab's session does with it, as its automation says.
+  const tabUse = (owner: string, ref: BrowserTabRef | null): TabUse => {
+    const live = automation.get(owner);
+    if (live === undefined || ref === null) return NO_USE;
+    const using = live.operations.filter(
+      (operation) => operation.target.id === ref.id && operation.state !== 'ended',
+    );
+    const stopping =
+      live.phase === 'stopping' || using.some((operation) => operation.state === 'stopping');
+    return {
+      held: using.length > 0,
+      acting:
+        (live.phase === 'acting' || live.phase === 'observing' || stopping) &&
+        using.some((operation) => operation.state === 'active' || operation.state === 'stopping'),
+      stopping,
+      waiting: live.pendingApprovals.some((approval) => approval.target.ref.id === ref.id),
+    };
+  };
   // The presentations with a panel open.
   const openPresentations = new Set(
     panelsOf(panels.layout).flatMap((panel) =>
@@ -287,6 +358,165 @@ export function App({ bridge }: { bridge: Bridge }) {
       ));
     };
 
+  // In place of the provider's own entry for each call of the app's browser and computer tools, what
+  // the call did, as the session's automation records it, with its screenshots read once it shows.
+  // Browser and computer use's setup, read while the settings show, and the steps the user's click
+  // takes in them and in the sessions' setup notices.
+  const setup = useUserSetup(
+    bridge.setup,
+    panelsOf(panels.layout).some((panel) => panel.content.kind === 'settings'),
+  );
+  const setupStep = (action: SetupAction): Promise<boolean> =>
+    bridge.setup.act(action).then((outcome) => outcome.status === 'verified');
+  const computerSteps: ComputerSteps = {
+    open: (permission) => setupStep({ kind: 'open-permission', permission }),
+    restart: () => setupStep({ kind: 'restart-helper' }),
+  };
+  const watchChrome = useCallback(
+    (receive: (chrome: SetupSnapshot['chrome']) => void) =>
+      bridge.setup.subscribe((snapshot) => {
+        receive(snapshot.chrome);
+      }),
+    [bridge.setup],
+  );
+  // The steps of a session's Chrome connection notice.
+  const browserSteps: BrowserSetupSteps = {
+    chrome: () => bridge.setup.snapshot().then((snapshot) => snapshot.chrome),
+    watchChrome,
+    connectChrome: (profileId) =>
+      setupStep({ kind: 'connect-browser', browser: 'chrome', profileId }),
+    copyFolder: (path) => bridge.sessions.copyText(path),
+  };
+  // Under a call refused until something is set up, the notice with the step that starts it.
+  const setupNotice = (requirement: SetupRequirement): ReactNode => {
+    if (requirement.kind === 'browser') return <BrowserSetupNotice steps={browserSteps} />;
+    if (requirement.kind === 'permission') {
+      return (
+        <ComputerSetupNotice
+          need={{ kind: 'permission', permission: requirement.permission }}
+          steps={computerSteps}
+        />
+      );
+    }
+    return <ComputerSetupNotice need={{ kind: 'restart-helper' }} steps={computerSteps} />;
+  };
+
+  const automationCalls =
+    (sessionId: string): RenderToolCall =>
+    (item) => {
+      const record = automation
+        .get(sessionId)
+        ?.recentCalls.find((call) => call.providerEntry?.providerToolId === item.id);
+      if (record === undefined) return undefined;
+      // A presentation shows as its own line, with Show, in the provider's entry's place.
+      if (record.family === 'panel') {
+        return record.toolName === 'panel_present' &&
+          record.outcome?.status === 'verified' &&
+          record.presentations.length > 0
+          ? null
+          : undefined;
+      }
+      const detail = record.outcome?.status === 'refused' ? record.outcome.detail : undefined;
+      // The approval the call asked for, once answered.
+      const approval = record.approval?.answer ? record.approval : null;
+      return (
+        <>
+          {approval !== null && (
+            <AnsweredHostApproval
+              approval={approval}
+              grant={grantStanding(sessionId, approval.grantId, record.grantEnd)}
+              agent={agentOf(sessionId)}
+              {...(approval.grantId === null
+                ? {}
+                : { onEnd: endGrant(sessionId, approval.grantId) })}
+            />
+          )}
+          <AutomationCall
+            record={record}
+            loadFrames={() => callFrames(sessionId, record.callId)}
+            {...(detail?.kind === 'setup' ? { notice: setupNotice(detail.requirement) } : {})}
+          />
+        </>
+      );
+    };
+  // The name of a session's agent, as its provider is called.
+  const agentOf = (sessionId: string): string => {
+    const provider = summaryOf(sessionId)?.provider;
+    return provider === undefined ? t('panels.someSession') : t(`providers.${provider}`);
+  };
+  // How an answered approval's grant stands, as the session's automation last said: in force, ended,
+  // or none.
+  const grantStanding = (
+    sessionId: string,
+    grantId: string | null,
+    end: GrantEndRecord | null,
+  ): GrantStanding => {
+    if (grantId === null) return null;
+    const live = automation.get(sessionId);
+    if (live?.grants.some((grant) => grant.id === grantId) === true) return 'active';
+    return end ?? live?.endedGrants.find((ended) => ended.grant.id === grantId) ?? null;
+  };
+  // Ends a session's grant from the user's click; whether it did.
+  const endGrant = (sessionId: string, grantId: string) => () =>
+    bridge.automation.endGrant(sessionId, grantId).then((outcome) => outcome.status === 'verified');
+  // The operation's approval a session's automation has waited on longest, if any.
+  const oldestApproval = (sessionId: string) =>
+    automation
+      .get(sessionId)
+      ?.pendingApprovals.reduce<HostApproval | undefined>(
+        (first, request) =>
+          first === undefined || request.requestedAt < first.requestedAt ? request : first,
+        undefined,
+      );
+  // Whether the request a session has waited on longest is one of its automation's approvals, which
+  // then takes the focus that showing the waiting session gives: the lists' waiting time is the
+  // oldest of the provider's requests and these approvals.
+  const approvalWaitsLongest = (sessionId: string): boolean => {
+    const oldest = oldestApproval(sessionId);
+    if (oldest === undefined) return false;
+    const since = summaryOf(sessionId)?.waitingSince;
+    return since === undefined || oldest.requestedAt <= since;
+  };
+  // The operations' approvals a session's automation waits on, at its activity's end, the focus
+  // key going to the oldest.
+  const hostRequestsOf = (sessionId: string, focusKey?: number): ReactNode => {
+    const waiting = automation.get(sessionId)?.pendingApprovals ?? [];
+    if (waiting.length === 0) return undefined;
+    const oldest = oldestApproval(sessionId);
+    return waiting.map((request) => (
+      <HostApprovalBlock
+        key={request.id}
+        request={request}
+        agent={agentOf(sessionId)}
+        {...(focusKey !== undefined && request.id === oldest?.id ? { focusKey } : {})}
+        onAnswer={(answer) =>
+          bridge.automation.answer(sessionId, request.id, answer).then((outcome) => {
+            if (outcome.status !== 'verified') throw new Error(`The answer was ${outcome.status}.`);
+          })
+        }
+      />
+    ));
+  };
+  const callFrames = (sessionId: string, callId: string): Promise<MessageImage[]> =>
+    bridge.automation
+      .callFrames(sessionId, callId)
+      .then((outcome) =>
+        outcome.status === 'verified'
+          ? outcome.value.map((frame) => frame.image)
+          : Promise.reject(new Error(`The call's screenshots are ${outcome.status}.`)),
+      );
+  // Presents beside the session each tab or application it uses, as the user asks from the line
+  // above its composer; true once each is shown.
+  const showUsed = (sessionId: string, targets: readonly TargetSummary[]): Promise<boolean> =>
+    Promise.all(
+      targets
+        .map(usedContent)
+        .filter((content) => content !== null)
+        .map(
+          (content) => area.current?.showUsed(sessionId, content) ?? Promise.resolve('unavailable'),
+        ),
+    ).then((outcomes) => outcomes.length > 0 && outcomes.every((outcome) => outcome === 'shown'));
+
   const view = (panel: Panel): PanelView => {
     const { content } = panel;
     // A presented panel names the session it comes from.
@@ -313,6 +543,113 @@ export function App({ bridge }: { bridge: Bridge }) {
         body: <ArtifactView state={state} />,
       };
     }
+    if (content.kind === 'browser' && panel.presented !== undefined) {
+      const { owner, presentationId } = panel.presented;
+      const { ref, state } = shownTab(owner, content.tabId);
+      const place = placeOf(state?.address ?? null);
+      const title = state?.title === undefined || state.title === '' ? null : state.title;
+      const shared =
+        state === null || state === undefined
+          ? null
+          : sharingTag(sharingWords(state.sharing, state.browser, state.profile), t);
+      const use = tabUse(owner, ref);
+      const session = sessionName(owner);
+      return {
+        title: title ?? place?.host ?? panel.presented.title,
+        ...(title !== null && place !== null
+          ? { detail: place.host, detailTitle: place.full }
+          : {}),
+        ...(use.held
+          ? { status: 'running', statusLabel: t('browser.panel.inUse', { session }) }
+          : {}),
+        ...(shared === null ? {} : { actions: <Tag>{shared}</Tag> }),
+        body: (
+          <BrowserPanel
+            state={state}
+            session={session}
+            use={use}
+            onCommand={(command) =>
+              ref === null
+                ? Promise.resolve(false)
+                : bridge.browser
+                    .command(owner, ref, command)
+                    .then((outcome) => outcome.status === 'verified')
+            }
+            onStop={() =>
+              bridge.automation.stop(owner).then((outcome) => outcome.status === 'verified')
+            }
+            onShowQuestion={() => {
+              const summary = summaryOf(owner);
+              if (summary !== undefined) showWaiting(summary);
+            }}
+            {...(ref === null || state === null || state === undefined
+              ? {}
+              : {
+                  page: (onFrame: (capturedAt: number | null) => void) => (
+                    <BrowserPageView
+                      views={bridge.browser}
+                      owner={owner}
+                      presentation={presentationId}
+                      tab={ref}
+                      title={title ?? place?.host ?? ''}
+                      address={place?.full ?? ''}
+                      {...(state.browser === 'embedded'
+                        ? {}
+                        : {
+                            previewRevision: [
+                              state.documentGeneration,
+                              state.geometryGeneration,
+                            ].join(':'),
+                          })}
+                      focused={panel.id === panels.focusedId}
+                      onFocus={() => {
+                        panels.focus(panel.id);
+                      }}
+                      onFrame={onFrame}
+                    />
+                  ),
+                })}
+          />
+        ),
+      };
+    }
+    if (content.kind === 'computer' && panel.presented !== undefined) {
+      const { owner, presentationId } = panel.presented;
+      const live = automation.get(owner);
+      const summary = live?.resources.find((resource) => resource.ref.id === content.targetId);
+      const application =
+        live === undefined || summary === undefined ? undefined : applicationOf(live, summary);
+      const name = summary?.applicationName ?? summary?.name ?? panel.presented.title;
+      const use = applicationUse(live, summary, application);
+      const session = sessionName(owner);
+      const delivery =
+        live === undefined || application === undefined
+          ? 'background'
+          : deliveryOn(live, application.ref);
+      return {
+        title: name,
+        detail: session,
+        ...(use.held
+          ? { status: 'running', statusLabel: t('computer.preview.inUse', { session }) }
+          : {}),
+        actions: <Tag>{t(`sessions.automation.delivery.${delivery}`)}</Tag>,
+        body: (
+          <ComputerPreviewView
+            port={bridge.computer}
+            owner={owner}
+            presentation={presentationId}
+            target={content.targetId}
+            name={name}
+            session={session}
+            use={use}
+            onStop={() =>
+              bridge.automation.stop(owner).then((outcome) => outcome.status === 'verified')
+            }
+            onAllow={() => computerSteps.open('screen-recording')}
+          />
+        ),
+      };
+    }
     if (content.kind === 'browser' || content.kind === 'computer') {
       return {
         title: panel.presented?.title ?? '',
@@ -323,7 +660,22 @@ export function App({ bridge }: { bridge: Bridge }) {
     if (content.kind === 'settings') {
       return {
         title: t('settings.title'),
-        body: <SettingsPanel settings={settings.settings} onChange={settings.change} />,
+        body: (
+          <SettingsPanel settings={settings.settings} onChange={settings.change}>
+            <BrowserUseSetting
+              setup={setup}
+              onClearSignIns={() => setupStep({ kind: 'clear-app-sign-ins' })}
+              chromeSteps={{
+                connect: (profileId) =>
+                  setupStep({ kind: 'connect-browser', browser: 'chrome', profileId }),
+                disconnect: (profileId) =>
+                  setupStep({ kind: 'disconnect-browser', browser: 'chrome', profileId }),
+                copyFolder: (path) => bridge.sessions.copyText(path),
+              }}
+            />
+            <ComputerUseSetting setup={setup?.computer ?? null} steps={computerSteps} />
+          </SettingsPanel>
+        ),
       };
     }
     if (content.kind === 'terminal') {
@@ -378,12 +730,39 @@ export function App({ bridge }: { bridge: Bridge }) {
             ? {}
             : {
                 renderToolExtra: presentationsUnder(sessionId),
+                renderToolCall: automationCalls(sessionId),
+                aboveComposer: (
+                  <>
+                    <AutomationLine
+                      state={automation.get(sessionId)}
+                      onShow={(targets) => showUsed(sessionId, targets)}
+                      onStop={() =>
+                        bridge.automation
+                          .stop(sessionId)
+                          .then((outcome) => outcome.status === 'verified')
+                      }
+                    />
+                    <GrantsLine
+                      grants={automation.get(sessionId)?.grants ?? []}
+                      onEnd={(grantId) => endGrant(sessionId, grantId)()}
+                    />
+                  </>
+                ),
+                hostRequests: hostRequestsOf(
+                  sessionId,
+                  requestFocus?.sessionId === sessionId &&
+                    sessionPanel(sessionId)?.id === panel.id &&
+                    approvalWaitsLongest(sessionId)
+                    ? requestFocus.key
+                    : undefined,
+                ),
                 renderRequest: (item, place) => (
                   <Request
                     item={item}
                     {...(requestFocus?.sessionId === sessionId &&
                     place.oldestWaiting &&
-                    sessionPanel(sessionId)?.id === panel.id
+                    sessionPanel(sessionId)?.id === panel.id &&
+                    !approvalWaitsLongest(sessionId)
                       ? { focusKey: requestFocus.key }
                       : {})}
                     answering={{
@@ -577,4 +956,73 @@ function reportReadAhead(error: unknown): void {
 
 function reportTerminal(error: unknown): void {
   console.error('The terminal could not open:', error);
+}
+
+// The application a target belongs to, as the session's automation lists it: the target itself for an
+// application, and for a window the application its summary identifies.
+function applicationOf(
+  live: AutomationLiveState,
+  target: TargetSummary,
+): TargetSummary | undefined {
+  if (target.ref.kind === 'application') return target;
+  const parent = target.application;
+  if (!parent) return undefined;
+  return live.resources.find(
+    ({ ref }) =>
+      ref.id === parent.id && ref.generation === parent.generation && ref.kind === 'application',
+  );
+}
+
+// What a window's session does with its application, as its automation says.
+function applicationUse(
+  live: AutomationLiveState | undefined,
+  target: TargetSummary | undefined,
+  application: TargetSummary | undefined,
+): ApplicationUse {
+  if (live === undefined || target === undefined) return NO_APPLICATION_USE;
+  const ids = new Set([target.ref.id, ...(application === undefined ? [] : [application.ref.id])]);
+  const using = live.operations.filter(
+    (operation) => ids.has(operation.target.id) && operation.state !== 'ended',
+  );
+  const stopping =
+    live.phase === 'stopping' || using.some((operation) => operation.state === 'stopping');
+  return {
+    held: using.length > 0,
+    acting:
+      (live.phase === 'acting' || live.phase === 'observing' || stopping) &&
+      using.some((operation) => operation.state === 'active' || operation.state === 'stopping'),
+    stopping,
+    userHas:
+      live.pausedTargets?.some(
+        ({ target, reason }) =>
+          reason === 'user-input' &&
+          target.id === application?.ref.id &&
+          target.generation === application.ref.generation,
+      ) ?? false,
+  };
+}
+
+// A page's address as a browser panel's header names it: its host, and its host and path.
+function placeOf(address: string | null): { host: string; full: string } | null {
+  if (address === null) return null;
+  try {
+    const url = new URL(address);
+    return { host: url.host, full: `${url.host}${url.pathname === '/' ? '' : url.pathname}` };
+  } catch {
+    return null;
+  }
+}
+
+// What the panel area shows of a target a session uses: a tab of the browser, or an application or one
+// of its windows; nothing for a system dialog, which only its application shows.
+function usedContent(target: TargetSummary): UsedContent | null {
+  switch (target.ref.kind) {
+    case 'browser-tab':
+      return { kind: 'browser', tabId: target.ref.id };
+    case 'application':
+    case 'window':
+      return { kind: 'computer', targetId: target.ref.id };
+    case 'system-dialog':
+      return null;
+  }
 }

@@ -5,7 +5,7 @@ title: The window, its panels, keys and look
 status: current
 visibility: public
 date: 2026-11-04
-summary: One window holds a sidebar of workspaces and sessions beside a main area of panels that split, move and close, with the title bar's buttons for archived sessions, accounts, settings and waiting sessions; it is drawn in an e-ink look in light and dark, in English or Simplified Chinese, shows the main process's menus and questions in its own page, and works from the keyboard as well as the pointer
+summary: One window holds a sidebar of workspaces and sessions beside a main area of panels that split, move and close, with the title bar's buttons for archived sessions, accounts, settings and waiting sessions; agents' browser and computer use shows in their sessions and in panels they present; it is drawn in an e-ink look in light and dark, in English or Simplified Chinese, shows the main process's menus and questions in its own page, and works from the keyboard as well as the pointer
 scope: ["src/*/renderer/**", "src/app/main/window.ts", "src/app/main/prompts.ts", "src/ui/shared/**"]
 tags: []
 supersedes: []
@@ -33,11 +33,25 @@ Each panel is a pane with a header, which can lie in the title bar, holding its 
 | Terminal | The user's login shell in a folder, or a provider's sign-in command (ADR-0015, ADR-0016) | DOC-mod-terminal |
 | Archived sessions | The archived sessions, searchable, each unarchived or removed from its row | DOC-mod-sessions |
 | Accounts | Each provider's sign-in and its subscription's usage limits (ADR-0017) | DOC-mod-accounts |
-| Settings | The language, the appearance and whether tooltips show | DOC-mod-settings |
+| Settings | The language, the appearance, whether tooltips show, Browser use and Computer use | DOC-mod-settings, DOC-mod-browser, DOC-mod-computer |
+| Browser tab | A tab of the app's browser, live, with Back, Forward and Reload; or a preview of an agent's Chrome tab with its age and Open in Chrome (ADR-0027, ADR-0030) | DOC-mod-browser |
+| App window | A preview of another app's window, with its age and Switch to (ADR-0027) | DOC-mod-computer |
+| Result | Markdown, an image or a table an agent presents (ADR-0027) | DOC-mod-panels |
 
 - **Opening**: a click on a session shows it; New session opens a session page in the selected workspace's folder; a row of a tree or list dragged into the area opens there, filling it, beside a panel near its edge, or in its place in its middle, as do files and folders dragged from the Finder. The archived sessions', accounts' and settings' panels show once each; opening one again focuses it.
 - **Arranging**: a panel's title drags it beside another or swaps the two; the dividers between panels drag, or take focus and move with the arrow keys. The app's own drags use the pointer's own events, never a drag of the system's (L-0003).
+- **Presented panels**: an agent can present files, results, pages and app windows. They open beside its session's panel, or in place of its earlier presentation where the area has no room, without the focus and dimmed, and VoiceOver announces them. Those that arrive during a drag wait for the drop. The session's activity keeps Show for each presentation, and the agent is told when the user closes one.
 - **Closing**: a panel with unsaved changes asks first, and so does a terminal while a program other than the shell runs in it.
+
+## Agents' browser and computer use
+
+What agents do with the app's browser, Chrome and other apps shows where the session is (ADR-0027). (DOC-mod-sessions, DOC-mod-approvals, DOC-mod-browser, DOC-mod-computer)
+
+- **In the activity**: each call of these tools says what it did and to what, such as Opened example.com/pricing or Clicked “Save Draft” with Mail. The call that opens a page says how the page is shared (No sharing, App sign-ins, or Chrome with its profile) and whether the work runs in the background or the foreground. What came of the call follows, and its screenshots lie under it.
+- **Approvals**: an operation beyond what the session reaches unasked asks once, at the activity's end: a page with shared sign-ins, an app in the background or the foreground, or a dialog. The approval says what it covers and how long each answer lasts, and answers as the providers' approvals do. Once answered, it stays before the call that asked, saying when its grant ended, or with End while it is in force. A session waiting on one counts as waiting, and an approval waits until the user answers.
+- **Above the composer**: what the session uses, with Show and Stop, and the grants in use, whose Show lists each grant with End.
+- **Setup**: a call that needs setup leaves a notice with the step that starts it, such as connecting Chrome or allowing Screen Recording. Setup starts only from the user's click, there or in Settings.
+- **Foreground control**: while an agent drives an app with the keyboard and pointer, a small control floats at the top of the screen, above every app and Space, without taking the focus. It names the session and the app, with Stop and the stop shortcut. Moving the mouse or typing pauses the agent, and Hand Back gives the app back to it.
 
 ## Keys
 
@@ -46,6 +60,7 @@ Each panel is a pane with a header, which can lie in the title bar, holding its 
 | ⌘B | Hide or show the sidebar |
 | ⌘, | Open the settings |
 | ⇧⌘A | Show the session that has waited longest on the user, then the next at each press |
+| ⌃⌥⌘. | Stop an agent's work in the foreground, from any app |
 | ⌃` | Open a terminal beside the focused panel, in its folder |
 | ⌘D, ⇧⌘D | Split the focused panel to the right or downwards, with a session page in its folder |
 | ⌘W | Close the focused panel |
@@ -55,7 +70,7 @@ Each panel is a pane with a header, which can lie in the title bar, holding its 
 | ⌘↓ | Open the focused row of a workspace's tree in the panel area |
 | ⌘S | Save the file in the focused panel |
 | Return, ⇧Return | Send a message; start a new line in it |
-| Return, ⌥Return, Escape | In an approval: give its default answer, allow for the session, deny |
+| Return, ⌥Return, Escape | In an approval, a provider's or an operation's: give its default answer, allow for the session, deny |
 | 1 to 9, Return, Escape | In a question: choose by number, answer, skip |
 
 The workspaces' tree moves as macOS lists do, with the arrow keys, Home and End.
@@ -80,4 +95,4 @@ The window and the main process's menus and questions are in English or Simplifi
 ## Access
 
 - The lists, the trees, the dividers, the menus and the questions take the focus and work with the keys above, and a row's menu opens with the menu key or VoiceOver's menu command as it does with a secondary click.
-- VoiceOver hears each control by name, each list and tree with its items and their states, menus as menus and questions as alerts.
+- VoiceOver hears each control by name, each list and tree with its items and their states, menus as menus and questions as alerts. A button whose label alone would not say what it acts on, as End among several grants, is heard with what it acts on. The floating control's buttons are native for VoiceOver.
