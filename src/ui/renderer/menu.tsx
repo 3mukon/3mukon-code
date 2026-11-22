@@ -1,5 +1,6 @@
 import { useEffectEvent, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import type { MenuEntry } from '../shared/prompts';
+import { addCover } from './cover';
 import { Check } from './icons';
 
 // How far a menu keeps from the window's edges.
@@ -44,6 +45,7 @@ export function Menu({ entries, at, onClose }: MenuProps) {
     const top = at.y + height + EDGE > window.innerHeight ? at.y - height : at.y;
     element.style.left = `${String(Math.max(EDGE, left))}px`;
     element.style.top = `${String(Math.max(EDGE, top))}px`;
+    const uncover = addCover(element);
     itemsOf(element)[0]?.focus();
     // Its own closing, which the browser's would do at the release of the press that asked for it.
     const beside = (event: Event) => {
@@ -65,6 +67,7 @@ export function Menu({ entries, at, onClose }: MenuProps) {
       document.removeEventListener('keydown', escape, true);
       window.removeEventListener('blur', dismiss);
       window.removeEventListener('resize', dismiss);
+      uncover();
       element.hidePopover();
     };
   }, [at]);

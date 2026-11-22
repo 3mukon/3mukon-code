@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { addCover } from './cover';
 
 // How long the pointer or the keyboard's focus rests on an element before its tooltip shows, and how
 // soon after one hides the next shows at once, so that moving along a row of icons names each in turn.
@@ -191,6 +192,7 @@ export function TooltipHost({ enabled }: { enabled: boolean }) {
       below + height > clientHeight - MARGIN ? Math.max(MARGIN, anchor.top - GAP - height) : below;
     tip.style.left = `${String(Math.round(left))}px`;
     tip.style.top = `${String(Math.round(top))}px`;
+    return addCover(tip);
   }, [shown]);
 
   return shown === null

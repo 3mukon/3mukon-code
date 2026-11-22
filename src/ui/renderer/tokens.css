@@ -150,6 +150,13 @@
       opacity: 0;
     }
   }
+  /* A live dot's slow pulse, as while an agent works with a tab or an application. */
+  --animate-live: live 1.6s ease-in-out infinite;
+  @keyframes live {
+    50% {
+      opacity: 0.35;
+    }
+  }
   /* What a wait says only once it has lasted long enough to mention, so that a short one shows
      nothing: hidden for its first 300ms. */
   --animate-appear: appear 0s 300ms both;

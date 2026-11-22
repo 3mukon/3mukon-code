@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useRef } from 'react';
+import { addCover } from './cover';
 import type { Question } from '../shared/prompts';
 
 interface QuestionDialogProps {
@@ -31,9 +32,11 @@ export function QuestionDialog({ question, onAnswer }: QuestionDialogProps) {
     if (element === null) return;
     active.current = true;
     element.showModal();
+    const uncover = addCover('window');
     element.querySelector<HTMLElement>('[data-default]')?.focus();
     return () => {
       active.current = false;
+      uncover();
       element.close();
     };
   }, []);

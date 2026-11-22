@@ -1,7 +1,9 @@
-export type Status = 'running' | 'waiting' | 'done' | 'idle';
+export type Status = 'running' | 'live' | 'waiting' | 'done' | 'idle';
 
 const look: Record<Status, string> = {
   running: 'bg-run shadow-[0_0_0_3px_var(--color-run-halo)]',
+  // An agent at work with something the user can watch, such as a tab: the accent, pulsing slowly.
+  live: 'bg-accent animate-live motion-reduce:animate-none',
   waiting: 'bg-wait',
   done: 'border border-idle',
   idle: 'bg-idle',

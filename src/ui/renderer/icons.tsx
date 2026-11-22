@@ -5,19 +5,26 @@ import {
   CaseSensitive as LucideCaseSensitive,
   Check as LucideCheck,
   ChevronDown as LucideChevronDown,
+  ChevronLeft as LucideChevronLeft,
   ChevronRight as LucideChevronRight,
   ChevronUp as LucideChevronUp,
+  CircleAlert as LucideCircleAlert,
   CircleQuestionMark as LucideCircleQuestionMark,
   Copy as LucideCopy,
   FileText as LucideFileText,
   FolderInput as LucideFolderInput,
   Gauge as LucideGauge,
   Globe as LucideGlobe,
+  Lock as LucideLock,
+  Monitor as LucideMonitor,
+  MousePointer2 as LucideMousePointer2,
+  PanelRight as LucidePanelRight,
   Pencil as LucidePencil,
   Plus as LucidePlus,
   Regex as LucideRegex,
   Replace as LucideReplace,
   ReplaceAll as LucideReplaceAll,
+  RotateCw as LucideRotateCw,
   Search as LucideSearch,
   Settings as LucideSettings,
   ShieldCheck as LucideShieldCheck,
@@ -72,3 +79,10 @@ export const Regex = decorative(LucideRegex);
 export const Replace = decorative(LucideReplace);
 export const ReplaceAll = decorative(LucideReplaceAll);
 export const TextSelect = decorative(LucideTextSelect);
+export const RotateCw = decorative(LucideRotateCw);
+export const ChevronLeft = decorative(LucideChevronLeft);
+export const CircleAlert = decorative(LucideCircleAlert);
+export const Lock = decorative(LucideLock);
+export const Monitor = decorative(LucideMonitor);
+export const Pointer = decorative(LucideMousePointer2);
+export const PanelRight = decorative(LucidePanelRight);
