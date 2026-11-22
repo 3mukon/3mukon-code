@@ -1,0 +1,3 @@
+# The Chrome extension's public key, which gives the unpacked extension its fixed ID (ADR-0030); it is
+# not a secret. Each entry exempts one finding by its file, rule and line.
+src/browser/native/chrome/extension/manifest.json:generic-api-key:7

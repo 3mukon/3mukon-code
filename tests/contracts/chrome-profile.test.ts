@@ -1,0 +1,519 @@
+import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createConnection, type Socket } from 'node:net';
+import { join } from 'node:path';
+import { expect, it, vi } from 'vitest';
+import { z } from 'zod';
+import { embeddedBrowser } from '../../src/app/main/browser-automation';
+import { waitForLocalChromeExtension } from '../../src/browser/main/chrome-local-setup';
+import { ChromeProfileConnection } from '../../src/browser/main/chrome-profile';
+import {
+  chromeProfileConnection,
+  chromeProfileNames,
+} from '../../src/browser/main/chrome-profile-installation';
+import type { EmbeddedEngine } from '../../src/browser/main/page';
+import { AutomationBroker, type BrokerAccess } from '../../src/toolset/main/broker';
+
+vi.mock('electron', () => ({
+  nativeImage: {
+    createFromBuffer: () => ({ getSize: () => ({ width: 640, height: 480 }) }),
+  },
+}));
+
+const name = { id: 'Profile 3', name: 'Synthetic Work' };
+
+function nativeBrowser(folder: string) {
+  const socket = createConnection(join(folder, 'channel'));
+  const received: unknown[] = [];
+  let bytes = Buffer.alloc(0);
+  socket.on('data', (chunk: Buffer) => {
+    bytes = Buffer.concat([bytes, chunk]);
+    while (bytes.length >= 4) {
+      const length = bytes.readUInt32LE();
+      if (bytes.length < length + 4) return;
+      received.push(JSON.parse(bytes.subarray(4, length + 4).toString('utf8')));
+      bytes = bytes.subarray(length + 4);
+    }
+  });
+  return {
+    socket,
+    closed: once(socket, 'close'),
+    send(message: object) {
+      const body = Buffer.from(JSON.stringify(message));
+      const prefix = Buffer.alloc(4);
+      prefix.writeUInt32LE(body.length);
+      socket.write(Buffer.concat([prefix, body]));
+    },
+    async next(): Promise<unknown> {
+      await vi.waitFor(() => {
+        expect(received.length).toBeGreaterThan(0);
+      });
+      return received.shift();
+    },
+  };
+}
+
+it('keeps the confirmed profile across app and native-peer restart and rejects a revoked link', async () => {
+  const folder = await mkdtemp('/private/tmp/chrome-profile-');
+  const setup = Promise.withResolvers<string>();
+  const ports = {
+    profiles: vi.fn(() => Promise.resolve([name])),
+    prepareHost: vi.fn(() => Promise.resolve()),
+    openSetup: vi.fn((_id: string, ticket: string) => {
+      setup.resolve(ticket);
+      return Promise.resolve();
+    }),
+    activate: vi.fn(() => Promise.resolve()),
+  };
+  const sockets: Socket[] = [];
+  let app = new ChromeProfileConnection(folder, ports);
+  try {
+    const initial = app.connect(name.id);
+    const ticket = await Promise.race([
+      setup.promise,
+      initial.then(() => {
+        throw new Error('Chrome setup ended before opening the test profile.');
+      }),
+    ]);
+    expect(ports.openSetup).toHaveBeenCalledExactlyOnceWith(
+      name.id,
+      ticket,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+    const wrong = nativeBrowser(folder);
+    sockets.push(wrong.socket);
+    wrong.send({ kind: 'pair', ticket: randomBytes(32).toString('hex') });
+    await wrong.closed;
+    expect(app.profile()).toBeNull();
+
+    const browser = nativeBrowser(folder);
+    sockets.push(browser.socket);
+    browser.send({ kind: 'pair', ticket });
+    const offer = (await browser.next()) as { kind: string; proof: string };
+    expect(offer.kind).toBe('paired');
+    browser.send({ kind: 'pair-saved' });
+    expect(await browser.next()).toEqual({ kind: 'ready' });
+    expect(await initial).toEqual({ status: 'verified', value: null });
+    expect(app.profile()).toEqual(name);
+    const first = app.tab();
+    expect(first).toMatchObject({ browser: 'chrome', profile: name });
+    const released = vi.fn();
+    first?.onEnd(released);
+
+    browser.socket.destroy();
+    await vi.waitFor(() => {
+      expect(app.profile()).toBeNull();
+    });
+    expect(released).toHaveBeenCalledOnce();
+    expect(app.rememberedProfile()).toEqual(name);
+    app.close();
+    app = new ChromeProfileConnection(folder, ports);
+    expect(app.rememberedProfile()).toEqual(name);
+    expect(app.requirement()).toBeUndefined();
+    await vi.waitFor(async () => {
+      expect((await lstat(join(folder, 'channel'))).isSocket()).toBe(true);
+    });
+    const restored = nativeBrowser(folder);
+    sockets.push(restored.socket);
+    restored.send({ kind: 'restore', proof: offer.proof });
+    expect(await restored.next()).toEqual({ kind: 'ready' });
+    expect(app.profile()).toEqual(name);
+    expect(ports.openSetup).toHaveBeenCalledOnce();
+
+    const ended = app.disconnect(name.id);
+    const request = (await restored.next()) as { id: number; action: object };
+    expect(request.action).toEqual({ kind: 'forget' });
+    restored.send({ kind: 'reply', id: request.id, ok: true });
+    expect(await ended).toEqual({ status: 'verified', value: null });
+    const revoked = nativeBrowser(folder);
+    sockets.push(revoked.socket);
+    revoked.send({ kind: 'restore', proof: offer.proof });
+    await revoked.closed;
+    expect(app.rememberedProfile()).toBeNull();
+  } finally {
+    app.close();
+    for (const socket of sockets) socket.destroy();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+it('lists the browser display names from profile metadata', async () => {
+  const folder = await mkdtemp('/private/tmp/chrome-names-');
+  try {
+    await writeFile(
+      join(folder, 'Local State'),
+      JSON.stringify({
+        profile: {
+          info_cache: {
+            'Profile 3': { name: name.name, unneeded: 'fixture' },
+            'Guest Profile': { name: 'Guest' },
+            '../elsewhere': { name: 'Not a profile' },
+          },
+        },
+      }),
+    );
+    expect(await chromeProfileNames(folder)).toEqual([name]);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+it('waits for the local extension in the selected profile before opening its pairing page', async () => {
+  const folder = await mkdtemp('/private/tmp/chrome-local-flow-');
+  const browserData = join(folder, 'browser');
+  const hostExecutable = join(folder, 'host-fixture');
+  const browserExecutable = join(folder, 'browser-fixture');
+  const bundledExtension = join(folder, 'bundled-extension');
+  const extensionFolder = join(folder, 'app', 'chrome-link', 'extension');
+  const trace = join(folder, 'launches');
+  const extensionId = 'abcdefghijklmnopabcdefghijklmnop';
+  const launches = () => readFile(trace, 'utf8');
+  const selector = '--profile-directory=' + name.id;
+  const pairLine = `${selector}|chrome-extension://${extensionId}/pair.html\n`;
+  const app = chromeProfileConnection({
+    appData: join(folder, 'app'),
+    browserData,
+    browserBundle: join(folder, 'Synthetic Chrome.app'),
+    browserExecutable,
+    browserEnvironment: { CHROME_TRACE: trace },
+    hostExecutable,
+    extensionId,
+    bundledExtension,
+  });
+  try {
+    await mkdir(browserData);
+    await mkdir(bundledExtension);
+    await writeFile(join(bundledExtension, 'manifest.json'), '{}');
+    await writeFile(
+      join(browserData, 'Local State'),
+      JSON.stringify({ profile: { info_cache: { [name.id]: { name: name.name } } } }),
+    );
+    await writeFile(hostExecutable, 'fixture', { mode: 0o700 });
+    await writeFile(
+      browserExecutable,
+      '#!/bin/sh\nprintf "%s|%s\\n" "$2" "${3%%#*}" >> "$CHROME_TRACE"\n',
+      { mode: 0o700 },
+    );
+    const connection = app.connect(name.id);
+    let setupUrl = '';
+    await vi.waitFor(async () => {
+      const output = await launches();
+      expect(output.startsWith(`${selector}|http://127.0.0.1:`)).toBe(true);
+      setupUrl = output.trim().split('|')[1] ?? '';
+    });
+    const report = (status: string, origin = new URL(setupUrl).origin) =>
+      fetch(setupUrl + '/' + status, { method: 'POST', headers: { origin } });
+    expect((await report('ready', 'http://localhost')).status).toBe(404);
+    expect((await report('missing')).status).toBe(204);
+    const setupLines = `${selector}|${setupUrl}\n`;
+    await vi.waitFor(async () => {
+      expect(await launches()).toBe(setupLines);
+      expect(app.extensionFolder()).toBe(extensionFolder);
+    });
+    expect(await readFile(join(extensionFolder, 'manifest.json'), 'utf8')).toBe('{}');
+    expect((await report('ready')).status).toBe(204);
+    await vi.waitFor(async () => {
+      expect(await launches()).toBe(setupLines + pairLine);
+    });
+    expect(app.profile()).toBeNull();
+    app.close();
+    expect(await connection).toMatchObject({ status: 'refused' });
+  } finally {
+    app.close();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+it('skips Chrome extension settings when the chosen profile already answers the local setup page', async () => {
+  const controller = new AbortController();
+  const open = vi.fn(async (url: string) => {
+    const origin = new URL(url).origin;
+    expect((await fetch(url)).ok).toBe(true);
+    expect((await fetch(url + '/ready', { method: 'POST', headers: { origin } })).status).toBe(204);
+  });
+  const missing = vi.fn();
+  await waitForLocalChromeExtension(
+    'abcdefghijklmnopabcdefghijklmnop',
+    open,
+    missing,
+    controller.signal,
+  );
+  expect(open).toHaveBeenCalledOnce();
+  expect(missing).not.toHaveBeenCalled();
+});
+
+it('uses only inactive task tabs and rejects commands and cleanup of pre-existing tabs', async () => {
+  const removed = vi.fn(() => Promise.resolve());
+  const sendCommand = vi.fn(() => Promise.resolve(null));
+  const updateSessionRules = vi.fn(() => Promise.resolve());
+  const browser = {
+    permissions: { contains: vi.fn(() => Promise.resolve(true)) },
+    declarativeNetRequest: { updateSessionRules },
+    windows: { getLastFocused: vi.fn(() => Promise.resolve({ id: 3, type: 'normal' })) },
+    tabs: {
+      create: vi.fn(() => Promise.resolve({ id: 19, incognito: false })),
+      remove: removed,
+    },
+    debugger: { attach: vi.fn(() => Promise.resolve()), sendCommand },
+  };
+  const source = new URL('../../src/browser/native/chrome/extension/task-tabs.js', import.meta.url);
+  const { TaskTabs } = (await import(source.href)) as {
+    TaskTabs: new (
+      api: typeof browser,
+      emit: () => void,
+    ) => {
+      request(action: object): Promise<unknown>;
+      event(tab: number, method: string, value: unknown): void;
+      close(): Promise<void>;
+    };
+  };
+  const emit = vi.fn();
+  const tabs = new TaskTabs(browser, emit);
+  await expect(tabs.request({ kind: 'close-tab', tab: 7 })).rejects.toThrow('outside');
+  await expect(
+    tabs.request({ kind: 'command', tab: 7, method: 'Runtime.evaluate', params: {} }),
+  ).rejects.toThrow('outside');
+  expect(removed).not.toHaveBeenCalled();
+  expect(sendCommand).not.toHaveBeenCalled();
+  expect(await tabs.request({ kind: 'create-tab' })).toEqual({ tab: 19 });
+  expect(browser.tabs.create).toHaveBeenCalledExactlyOnceWith({
+    windowId: 3,
+    url: 'about:blank',
+    active: false,
+  });
+  await expect(
+    tabs.request({ kind: 'command', tab: 19, method: 'Target.getTargets' }),
+  ).rejects.toThrow('Unsupported command');
+  expect(sendCommand).toHaveBeenCalledWith({ tabId: 19 }, 'Fetch.enable', {
+    patterns: [{ resourceType: 'Document', requestStage: 'Response' }],
+  });
+  expect(updateSessionRules).toHaveBeenCalledExactlyOnceWith({
+    removeRuleIds: [19],
+    addRules: [
+      {
+        id: 19,
+        condition: { tabIds: [19], resourceTypes: ['main_frame', 'sub_frame'] },
+        action: {
+          type: 'modifyHeaders',
+          responseHeaders: [
+            {
+              header: 'content-security-policy',
+              operation: 'append',
+              value: 'sandbox allow-same-origin allow-scripts allow-forms',
+            },
+          ],
+        },
+      },
+    ],
+  });
+  const responseHeaders = [{ name: 'Content-Type', value: 'text/html' }];
+  const response = { requestId: 'document', responseStatusCode: 200, responseHeaders };
+  sendCommand.mockClear();
+  tabs.event(7, 'Fetch.requestPaused', response);
+  expect(sendCommand).not.toHaveBeenCalled();
+  tabs.event(19, 'Fetch.requestPaused', response);
+  expect(sendCommand).toHaveBeenCalledExactlyOnceWith({ tabId: 19 }, 'Fetch.continueRequest', {
+    requestId: 'document',
+  });
+  expect(emit).not.toHaveBeenCalled();
+  await tabs.close();
+  expect(removed).toHaveBeenCalledExactlyOnceWith(19);
+  expect(updateSessionRules).toHaveBeenLastCalledWith({ removeRuleIds: [19] });
+});
+
+// The app's extension on the native channel, answering each request for its task tab with `answer`.
+function taskExtension(folder: string, answer: (action: TaskAction) => object | undefined) {
+  const socket = createConnection(join(folder, 'channel'));
+  const received: unknown[] = [];
+  let bytes = Buffer.alloc(0);
+  const send = (message: object) => {
+    const body = Buffer.from(JSON.stringify(message));
+    const prefix = Buffer.alloc(4);
+    prefix.writeUInt32LE(body.length);
+    socket.write(Buffer.concat([prefix, body]));
+  };
+  socket.on('data', (chunk: Buffer) => {
+    bytes = Buffer.concat([bytes, chunk]);
+    while (bytes.length >= 4) {
+      const length = bytes.readUInt32LE();
+      if (bytes.length < length + 4) return;
+      const message = JSON.parse(bytes.subarray(4, length + 4).toString('utf8')) as {
+        kind: string;
+        id?: number;
+        action?: TaskAction;
+      };
+      bytes = bytes.subarray(length + 4);
+      if (message.kind !== 'request' || !message.action) {
+        received.push(message);
+        continue;
+      }
+      const result = answer(message.action);
+      send({ kind: 'reply', id: message.id, ok: true, ...(result ? { result } : {}) });
+    }
+  });
+  return { socket, send, received };
+}
+type TaskAction =
+  | { kind: 'create-tab' | 'forget' }
+  | { kind: 'close-tab'; tab: number }
+  | { kind: 'command'; tab: number; method: string; params: { url?: string; expression?: string } };
+
+it('asks before the first use of a task tab in the connected profile, opens it on navigation, previews and reveals it, and ends it on disconnect', async () => {
+  const folder = await mkdtemp('/private/tmp/chrome-task-');
+  const ticket = Promise.withResolvers<string>();
+  const ports = {
+    profiles: vi.fn(() => Promise.resolve([name])),
+    prepareHost: vi.fn(() => Promise.resolve()),
+    openSetup: vi.fn((_id: string, value: string) => {
+      ticket.resolve(value);
+      return Promise.resolve();
+    }),
+    activate: vi.fn(() => Promise.resolve()),
+  };
+  const app = new ChromeProfileConnection(folder, ports);
+  const embedded = { page: vi.fn(), clear: vi.fn() } satisfies EmbeddedEngine;
+  const { browser, tools } = embeddedBrowser(embedded, () => broker, app);
+  const broker = new AutomationBroker(tools);
+  const actions: TaskAction[] = [];
+  const onViewport = vi.fn<() => void>();
+  let address = 'about:blank';
+  const extension = { current: undefined as ReturnType<typeof taskExtension> | undefined };
+  const answer = (action: TaskAction): object | undefined => {
+    actions.push(action);
+    if (action.kind === 'create-tab') return { tab: 19 };
+    if (action.kind !== 'command') return undefined;
+    const { expression = '', url } = action.params;
+    switch (action.method) {
+      case 'Target.getTargetInfo':
+        return { targetInfo: { type: 'page', targetId: 'target' } };
+      case 'Page.navigate':
+        address = url ?? address;
+        return {};
+      case 'Page.getFrameTree':
+        return { frameTree: { frame: { id: 'top', url: address } } };
+      case 'Page.createIsolatedWorld':
+        return { executionContextId: 4 };
+      case 'Page.captureScreenshot':
+        return { data: 'ZmFrZQ==' };
+      case 'Runtime.evaluate': {
+        const viewport = expression.endsWith('({"kind":"viewport"})');
+        if (viewport) onViewport();
+        const value = expression.includes('document.title.slice')
+          ? { title: 'Fixture', address: address + '?private=query#detail' }
+          : expression.startsWith('document.hasFocus()')
+            ? true
+            : viewport
+              ? { width: 640, height: 480, x: 0, y: 0 }
+              : {
+                  width: 640,
+                  height: 480,
+                  text: 'Signed in as a synthetic fixture',
+                  truncated: false,
+                  elements: [],
+                };
+        return { result: { value } };
+      }
+      default:
+        return {};
+    }
+  };
+  let serial = 0;
+  const call = (access: BrokerAccess, tool: string, args: object) =>
+    broker.dispatch(access, 'browser_' + tool, args, { actionId: String(++serial) });
+  const bind = async (id: string) => {
+    await broker.bind(id, process.cwd(), { mode: 'auto', sandbox: 'workspace-write' });
+    const access = broker.openAccess(id);
+    broker.beginTurn(id);
+    return access;
+  };
+  try {
+    const a = await bind('a');
+    const b = await bind('b');
+    expect((await call(a, 'open', { sharing: 'global' })).outcome).toMatchObject({
+      code: 'setup-required',
+      detail: {
+        kind: 'setup',
+        requirement: { kind: 'browser', browser: 'chrome', step: 'connect' },
+      },
+    });
+    expect(ports.openSetup).not.toHaveBeenCalled();
+
+    const connecting = app.connect(name.id);
+    const invitation = await ticket.promise;
+    const chrome = taskExtension(folder, answer);
+    extension.current = chrome;
+    chrome.send({ kind: 'pair', ticket: invitation });
+    await vi.waitFor(() => {
+      expect(chrome.received).toContainEqual(expect.objectContaining({ kind: 'paired' }));
+    });
+    chrome.send({ kind: 'pair-saved' });
+    expect(await connecting).toEqual({ status: 'verified', value: null });
+
+    const opened = (await call(a, 'open', { sharing: 'global' })).outcome;
+    if (opened.status !== 'verified') throw new Error('The task tab was not reserved.');
+    const tab = z
+      .object({ id: z.uuid(), generation: z.int(), kind: z.literal('browser-tab') })
+      .parse(opened.value);
+    expect(broker.snapshot('a').value.pendingApprovals).toEqual([]);
+    expect(browser.pageForView('a', tab)).toBeNull();
+    expect((await call(b, 'snapshot', { target: tab })).outcome).toMatchObject({
+      code: 'wrong-owner',
+    });
+
+    // The first use asks; a blank task tab then serves nothing before its first navigation.
+    const reading = call(a, 'snapshot', { target: tab });
+    await vi.waitFor(() => {
+      expect(broker.snapshot('a').value.pendingApprovals).toHaveLength(1);
+    });
+    const [approval] = broker.snapshot('a').value.pendingApprovals;
+    if (!approval) throw new Error('The fixture did not ask.');
+    expect(approval.target).toMatchObject({ sharing: 'global', browser: 'chrome', profile: name });
+    broker.answer('a', approval.id, { decision: 'allow-once' });
+    expect((await reading).outcome).toMatchObject({ code: 'not-found' });
+    expect(actions).toEqual([]);
+
+    expect(
+      (await call(a, 'navigate', { target: tab, url: 'https://fixture.test/path' })).outcome,
+    ).toMatchObject({ status: 'dispatched' });
+    expect(actions[0]).toEqual({ kind: 'create-tab' });
+    expect((await call(a, 'snapshot', { target: tab })).outcome).toMatchObject({
+      status: 'verified',
+      value: { text: 'Signed in as a synthetic fixture', address: 'https://fixture.test/path' },
+    });
+
+    const preview = browser.pageForView('a', tab);
+    const signal = broker.browserObservationSignal('a', tab);
+    if (!preview || !signal) throw new Error('The preview operation was not established.');
+    expect(await preview.capture(signal)).toMatchObject({ width: 640, height: 480 });
+    expect('mount' in preview).toBe(false);
+    expect(ports.activate).not.toHaveBeenCalled();
+    expect(await browser.command('a', tab, { kind: 'open-external' })).toMatchObject({
+      status: 'verified',
+    });
+    expect(ports.activate).toHaveBeenCalledOnce();
+    const commands = actions.filter((action) => action.kind === 'command');
+    expect(commands.filter((action) => action.method === 'Page.bringToFront')).toHaveLength(1);
+    expect(commands.every((action) => action.tab === 19)).toBe(true);
+    expect(embedded.page).not.toHaveBeenCalled();
+
+    onViewport.mockImplementationOnce(() => {
+      broker.endTurn('a');
+    });
+    expect(await preview.capture(signal)).toBeNull();
+    expect(signal.aborted).toBe(true);
+
+    expect(await app.disconnect(name.id)).toEqual({ status: 'verified', value: null });
+    await vi.waitFor(async () => {
+      expect(await browser.snapshot('a', tab)).toBeNull();
+    });
+    expect(actions).toContainEqual({ kind: 'forget' });
+  } finally {
+    await broker.close();
+    await browser.close();
+    app.close();
+    extension.current?.socket.destroy();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
