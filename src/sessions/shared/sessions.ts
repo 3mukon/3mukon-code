@@ -30,6 +30,9 @@ export interface SessionSummary {
   waitingSince?: number;
   // The session is in the archived list instead of the Sessions list.
   archived?: true;
+  // The app's id of the session that started it, for a child, which the Sessions list shows beneath
+  // its parent (ADR-0036).
+  parent?: string;
 }
 
 // What the window's lists show of the sessions: the Sessions list's, how many are archived, which the

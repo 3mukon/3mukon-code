@@ -19,6 +19,10 @@ export interface SessionRecord extends SessionSettings {
   cwd: string;
   // The title the list last showed: the provider's, or else the session's first message.
   title?: string;
+  // The title written for the session once it had run for a while (ADR-0035).
+  titled?: string;
+  // The session that started the session, for a child (ADR-0036).
+  parent?: string;
   // When the user last sent the session a message or a turn of it ended, in milliseconds since the
   // epoch.
   activeAt: number;
@@ -41,6 +45,8 @@ const storedRecord = z.object({
   sessionId: z.string().min(1),
   cwd: z.string().startsWith('/'),
   title: z.string().optional(),
+  titled: z.string().min(1).optional().catch(undefined),
+  parent: z.string().min(1).optional().catch(undefined),
   activeAt: z.number(),
   archived: z.literal(true).optional(),
   context: storedContext,
@@ -73,11 +79,13 @@ export function recordStorage(folder: string): RecordStorage {
       return entries.flatMap((entry): SessionRecord[] => {
         const parsed = storedRecord.safeParse(entry);
         if (!parsed.success) return [];
-        const { title, archived, context, ...record } = parsed.data;
+        const { title, titled, parent, archived, context, ...record } = parsed.data;
         return [
           {
             ...record,
             ...(title === undefined ? {} : { title }),
+            ...(titled === undefined ? {} : { titled }),
+            ...(parent === undefined ? {} : { parent }),
             ...(archived === undefined ? {} : { archived }),
             ...(context === undefined ? {} : { context }),
           },

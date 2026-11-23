@@ -24,6 +24,8 @@ import { dayRoot } from '../../sessions/main/folders';
 import { SessionHost } from '../../sessions/main/host';
 import { windowSessionsUi } from '../../sessions/main/native';
 import type { Provider } from '../../sessions/main/provider';
+import { inboxStorage, SessionInboxes } from '../../sessions/main/inbox';
+import type { SessionCoordinator } from '../../sessions/main/provider';
 import { recordStorage, SessionRecords } from '../../sessions/main/records';
 import { textStorage } from '../../sessions/main/texts';
 import { Settings, settingsStorage } from '../../settings/main/settings';
@@ -142,6 +144,8 @@ void app
       (owner, target, signal) =>
         controlWindow?.surface(owner, target, signal) ?? Promise.resolve(undefined),
     );
+    // The sessions' coordination, which the toolset's session tools reach once the sessions exist.
+    const coordination: { current?: SessionCoordinator } = {};
     const [toolset, shellPath]: [RunningToolset | undefined, string | null] = await Promise.all([
       startToolsetIfPossible(
         version,
@@ -163,6 +167,7 @@ void app
         () => {
           presentations.flushNotices();
         },
+        () => coordination.current,
       ),
       app.isPackaged ? loginShellPath(loginShell()) : Promise.resolve(null),
     ]);
@@ -175,7 +180,9 @@ void app
       new SessionRecords(recordStorage(data)),
       textStorage(join(data, 'session-texts')),
       toolset?.sessions,
+      new SessionInboxes(inboxStorage(data)),
     );
+    coordination.current = sessions.coordinator();
     const automation = automationUi(toolset?.broker, sessions);
     let stopWatchingControl: (() => void) | undefined;
     let stopControlSettings: (() => void) | undefined;
@@ -309,6 +316,7 @@ async function startToolsetIfPossible(
   onOwnerClosed: (id: string) => Promise<void>,
   onOwnerRemoved: (id: string) => void,
   onDeliveryOpportunity: () => void,
+  coordinator: () => SessionCoordinator | undefined,
 ): Promise<RunningToolset | undefined> {
   try {
     return await startToolset({
@@ -317,6 +325,7 @@ async function startToolsetIfPossible(
       onOwnerClosed,
       onOwnerRemoved,
       onDeliveryOpportunity,
+      coordinator,
     });
   } catch (error) {
     console.error('The toolset could not start, so Codex sessions are unavailable:', error);

@@ -4,7 +4,8 @@ import type { AutomationTool, ExecutionResult } from './execution';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ToolsetAccess } from '../../sessions/main/provider';
+import type { SessionCoordinator, ToolsetAccess } from '../../sessions/main/provider';
+import type { InboxNotice } from '../../sessions/shared/inbox';
 import { startToolset, TOOLSET_NAME, type RunningToolset } from './server';
 
 let toolset: RunningToolset;
@@ -328,4 +329,193 @@ it('reports since when a session’s oldest operation approval has waited, and w
   await call;
   expect(heard).toEqual([undefined, request.requestedAt, undefined]);
   stop();
+});
+
+describe('the session tools', () => {
+  // A coordinator that answers as the host would, and records who called.
+  function coordinator(): SessionCoordinator & { calls: unknown[][]; untold: InboxNotice[] } {
+    const calls: unknown[][] = [];
+    const untold: InboxNotice[] = [];
+    const session = (id: string, parent?: string) => ({
+      id,
+      title: id === 'lead' ? 'Lead' : 'Helper',
+      provider: 'codex' as const,
+      folder: '/work',
+      status: 'idle' as const,
+      ...(parent === undefined ? {} : { parent }),
+    });
+    return {
+      calls,
+      untold,
+      mayStart: (owner) => owner === 'lead',
+      list: (owner) => {
+        calls.push(['list', owner]);
+        return [session('lead'), session('helper', 'lead')];
+      },
+      start: (owner, request) => {
+        calls.push(['start', owner, request]);
+        return Promise.resolve(session('helper', owner));
+      },
+      end: (owner, id) => {
+        calls.push(['end', owner, id]);
+        if (id !== 'helper') return Promise.reject(new Error('Not yours to end.'));
+        return Promise.resolve(session('helper', owner));
+      },
+      send: (owner, to, summary, body) => {
+        calls.push(['send', owner, to, summary, body]);
+        return {
+          id: 'm1',
+          from: owner,
+          fromTitle: 'Lead',
+          summary,
+          sentAt: 0,
+          read: false,
+          to,
+          toTitle: 'Helper',
+        };
+      },
+      inbox: (owner) => {
+        calls.push(['inbox', owner]);
+        return [];
+      },
+      read: (owner, id) => {
+        calls.push(['read', owner, id]);
+        return {
+          id,
+          from: 'helper',
+          fromTitle: 'Helper',
+          summary: 'Done',
+          sentAt: 0,
+          read: true,
+          body: 'All tests pass.',
+        };
+      },
+      notices: () =>
+        untold.length === 0
+          ? undefined
+          : {
+              notices: [...untold],
+              told: () => {
+                untold.length = 0;
+              },
+            },
+    };
+  }
+  async function session(id: string, sessions: SessionCoordinator) {
+    await toolset.close();
+    toolset = await startToolset({ version: '1.2.3', coordinator: () => sessions });
+    const owner = await toolset.sessions.bind({
+      id,
+      cwd: process.cwd(),
+      mode: 'auto',
+      sandbox: 'workspace-write',
+    });
+    const access = owner.toolset.open();
+    return { access, client: await connect(access) };
+  }
+  const text = (result: unknown) =>
+    (result as { content: { text: string }[] }).content[0]?.text ?? '';
+
+  it('offers a session the five tools, and a child no tool to start sessions, all allowed', async () => {
+    const sessions = coordinator();
+    const lead = await session('lead', sessions);
+    const names = (await lead.client.listTools()).tools.map((tool) => tool.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'session_list',
+        'session_start',
+        'session_end',
+        'message_send',
+        'message_read',
+      ]),
+    );
+    expect(lead.access.tools).toEqual(expect.arrayContaining(['session_start', 'message_read']));
+    const helper = await session('helper', sessions);
+    const offered = (await helper.client.listTools()).tools.map((tool) => tool.name);
+    expect(offered).toContain('message_send');
+    expect(offered).not.toContain('session_start');
+    const refused = await helper.client.callTool({
+      name: 'session_start',
+      arguments: { prompt: 'x' },
+    });
+    expect(refused.isError).toBe(true);
+    expect(sessions.calls).toEqual([]);
+  });
+
+  it('calls the sessions as the session whose access calls, never as one its arguments name', async () => {
+    const sessions = coordinator();
+    const { client } = await session('lead', sessions);
+    const listed = await client.callTool({ name: 'session_list', arguments: {} });
+    expect(text(listed)).toContain('lead: Lead (codex, idle, in /work) [you]');
+    expect(text(listed)).toContain('helper: Helper (codex, idle, in /work) [your child]');
+    const started = await client.callTool({
+      name: 'session_start',
+      arguments: { prompt: 'Write the tests', provider: 'claude-code', title: 'Tests' },
+    });
+    expect(text(started)).toContain('Started the child session helper');
+    const sent = await client.callTool({
+      name: 'message_send',
+      arguments: { to: 'helper', summary: 'Start now', body: 'Details' },
+    });
+    expect(text(sent)).toBe('Sent to Helper (helper): Start now');
+    const read = await client.callTool({ name: 'message_read', arguments: { messageId: 'm7' } });
+    expect(text(read)).toContain('Summary: Done\n\nAll tests pass.');
+    expect(sessions.calls).toEqual([
+      ['list', 'lead'],
+      ['start', 'lead', { prompt: 'Write the tests', provider: 'claude-code', title: 'Tests' }],
+      ['send', 'lead', 'helper', 'Start now', 'Details'],
+      ['read', 'lead', 'm7'],
+    ]);
+    // A child's list marks its parent.
+    const helper = await session('helper', sessions);
+    const fromChild = await helper.client.callTool({ name: 'session_list', arguments: {} });
+    expect(text(fromChild)).toContain('lead: Lead (codex, idle, in /work) [your parent]');
+    expect(text(fromChild)).toContain(
+      'helper: Helper (codex, idle, in /work) [you, child of lead]',
+    );
+  });
+
+  it('says why a call is refused, for bad arguments as for the sessions’ own refusals', async () => {
+    const sessions = coordinator();
+    const { client } = await session('lead', sessions);
+    const bad = await client.callTool({ name: 'message_send', arguments: { to: 'helper' } });
+    expect(bad.isError).toBe(true);
+    expect(text(bad)).toContain('summary');
+    const refused = await client.callTool({
+      name: 'session_end',
+      arguments: { sessionId: 'stranger' },
+    });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toBe('Not yours to end.');
+  });
+
+  it('carries the notices of new messages with the next result, once, by their summaries', async () => {
+    const sessions = coordinator();
+    const { client } = await session('lead', sessions);
+    sessions.untold.push({
+      id: 'n1',
+      from: 'helper',
+      fromTitle: 'Helper',
+      summary: 'Tests written',
+      sentAt: 0,
+    });
+    const first = await client.callTool({ name: 'message_read', arguments: {} });
+    expect(text(first)).toContain('Your inbox is empty.');
+    expect(text(first)).toContain('- n1: from Helper (helper): Tests written');
+    expect(first.structuredContent).toMatchObject({
+      inbox: { source: '3mukon-code:inbox', messages: [{ id: 'n1' }] },
+    });
+    const second = await client.callTool({ name: 'message_read', arguments: {} });
+    expect(text(second)).toBe('Your inbox is empty.');
+    // Any of the app's tools carries them, the automation tools in their JSON.
+    sessions.untold.push({
+      id: 'n2',
+      from: 'helper',
+      fromTitle: 'Helper',
+      summary: 'More',
+      sentAt: 0,
+    });
+    const capabilities = await client.callTool({ name: 'automation_capabilities', arguments: {} });
+    expect(JSON.parse(text(capabilities))).toMatchObject({ inbox: { messages: [{ id: 'n2' }] } });
+  });
 });

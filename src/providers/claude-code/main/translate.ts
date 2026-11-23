@@ -1,4 +1,5 @@
 import type { SDKMessage, SessionMessage } from '@anthropic-ai/claude-agent-sdk';
+import { inboxNoticesOf } from '../../../sessions/shared/inbox';
 import type {
   FileChange,
   MessageImage,
@@ -179,6 +180,7 @@ export class Translator {
     const text = blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n');
     return [
       ...userText(message.uuid, text, imagesOf(blocks)),
+      ...inboxOf(blocks),
       ...this.toolResults(blocks, undefined),
     ];
   }
@@ -337,6 +339,18 @@ export class Translator {
 
 function taskStatus(value: unknown): Task['status'] {
   return value === 'in_progress' || value === 'completed' ? value : 'pending';
+}
+
+// The notices of new messages the app gave beside a message, or alone, in a document of its own
+// (ADR-0036).
+function inboxOf(content: unknown): SessionEvent[] {
+  if (!Array.isArray(content)) return [];
+  return content.map(asRecord).flatMap((block): SessionEvent[] => {
+    const source = asRecord(block.source);
+    if (block.type !== 'document' || typeof source.data !== 'string') return [];
+    const notices = inboxNoticesOf(source.data);
+    return notices === undefined || notices.length === 0 ? [] : [{ type: 'inbox', notices }];
+  });
 }
 
 function userText(id: string, text: string, images: MessageImage[] = []): SessionEvent[] {

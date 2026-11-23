@@ -28,3 +28,6 @@ One name per concept: naming and search follow the Term column, and Avoid lists 
 | panel | One part of the main area's layout, showing a session, a session page, a file, a terminal, or one of the app's own panels: the archived sessions, the accounts or the settings | pane, tab, view |
 | gateway | A provider's settings file that the user picks for a session to run it through another endpoint or account: a Claude Code settings file or a Codex profile in the provider's gateways folder (ADR-0028) | proxy, profile (for this meaning) |
 | usage window | One span of a subscription's usage limits, such as five hours or a week, with the share used and when it resets (ADR-0017) | quota, window (alone, for this meaning) |
+| child session | A session another session started with the toolset, which works in its parent's folder, shows beneath it in the Sessions list and starts no sessions of its own (ADR-0036) | subagent (the providers' own), teammate, worker |
+| inbox | Where a session's messages from other sessions wait, each with a summary that reaches its agent by itself and a body it reads through a tool (ADR-0036) | queue, mailbox |
+| notice | What tells an agent of a change it did not make itself, beside the user's next message or with a tool's result: of a presentation's state (ADR-0026) or of new messages (ADR-0036) | notification (for this meaning) |

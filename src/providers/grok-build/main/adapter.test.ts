@@ -686,6 +686,22 @@ class FakeGrok {
           return { status: 'queued' };
         },
       )
+      .onRequest(
+        '_x.ai/session/rename',
+        (params) => params as Params,
+        ({ params }) => {
+          record('_x.ai/session/rename', params);
+          return { success: true };
+        },
+      )
+      .onRequest(
+        '_x.ai/session/delete',
+        (params) => params as Params,
+        ({ params }) => {
+          record('_x.ai/session/delete', params);
+          return { success: true };
+        },
+      )
       .onNotification('session/cancel', ({ params }) => {
         record('session/cancel', params);
         this.endPrompt('cancelled');
@@ -924,6 +940,41 @@ describe('turns', () => {
     expect(fake().paramsOf('session/prompt')[0]).toEqual({
       sessionId: 'grok-1',
       prompt: [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' }],
+    });
+  });
+
+  it('tells the agent of new messages in a resource of its own, beside a message or in a turn of the app’s own', async () => {
+    const { session, events, until } = await open((onEvent) =>
+      provider.start({ cwd: '/work' }, onEvent),
+    );
+    const notice = { id: 'n1', from: 'child', fromTitle: 'Tests', summary: 'Done', sentAt: 1 };
+    const context = { presentationNotices: [], inboxNotices: [notice] };
+    const inboxBlock = {
+      type: 'resource',
+      resource: {
+        uri: 'app://3mukon-code/inbox',
+        mimeType: 'text/plain',
+        text: expect.stringContaining('Done') as string,
+      },
+    };
+    await session.send('Go on', [], context, { accepted: vi.fn(), failed: vi.fn() });
+    await fake().prompted();
+    expect(fake().paramsOf('session/prompt')[0]?.prompt).toEqual([
+      inboxBlock,
+      { type: 'text', text: 'Go on' },
+    ]);
+    const delivery = { accepted: vi.fn(), failed: vi.fn() };
+    await expect(session.deliverContext?.(context, delivery)).rejects.toThrow('turn is running');
+    fake().endPrompt('end_turn');
+    await until(has('turn-ended'));
+    const messages = events.filter((event) => event.type === 'message').length;
+    await session.deliverContext?.(context, delivery);
+    await fake().prompted();
+    expect(fake().paramsOf('session/prompt')[1]?.prompt).toEqual([inboxBlock]);
+    expect(events.filter((event) => event.type === 'message')).toHaveLength(messages);
+    fake().endPrompt('end_turn');
+    await vi.waitFor(() => {
+      expect(delivery.accepted).toHaveBeenCalledOnce();
     });
   });
 
@@ -1494,6 +1545,77 @@ describe('resuming and history', () => {
       { id: 'grok-newest', label: 'Grok Newest', efforts: [], default: true },
     ]);
     await session.close();
+  });
+});
+
+describe('titles', () => {
+  it('writes a title in a session of a read-only process with the model and effort given, and deletes the session', async () => {
+    const writing = provider.writeTitle?.({
+      gateway: null,
+      model: 'grok-code',
+      effort: 'low',
+      prompt: 'Title this: …',
+    });
+    await vi.waitFor(() => {
+      expect(fakes).toHaveLength(1);
+    });
+    const grok = fake();
+    await grok.prompted();
+    expect(grok.args).toEqual(expect.arrayContaining(['--sandbox', 'read-only']));
+    expect(grok.paramsOf('session/new')[0]).toMatchObject({ cwd: grok.cwd, mcpServers: [] });
+    expect(grok.paramsOf('session/set_config_option')).toEqual([
+      { sessionId: 'grok-1', configId: 'model', value: 'grok-code' },
+      { sessionId: 'grok-1', configId: 'reasoning_effort', value: 'low' },
+    ]);
+    expect(grok.paramsOf('session/prompt')[0]).toEqual({
+      sessionId: 'grok-1',
+      prompt: [{ type: 'text', text: 'Title this: …' }],
+    });
+    await grok.update({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Fix ' },
+    });
+    await grok.update({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'the build' },
+    });
+    grok.endPrompt('end_turn');
+    expect(await writing).toBe('Fix the build');
+    expect(grok.paramsOf('_x.ai/session/delete')).toEqual([{ sessionId: 'grok-1' }]);
+  });
+
+  it('cancels and fails a title whose agent starts a tool, and still deletes the session', async () => {
+    const writing = provider.writeTitle?.({
+      gateway: null,
+      model: null,
+      effort: null,
+      prompt: 'x',
+    });
+    await vi.waitFor(() => {
+      expect(fakes).toHaveLength(1);
+    });
+    const grok = fake();
+    await grok.prompted();
+    expect(grok.paramsOf('session/set_config_option')).toEqual([]);
+    await grok.update({
+      sessionUpdate: 'tool_call',
+      toolCallId: 't1',
+      title: 'Read file',
+      kind: 'read',
+      status: 'pending',
+    });
+    await expect(writing).rejects.toThrow('started a tool');
+    expect(grok.methods()).toContain('session/cancel');
+    expect(grok.paramsOf('_x.ai/session/delete')).toEqual([{ sessionId: 'grok-1' }]);
+  });
+
+  it('gives a session a title in Grok’s history, and reports it', async () => {
+    const { session, events } = await open((onEvent) => provider.start({ cwd: '/work' }, onEvent));
+    await session.setTitle?.('Build fixes');
+    expect(fake().paramsOf('_x.ai/session/rename')).toEqual([
+      { sessionId: 'grok-1', title: 'Build fixes' },
+    ]);
+    expect(events).toContainEqual({ type: 'title', title: 'Build fixes' });
   });
 });
 

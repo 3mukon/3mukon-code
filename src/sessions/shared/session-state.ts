@@ -15,6 +15,7 @@ import type {
   ToolKind,
   ToolStatus,
 } from './events';
+import type { InboxNotice } from './inbox';
 
 export type SessionStatus = 'idle' | 'running' | 'waiting' | 'closed';
 
@@ -50,6 +51,8 @@ export type TimelineItem =
       resolution?: 'answered' | 'cancelled';
       answer?: QuestionAnswer;
     }
+  // Messages from other sessions the agent was told of, by their summaries (ADR-0036).
+  | { type: 'inbox'; notices: InboxNotice[] }
   // Without a message, the UI says in its own words that the turn failed.
   | { type: 'error'; message?: string };
 
@@ -280,6 +283,10 @@ function fold(state: SessionState, event: SessionEvent): SessionState {
     }
     case 'resumed':
       return { ...state, closed: false, historyFailed: false };
+    case 'inbox':
+      return event.notices.length === 0
+        ? state
+        : append(state, { type: 'inbox', notices: event.notices });
     case 'error':
       return append(state, errorItem(event.message));
     case 'closed': {
@@ -304,6 +311,7 @@ function itemId(item: TimelineItem): string | undefined {
     case 'approval':
     case 'question':
       return item.request.id;
+    case 'inbox':
     case 'error':
       return undefined;
   }

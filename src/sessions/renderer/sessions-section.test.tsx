@@ -94,6 +94,31 @@ describe('SessionsSection', () => {
     expect(rows()).toHaveLength(4);
   });
 
+  it('shows each child indented beneath its parent, and on its own where its parent is not shown', () => {
+    const family = [
+      session('c2', '/Users/me/web', { title: 'Second child', parent: 'p' }),
+      session('o', '/Users/me/api', { title: 'Other' }),
+      session('p', '/Users/me/api', { title: 'Parent' }),
+      session('c1', '/Users/me/web', { title: 'First child', parent: 'p' }),
+    ];
+    render(<SessionsSection bridge={unsearched} sessions={family} folders={folders} />);
+    const items = () => within(region()).queryAllByRole('listitem');
+    expect(rows()).toEqual([
+      'IdleOtherapi',
+      'IdleParentapi',
+      'IdleSecond childweb',
+      'IdleFirst childweb',
+    ]);
+    expect(items().map((item) => item.getAttribute('aria-level'))).toEqual(['1', '1', '2', '2']);
+    expect(within(items()[2] ?? region()).getByRole('button').className).toContain('pl-6');
+    // The filter shows the children without their parent, each on its own.
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter sessions by workspace' }), {
+      target: { value: 'w1' },
+    });
+    expect(rows()).toEqual(['IdleSecond childweb', 'IdleFirst childweb']);
+    expect(items().map((item) => item.getAttribute('aria-level'))).toEqual(['1', '1']);
+  });
+
   it('opens a session page with New session, and shows a session clicked in the list', () => {
     const onNewSession = vi.fn();
     const onOpenSession = vi.fn();

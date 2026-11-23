@@ -98,12 +98,13 @@
       "sandbox": "沙盒",
       "noGateway": "不使用网关",
       "defaultModel": "默认模型",
-      "defaultEffort": "默认强度",
       "loadingModels": "正在加载模型…",
       "settings": "会话设置",
       "settingsSummary": "会话设置：{{summary}}",
       "fromUser": "你：",
       "fromAgent": "{{agent}}：",
+      "fromSession": "{{session}}：",
+      "sentBy": "来自 {{session}}",
       "failed": "本轮失败。",
       "startFailed": "无法启动会话。",
       "resumeFailed": "无法恢复会话。",
@@ -307,6 +308,10 @@
         "endNamed": "结束：{{grant}}",
         "endFailed": "无法结束。"
       }
+    },
+    "inbox": {
+      "notices": "来自其他会话的新消息",
+      "from": "消息来自"
     }
   },
   "approvals": {

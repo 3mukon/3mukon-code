@@ -1,7 +1,9 @@
 import { createContext, memo, useContext, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Inbox } from '../../ui/renderer/icons';
 import { StatusDot, type Status } from '../../ui/renderer/status-dot';
 import type { MessageImage, Task } from '../shared/events';
+import type { InboxNotice } from '../shared/inbox';
 import {
   openRequests,
   type RequestItem,
@@ -67,6 +69,9 @@ interface TimelineProps {
   pending?: { text: string; images: MessageImage[] };
   // The provider's name, which VoiceOver reads before each of the agent's messages.
   agent: string;
+  // For a child session, its parent's title, which names the sender of its first message, the task
+  // its parent gave it, in place of the user (ADR-0036).
+  firstFrom?: string;
   renderRequest?: RenderRequest;
   renderToolExtra?: RenderToolExtra;
   renderToolCall?: RenderToolCall;
@@ -87,6 +92,7 @@ export function Timeline({
   from = 0,
   pending,
   agent,
+  firstFrom,
   renderRequest,
   renderToolExtra,
   renderToolCall,
@@ -95,6 +101,10 @@ export function Timeline({
   const { t } = useTranslation();
   const working = pending !== undefined || state?.turnRunning === true;
   const oldestWaiting = state === null ? undefined : openRequests(state)[0]?.id;
+  const first =
+    firstFrom === undefined
+      ? undefined
+      : state?.timeline.find((item) => item.type === 'message' && item.role === 'user');
   return (
     <ToolExtras.Provider value={renderToolExtra}>
       <ToolCalls.Provider value={renderToolCall}>
@@ -104,6 +114,7 @@ export function Timeline({
             item={item}
             agent={agent}
             oldestWaiting={oldestWaiting}
+            {...(item === first && firstFrom !== undefined ? { from: firstFrom } : {})}
             {...(renderRequest === undefined ? {} : { renderRequest })}
           />
         ))}
@@ -161,6 +172,8 @@ const taskLook: Record<Task['status'], string> = {
 interface ItemProps {
   item: TimelineItem;
   agent: string;
+  // Another session's title, for a message in the user's place that it sent.
+  from?: string;
   // The id of the session's oldest waiting request, if any.
   oldestWaiting: string | undefined;
   renderRequest?: RenderRequest;
@@ -172,7 +185,8 @@ interface ItemProps {
 // made afresh by whoever renders the page, or a request answered, renders no other entry again; a
 // change of language reaches every entry all the same, through its translation.
 function rendersAsBefore(before: ItemProps, after: ItemProps): boolean {
-  if (before.item !== after.item || before.agent !== after.agent) return false;
+  if (before.item !== after.item || before.agent !== after.agent || before.from !== after.from)
+    return false;
   if (after.item.type !== 'approval' && after.item.type !== 'question') return true;
   return (
     before.renderRequest === after.renderRequest &&
@@ -181,11 +195,19 @@ function rendersAsBefore(before: ItemProps, after: ItemProps): boolean {
   );
 }
 
-const Item = memo(function Item({ item, agent, oldestWaiting, renderRequest }: ItemProps) {
+const Item = memo(function Item({ item, agent, from, oldestWaiting, renderRequest }: ItemProps) {
   const { t } = useTranslation();
   switch (item.type) {
     case 'message':
-      return <Message role={item.role} text={item.text} images={item.images} agent={agent} />;
+      return (
+        <Message
+          role={item.role}
+          text={item.text}
+          images={item.images}
+          agent={agent}
+          {...(from === undefined ? {} : { from })}
+        />
+      );
     case 'tool':
       return (
         <>
@@ -198,6 +220,8 @@ const Item = memo(function Item({ item, agent, oldestWaiting, renderRequest }: I
     case 'approval':
     case 'question':
       return renderRequest?.(item, { oldestWaiting: item.request.id === oldestWaiting }) ?? null;
+    case 'inbox':
+      return <InboxNotices notices={item.notices} />;
     case 'error':
       return (
         <p className="my-3 whitespace-pre-wrap text-del">
@@ -206,6 +230,26 @@ const Item = memo(function Item({ item, agent, oldestWaiting, renderRequest }: I
       );
   }
 }, rendersAsBefore);
+
+// The new messages from other sessions the agent was told of (ADR-0036), as the app's and never as
+// the user's: each as a line with an inbox icon, its sender in the ink and its summary, in faint
+// type.
+function InboxNotices({ notices }: { notices: readonly InboxNotice[] }) {
+  const { t } = useTranslation();
+  return (
+    <ul aria-label={t('sessions.inbox.notices')} className="my-3 flex flex-col gap-1 text-faint">
+      {notices.map((notice) => (
+        <li key={notice.id} className="flex items-start gap-2">
+          <Inbox className="mt-1 size-3.5 shrink-0" />
+          <span className="min-w-0 wrap-anywhere">
+            {t('sessions.inbox.from')} <span className="text-ink">{notice.fromTitle}</span>:{' '}
+            {notice.summary}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function keyOf(item: TimelineItem, index: number): string {
   switch (item.type) {
@@ -217,6 +261,8 @@ function keyOf(item: TimelineItem, index: number): string {
     case 'approval':
     case 'question':
       return `${item.type}:${item.request.id}`;
+    case 'inbox':
+      return `inbox:${item.notices[0]?.id ?? String(index)}`;
     case 'error':
       return `error:${String(index)}`;
   }

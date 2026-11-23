@@ -1,3 +1,5 @@
+import type { InboxNotice } from './inbox';
+
 // The provider-neutral session model: the events a provider adapter reports, and the requests and
 // answers that pass between a session and the user. Everything here is plain JSON-serializable data,
 // so it crosses from the main process to the renderer unchanged. Text that comes from an agent or a
@@ -216,6 +218,9 @@ export type SessionEvent =
   // The host has resumed a session that was not running, which runs again. A host event, which no
   // provider sends.
   | { type: 'resumed' }
+  // Messages from other sessions that the agent was told of, by their summaries (ADR-0036): a host
+  // event as the notices are given, and a provider's as its history gives them back.
+  | { type: 'inbox'; notices: InboxNotice[] }
   | { type: 'error'; message: string }
   // The session ended, and its provider process with it.
   | { type: 'closed'; error?: string };

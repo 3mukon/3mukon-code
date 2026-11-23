@@ -10,6 +10,7 @@ import type {
   SandboxLevel,
   SessionEvent,
 } from '../shared/events';
+import type { InboxNotice } from '../shared/inbox';
 import type {
   AutomationPolicy,
   AutomationCallReceipt,
@@ -44,6 +45,16 @@ export interface ResumeOptions extends StartOptions {
   sessionId: string;
 }
 
+// What a session's title is written from (ADR-0035): the session's gateway, model and effort, null
+// for the provider's own configuration, default model or default effort, and the prompt, which
+// holds the instructions and the conversation so far.
+export interface TitleRequest {
+  gateway: string | null;
+  model: string | null;
+  effort: ReasoningEffort | null;
+  prompt: string;
+}
+
 // One provider protocol behind the provider-neutral session model; each adapter under src/providers/
 // implements it. Methods reject when the provider refuses or fails; failures that happen later, while
 // a session runs, arrive as error and closed events. Credentials never pass through this interface:
@@ -69,6 +80,11 @@ export interface Provider {
   // appears in the provider's history, and without running anything in the folder, which may not exist
   // yet: a provider counts the folder's own settings only where it can read them so, as Codex can.
   listModels(gateway: string | null, cwd?: string): Promise<ModelOption[]>;
+  // Answers the prompt with the agent's reply alone, through the gateway and with the model and
+  // effort given, in a request of its own beside any session (ADR-0035): it runs no tools, changes
+  // no session and leaves no session in the provider's history. Rejects when the provider refuses
+  // or fails.
+  writeTitle?(request: TitleRequest): Promise<string>;
   // Ends the processes the provider runs outside its sessions, such as those listing its models or
   // reading its account, and starts no more; resolves once they have ended. The app calls it as it
   // quits, so that none of them outlives the app.
@@ -112,8 +128,69 @@ export interface ProviderSession {
   // happens at once; asked for during a turn, it happens when the turn ends, before the next one. The
   // session keeps its id and its history.
   setGateway(gateway: string | null): Promise<void>;
+  // Gives the session the title in the provider's own store, where the provider keeps titles, so
+  // that its own tools show it; a title event follows where the provider reports one.
+  setTitle?(title: string): Promise<void>;
+  // Starts a turn of the app's own that carries the host context alone, without a message of the
+  // user's, as the notice of new messages to an idle session does (ADR-0036); resolves once the
+  // provider has taken it, and refuses while a turn runs. Set only beside supportsHostContext.
+  deliverContext?(context: HostTurnContext, delivery: HostContextDelivery): Promise<void>;
   // Ends the session and its provider process; a closed event follows.
   close(): Promise<void>;
+}
+
+// A session as an agent's session tools list it (ADR-0036): the app's id that addresses it, its
+// title, provider, folder and status, and its parent where it is a child.
+export interface CoordinatedSession {
+  id: string;
+  title: string;
+  provider: ProviderId;
+  folder: string;
+  status: 'idle' | 'running' | 'waiting' | 'closed';
+  parent?: string;
+}
+
+// What an agent asks a child session to be: its first message, which is its task, and where given,
+// its provider, model, effort, a narrower sandbox level than its parent's and a title.
+export interface ChildRequest {
+  prompt: string;
+  provider?: ProviderId;
+  model?: string;
+  effort?: ReasoningEffort;
+  sandbox?: SandboxLevel;
+  title?: string;
+}
+
+// A message in a session's inbox as its agent lists it, without its body, and whether it was read.
+export interface InboxEntry extends InboxNotice {
+  read: boolean;
+}
+
+// What an agent's session tools reach of the sessions (ADR-0036), which the host implements and the
+// toolset calls with the calling session's own id, from its bound access, never from a model's
+// arguments. Each method rejects, or throws, with the reason in words where the app refuses.
+export interface SessionCoordinator {
+  // Whether the session may start sessions: one that is not a child.
+  mayStart(owner: string): boolean;
+  // The sessions of the Sessions list, archived ones aside.
+  list(owner: string): CoordinatedSession[];
+  // Starts a child of the session, once it has taken its first message.
+  start(owner: string, request: ChildRequest): Promise<CoordinatedSession>;
+  // Ends a child of the session, or the session itself where it is a child.
+  end(owner: string, id: string): Promise<CoordinatedSession>;
+  // Puts a message in another session's inbox, and gives it back with the receiver's title.
+  send(
+    owner: string,
+    to: string,
+    summary: string,
+    body: string,
+  ): InboxEntry & { to: string; toTitle: string };
+  // The session's inbox, the newest first, and one message's body, which marks it read.
+  inbox(owner: string): InboxEntry[];
+  read(owner: string, id: string): InboxEntry & { body: string };
+  // The notices the result of the session's next call to the app's tools carries, and what marks
+  // them told as the result goes; undefined where there are none.
+  notices(owner: string): { notices: InboxNotice[]; told(): void } | undefined;
 }
 
 // A factory already bound to one app session (ADR-0023). The host supplies it before the provider
@@ -181,6 +258,9 @@ export interface SessionAutomation {
 }
 export interface HostTurnContext {
   presentationNotices: readonly PresentationNotice[];
+  // The new messages from other sessions the agent is told of, by their summaries (ADR-0036), in a
+  // block of their own beside the presentation state.
+  inboxNotices?: readonly InboxNotice[];
 }
 // Separate from the serializable context: queued input is not yet delivery. The adapter settles
 // this only on a native acknowledgement, or failure, including cancellation of its queued messages.

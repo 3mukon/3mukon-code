@@ -119,18 +119,26 @@ export class Translator {
   // One item of a past turn, from the thread's history.
   history(item: ThreadItem): SessionEvent[] {
     if (item.type !== 'userMessage') return this.item(item, true);
+    const own = (input: (typeof item.content)[number], placeholder: string) =>
+      input.type === 'text' &&
+      input.text_elements.some((element) => element.placeholder === placeholder);
     const text = item.content
       .flatMap((input) =>
-        input.type === 'text' &&
-        !input.text_elements.some((element) => element.placeholder === PRESENTATION_CONTEXT)
+        input.type === 'text' && !own(input, PRESENTATION_CONTEXT) && !own(input, INBOX_CONTEXT)
           ? [input.text]
           : [],
       )
       .join('\n');
+    // The notices of new messages the app gave beside the message, or alone (ADR-0036).
+    const inbox = item.content.flatMap((input): SessionEvent[] => {
+      if (input.type !== 'text' || !own(input, INBOX_CONTEXT)) return [];
+      const notices = inboxNoticesOf(input.text);
+      return notices === undefined || notices.length === 0 ? [] : [{ type: 'inbox', notices }];
+    });
     const images = item.content.flatMap((input) =>
       input.type === 'image' && 'url' in input ? imagesOfUrl(input.url) : [],
     );
-    if (text.trim() === '' && images.length === 0) return [];
+    if (text.trim() === '' && images.length === 0) return inbox;
     return [
       {
         type: 'message',
@@ -139,6 +147,7 @@ export class Translator {
         text,
         ...(images.length === 0 ? {} : { images }),
       },
+      ...inbox,
     ];
   }
 
@@ -457,3 +466,4 @@ function mcpOutput(result: McpToolCallResult | null, error: McpToolCallError | n
   return text.join('\n').slice(0, OUTPUT_LIMIT);
 }
 import { PRESENTATION_CONTEXT } from '../../../sessions/shared/host-context';
+import { INBOX_CONTEXT, inboxNoticesOf } from '../../../sessions/shared/inbox';

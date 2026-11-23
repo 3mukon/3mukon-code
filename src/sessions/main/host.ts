@@ -29,16 +29,33 @@ import type {
   SessionSummary,
 } from '../shared/sessions';
 import type {
+  ChildRequest,
+  CoordinatedSession,
+  HostContextDelivery,
+  HostTurnContext,
+  InboxEntry,
   Provider,
   ProviderSession,
   SessionAutomation,
   SessionAutomationHost,
+  SessionCoordinator,
   SessionEventListener,
   StartOptions,
 } from './provider';
+import { CHILD_LIMIT, MESSAGE_LIMITS, type InboxNotice } from '../shared/inbox';
+import { memoryInboxStorage, SessionInboxes, type InboxMessage } from './inbox';
 import type { SessionRecord, SessionRecords } from './records';
+import { cleanTitle, ranAWhile, TITLE_ATTEMPTS, titlePrompt, type TurnProgress } from './titles';
+import { effortToSet, modelInUse, titleEffort } from '../shared/efforts';
 import { searchWords } from '../shared/search';
 import { matchOf, memoryTextStorage, textOf, type TextStorage } from './texts';
+
+// How long a child that ends itself waits before it closes, so that the result of its call reaches
+// it.
+const SELF_END_MS = 1_000;
+
+// The sandbox levels from the narrowest to the widest.
+const SANDBOX_ORDER: readonly SandboxLevel[] = ['read-only', 'workspace-write', 'full-access'];
 
 // How long a provider has to list its models before the list fails.
 const MODELS_TIMEOUT_MS = 60_000;
@@ -80,8 +97,27 @@ interface Hosted {
   provider: ProviderId;
   cwd: string;
   // The provider's id for the session, once the provider has started it; the session is listed from
-  // then on.
+  // then on, or, for one started with a message, once that message is in it or has failed to go.
   sessionId?: string;
+  // Whether the session was started with a message that is neither in it yet nor failed to go, so
+  // that its row shows that message and its running turn from the first.
+  sending?: boolean;
+  // The model and effort for which the host last set the session's starting effort, so that it asks
+  // once for each.
+  effortSet?: string;
+  // How long the session's turns have run in this run and how many have ended, and since when the
+  // running turn has run, by which the host tells when the session has run for a while (ADR-0035).
+  progress: TurnProgress;
+  turnSince?: number;
+  // The title written for the session once it had run for a while, how many times one was asked for
+  // in this run, and whether one is being written.
+  titled?: string;
+  titleAsked: number;
+  titling?: boolean;
+  // The session that started the session, for a child (ADR-0036).
+  parent?: string;
+  // Whether the host is telling the session of its new messages in a turn of its own.
+  waking?: boolean;
   // When the user last sent the session a message or a turn of it ended.
   activeAt: number;
   archived: boolean;
@@ -141,6 +177,8 @@ export class SessionHost {
   private readonly unreadable = new Set<string>();
   // Set as the app quits, which stops the catch-up.
   private closing = false;
+  // How many children each session is starting, which count towards its limit until they run.
+  private readonly childStarts = new Map<string, number>();
   // What each session closing as the app quits calls as it ends, by session.
   private readonly ending = new Map<string, () => void>();
 
@@ -149,6 +187,7 @@ export class SessionHost {
     records: SessionRecords,
     texts: TextStorage = memoryTextStorage(),
     private readonly automation?: SessionAutomationHost,
+    private readonly inboxes: SessionInboxes = new SessionInboxes(memoryInboxStorage()),
   ) {
     this.providers = new Map(providers.map((provider) => [provider.id, provider]));
     this.records = records;
@@ -207,9 +246,18 @@ export class SessionHost {
     return listed;
   }
 
-  // Starts a session in a folder and resolves with the app's id for it once the provider has started
-  // it. It rejects when the folder is not one, or the provider is not available or refuses.
-  async start(providerId: ProviderId, options: StartOptions): Promise<string> {
+  // Starts a session in a folder and resolves with the app's id for it once the provider has
+  // started it and taken the message it is started with, if any. A session started with a message
+  // is listed once the message is in it, as the provider reports it at once, so that its row shows
+  // the message and the running turn from the first, rather than its provider's name and idle for a
+  // moment; a message that fails to go leaves it listed as it is, and the start rejects. It rejects
+  // when the folder is not one, or the provider is not available or refuses.
+  async start(
+    providerId: ProviderId,
+    options: StartOptions,
+    message?: { text: string; images?: MessageImage[] },
+    link: { parent?: string; title?: string } = {},
+  ): Promise<string> {
     if (this.isClosing()) throw new Error('The app is closing.');
     const provider = this.provider(providerId);
     if (!(await stat(options.cwd)).isDirectory()) {
@@ -232,6 +280,11 @@ export class SessionHost {
       seq: 0,
       runs: 1,
       shown: false,
+      progress: { turns: 0, turnMs: 0 },
+      titleAsked: 0,
+      ...(message === undefined ? {} : { sending: true }),
+      ...(link.parent === undefined ? {} : { parent: link.parent }),
+      ...(link.title === undefined ? {} : { titled: link.title }),
     };
     this.sessions.set(hosted.id, hosted);
     try {
@@ -259,6 +312,16 @@ export class SessionHost {
     hosted.sessionId = hosted.session.id;
     this.keep(hosted);
     this.report(hosted);
+    if (message !== undefined) {
+      try {
+        await this.send(hosted.id, message.text, message.images);
+      } finally {
+        delete hosted.sending;
+        this.report(hosted);
+      }
+    }
+    // Once the first message is in, as Claude Code keeps a title only in a transcript it has begun.
+    if (link.title !== undefined) this.giveTitle(hosted, link.title);
     return hosted.id;
   }
 
@@ -292,7 +355,7 @@ export class SessionHost {
     const session = this.session(id);
     const hostedBefore = this.sessions.get(id);
     const wasRunning = hostedBefore?.state.turnRunning === true;
-    const prepared = prepareContext(hostedBefore?.automation);
+    const prepared = this.turnContext(hostedBefore);
     try {
       if (prepared && session.supportsHostContext === true) {
         await session.send(text, images, prepared.context, prepared);
@@ -319,7 +382,7 @@ export class SessionHost {
 
   title(id: string): string | undefined {
     const hosted = this.sessions.get(id);
-    return hosted && (titleOf(hosted.state) ?? hosted.summary?.title);
+    return hosted && (this.titleOf(hosted) ?? hosted.summary?.title);
   }
 
   interrupt(id: string): Promise<void> {
@@ -456,7 +519,11 @@ export class SessionHost {
     hosted.archived = true;
     this.keep(hosted);
     this.report(hosted);
-    await this.close(hosted);
+    // A parent's children go with it (ADR-0036).
+    await Promise.all([
+      this.close(hosted),
+      ...this.childrenOf(id).map((child) => this.archive(child.id)),
+    ]);
   }
 
   // Returns an archived session to the Sessions list.
@@ -466,6 +533,7 @@ export class SessionHost {
     hosted.archived = false;
     this.keep(hosted);
     this.report(hosted);
+    for (const child of this.childrenOf(id)) this.unarchive(child.id);
   }
 
   // Takes the session off the app's lists and out of its records, closing it while it is open; its
@@ -473,12 +541,17 @@ export class SessionHost {
   async remove(id: string): Promise<void> {
     const hosted = this.sessions.get(id);
     if (hosted === undefined) return;
+    const children = this.childrenOf(id);
     this.sessions.delete(id);
     this.records.remove(id);
     this.forgetText(id);
+    this.inboxes.forget(id);
     this.notify();
-    await this.close(hosted);
-    await hosted.automation?.close(true);
+    await Promise.all([
+      this.close(hosted).then(() => hosted.automation?.close(true)),
+      // A parent's children go with it (ADR-0036).
+      ...children.map((child) => this.remove(child.id)),
+    ]);
   }
 
   // Offers the session's menu, and does what the user chooses once they confirm where it asks:
@@ -499,7 +572,11 @@ export class SessionHost {
     if (summary === undefined) return null;
     switch (action) {
       case 'archive': {
-        const working = summary.status === 'running' || summary.status === 'waiting';
+        // A parent's children go with it, so that any of them working stops too.
+        const working = [
+          summary,
+          ...this.childrenOf(id).flatMap((child) => child.summary ?? []),
+        ].some((one) => one.status === 'running' || one.status === 'waiting');
         if (working && !(await ui.confirmArchive(summary))) return null;
         await this.archive(id);
         return action;
@@ -769,13 +846,29 @@ export class SessionHost {
     if (event.type === 'turn-ended') hosted.automation?.turnEnded();
     if (event.type === 'mode' || event.type === 'settings')
       hosted.automation?.setPolicy(this.policy(hosted));
+    if (event.type === 'settings' || event.type === 'models') this.knowEffort(hosted);
     if (event.type === 'closed') hosted.automation?.disconnect();
     hosted.seq += 1;
-    if (event.type === 'turn-ended') hosted.activeAt = Date.now();
+    if (event.type === 'turn-started') hosted.turnSince ??= Date.now();
+    if (event.type === 'turn-ended') {
+      hosted.activeAt = Date.now();
+      hosted.progress = {
+        turns: hosted.progress.turns + 1,
+        turnMs: hosted.progress.turnMs + (Date.now() - (hosted.turnSince ?? Date.now())),
+      };
+      delete hosted.turnSince;
+    }
     for (const listener of this.eventListeners) listener(hosted.id, hosted.seq, event);
     this.keep(hosted);
     this.report(hosted);
     if (TEXT_EVENTS.has(event.type)) this.keepText(hosted);
+    if (event.type === 'turn-ended') {
+      this.writeTitle(hosted);
+      // Once the adapter has finished reporting the turn's end.
+      queueMicrotask(() => {
+        this.wake(hosted);
+      });
+    }
     if (event.type === 'closed') {
       this.ending.get(hosted.id)?.();
       this.ending.delete(hosted.id);
@@ -786,11 +879,337 @@ export class SessionHost {
     return this.closing;
   }
 
+  // Sets the starting effort for a running session whose model takes an effort but which has none
+  // whose provider names the model's default, as Claude Code names none, so that it runs with an
+  // effort its page can show as one of the model's levels: after a start before the models were
+  // known, a switch from a model that takes no effort, or a resumption without one. Once for each
+  // model and effort, so that a refusal is not asked again.
+  private knowEffort(hosted: Hosted): void {
+    const { session, state } = hosted;
+    if (session === undefined || state.closed) return;
+    const model = modelInUse(state.models, state.model);
+    const level = effortToSet(model, state.effort);
+    if (level === null || model === undefined) return;
+    const asked = `${model.id}\n${state.effort ?? ''}`;
+    if (hosted.effortSet === asked) return;
+    hosted.effortSet = asked;
+    // Once the event that called for it has been folded and heard.
+    queueMicrotask(() => {
+      session.setEffort(level).catch((error: unknown) => {
+        console.error('A session’s reasoning effort could not be set:', error);
+      });
+    });
+  }
+
   private policy(hosted: Hosted): { mode: PermissionMode; sandbox: SandboxLevel } {
     return {
       mode: hosted.state.mode ?? hosted.chosen.mode,
       sandbox: hosted.state.sandbox ?? hosted.chosen.sandbox,
     };
+  }
+
+  // What the toolset's session tools reach of the sessions (ADR-0036), for the session each call
+  // names by its own id.
+  coordinator(): SessionCoordinator {
+    return {
+      mayStart: (owner) => {
+        const hosted = this.sessions.get(owner);
+        return hosted !== undefined && hosted.parent === undefined;
+      },
+      list: (owner) => {
+        this.caller(owner);
+        return this.list().sessions.map(coordinated);
+      },
+      start: (owner, request) => this.startChild(owner, request),
+      end: (owner, id) => this.endChild(owner, id),
+      send: (owner, to, summary, body) => this.sendMessage(owner, to, summary, body),
+      inbox: (owner) => {
+        this.caller(owner);
+        return this.inboxes.list(owner).map(entryOf);
+      },
+      read: (owner, id) => {
+        this.caller(owner);
+        const message = this.inboxes.read(owner, id);
+        if (message === undefined) throw new Error('Your inbox has no message with that id.');
+        return { ...entryOf(message), body: message.body };
+      },
+      notices: (owner) => {
+        const hosted = this.sessions.get(owner);
+        if (hosted === undefined) return undefined;
+        const notices = this.untold(hosted);
+        return notices.length === 0
+          ? undefined
+          : {
+              notices,
+              told: () => {
+                this.told(hosted, notices);
+              },
+            };
+      },
+    };
+  }
+
+  // The calling session, which must be one the app has.
+  private caller(owner: string): Hosted {
+    const hosted = this.sessions.get(owner);
+    if (hosted === undefined) throw new Error('The app does not know the calling session.');
+    return hosted;
+  }
+
+  // The session's children, those that are archived included.
+  private childrenOf(id: string): Hosted[] {
+    return [...this.sessions.values()].filter((hosted) => hosted.parent === id);
+  }
+
+  // Starts a child of a running session that is not a child itself (ADR-0036), in its folder, in
+  // auto, at its sandbox level or a narrower one, with its provider, gateway, model and effort
+  // unless the request names others, once fewer than eight of its children run.
+  private async startChild(owner: string, request: ChildRequest): Promise<CoordinatedSession> {
+    const parent = this.caller(owner);
+    if (parent.parent !== undefined) throw new Error('A child session cannot start sessions.');
+    if (parent.session === undefined || parent.state.closed) {
+      throw new Error('The calling session is not running.');
+    }
+    const running = this.childrenOf(owner).filter(
+      (child) => child.session !== undefined && !child.state.closed,
+    );
+    const starting = this.childStarts.get(owner) ?? 0;
+    if (running.length + starting >= CHILD_LIMIT) {
+      throw new Error(
+        `A session can have at most ${String(CHILD_LIMIT)} children running at once; end one first.`,
+      );
+    }
+    const prompt = request.prompt.trim();
+    if (prompt === '') throw new Error('A child needs a first message that says its task.');
+    const own = this.settingsOf(parent);
+    const sandbox = request.sandbox ?? own.sandbox;
+    if (SANDBOX_ORDER.indexOf(sandbox) > SANDBOX_ORDER.indexOf(own.sandbox)) {
+      throw new Error(`A child cannot have a wider sandbox than its parent’s, ${own.sandbox}.`);
+    }
+    const providerId = request.provider ?? parent.provider;
+    const same = providerId === parent.provider;
+    const gateway = same ? own.gateway : null;
+    const model = request.model ?? (same ? own.model : null);
+    const effort = request.effort ?? (same && model === own.model ? own.effort : null);
+    const title = request.title === undefined ? undefined : cleanTitle(request.title);
+    this.childStarts.set(owner, starting + 1);
+    let id: string;
+    try {
+      id = await this.start(
+        providerId,
+        {
+          cwd: parent.cwd,
+          mode: 'auto',
+          sandbox,
+          ...(gateway === null ? {} : { gateway }),
+          ...(model === null ? {} : { model }),
+          ...(effort === null ? {} : { effort }),
+        },
+        { text: prompt },
+        { parent: owner, ...(title === undefined ? {} : { title }) },
+      );
+    } finally {
+      const left = (this.childStarts.get(owner) ?? 1) - 1;
+      if (left > 0) this.childStarts.set(owner, left);
+      else this.childStarts.delete(owner);
+    }
+    const summary = this.sessions.get(id)?.summary;
+    if (summary === undefined) throw new Error('The child left the list as it started.');
+    return coordinated(summary);
+  }
+
+  // Ends a child of the calling session, or the calling session where it is a child: it closes and
+  // stays in the list, closed. A child that ends itself closes a moment later, once its call's
+  // result has reached it.
+  private async endChild(owner: string, id: string): Promise<CoordinatedSession> {
+    const caller = this.caller(owner);
+    const target = this.sessions.get(id);
+    const own = id === owner ? caller.parent !== undefined : target?.parent === owner;
+    if (target === undefined || !own) {
+      throw new Error('A session can end only the children it started, and a child itself.');
+    }
+    if (id === owner) {
+      setTimeout(() => {
+        this.close(target).catch(reportClose);
+      }, SELF_END_MS);
+    } else {
+      await this.close(target);
+    }
+    const summary = target.summary;
+    if (summary === undefined) throw new Error('The session is not listed.');
+    return coordinated(summary);
+  }
+
+  // Puts a message in another session's inbox, one of the Sessions list's, and tells that session
+  // at once where it is idle.
+  private sendMessage(
+    owner: string,
+    to: string,
+    summary: string,
+    body: string,
+  ): InboxEntry & { to: string; toTitle: string } {
+    const sender = this.caller(owner);
+    if (to === owner) throw new Error('A session cannot send a message to itself.');
+    const target = this.sessions.get(to);
+    if (target === undefined || !this.listed(target)) {
+      throw new Error('The Sessions list holds no session with that id.');
+    }
+    const said = summary.replace(/\s+/g, ' ').trim();
+    if (said === '' || said.length > MESSAGE_LIMITS.summary) {
+      throw new Error(
+        `A message needs a summary of 1 to ${String(MESSAGE_LIMITS.summary)} characters.`,
+      );
+    }
+    if (Buffer.byteLength(body, 'utf8') > MESSAGE_LIMITS.bodyBytes) {
+      throw new Error(`A message’s body holds at most ${String(MESSAGE_LIMITS.bodyBytes)} bytes.`);
+    }
+    const message = this.inboxes.send({
+      from: owner,
+      fromTitle: this.titleOf(sender) ?? sender.provider,
+      to,
+      summary: said,
+      body,
+      sentAt: Date.now(),
+    });
+    this.wake(target);
+    return { ...entryOf(message), to, toTitle: this.titleOf(target) ?? target.provider };
+  }
+
+  // The session's messages its agent has not been told of, as a notice names them.
+  private untold(hosted: Hosted): InboxNotice[] {
+    return this.inboxes.untold(hosted.id).map(noticeOf);
+  }
+
+  // Marks notices told, and shows them in the session's activity.
+  private told(hosted: Hosted, notices: readonly InboxNotice[]): void {
+    this.inboxes.told(
+      hosted.id,
+      notices.map((notice) => notice.id),
+    );
+    if (this.sessions.get(hosted.id) === hosted) {
+      this.apply(hosted, { type: 'inbox', notices: [...notices] });
+    }
+  }
+
+  // The context a message carries beside the user's text: the automation's notices and the notices
+  // of new messages, with what tells each of its delivery.
+  private turnContext(
+    hosted: Hosted | undefined,
+  ): (HostContextDelivery & { context: HostTurnContext }) | undefined {
+    const prepared = prepareContext(hosted?.automation);
+    const notices = hosted === undefined ? [] : this.untold(hosted);
+    if (hosted === undefined || notices.length === 0) return prepared;
+    return {
+      context: {
+        presentationNotices: prepared?.context.presentationNotices ?? [],
+        inboxNotices: notices,
+      },
+      accepted: (delivered) => {
+        prepared?.accepted(delivered);
+        this.told(hosted, notices);
+      },
+      failed: () => {
+        prepared?.failed();
+      },
+    };
+  }
+
+  // Tells an idle session of its new messages in a turn of the app's own (ADR-0036): one running,
+  // with no turn, no request waiting on the user and no first message on its way, whose provider
+  // takes host context alone. One at a time; what is not taken waits for the next fitting moment.
+  private wake(hosted: Hosted): void {
+    const { session, state } = hosted;
+    if (session?.deliverContext === undefined || session.supportsHostContext !== true) return;
+    if (this.sessions.get(hosted.id) !== hosted || state.closed || state.turnRunning) return;
+    if (hosted.sending === true || hosted.waking === true || openRequests(state).length > 0) return;
+    if (this.inboxes.untold(hosted.id).length === 0) return;
+    const prepared = this.turnContext(hosted);
+    if (prepared?.context.inboxNotices === undefined) {
+      prepared?.failed();
+      return;
+    }
+    hosted.waking = true;
+    session.deliverContext(prepared.context, prepared).then(
+      () => {
+        delete hosted.waking;
+      },
+      (error: unknown) => {
+        delete hosted.waking;
+        prepared.failed();
+        hosted.automation?.turnEnded();
+        console.error('A session could not be told of its new messages:', error);
+      },
+    );
+  }
+
+  // The settings the session has: those it reported, or else those it started or resumed with.
+  private settingsOf(hosted: Hosted): SessionSettings {
+    const { state, chosen } = hosted;
+    return {
+      mode: state.mode ?? chosen.mode,
+      gateway: state.gateway === undefined ? chosen.gateway : state.gateway,
+      model: state.model === undefined ? chosen.model : state.model,
+      effort: state.effort === undefined ? chosen.effort : state.effort,
+      sandbox: state.sandbox ?? chosen.sandbox,
+    };
+  }
+
+  // Asks the session's provider for a title once the session has run for a while, where the
+  // provider has given it none of its own (ADR-0037): with the model the session runs and its title
+  // effort, through its gateway, from the conversation so far, beside the session, which goes on
+  // meanwhile. A session already titled, by the provider on its own, as Claude Code and Grok Build
+  // title theirs, by the user in the provider's tools, or by the app, and one asked for three times
+  // are left as they are. The title replaces the first message, is kept with the session and given
+  // back to the provider; a request that fails or gives nothing usable is tried again at the end of
+  // the next turn, and a title that comes once the session has closed or left the lists, or once
+  // the provider has titled it, is dropped.
+  private writeTitle(hosted: Hosted): void {
+    const provider = this.providers.get(hosted.provider);
+    const { state } = hosted;
+    if (provider?.writeTitle === undefined || hosted.session === undefined || state.closed) return;
+    if (hosted.titled !== undefined || hosted.titling === true) return;
+    if (hosted.titleAsked >= TITLE_ATTEMPTS || !ranAWhile(hosted.progress)) return;
+    if (state.title !== undefined) return;
+    const prompt = titlePrompt(state);
+    if (prompt === undefined) return;
+    const model = state.model === undefined ? hosted.chosen.model : state.model;
+    const request = {
+      gateway: state.gateway === undefined ? hosted.chosen.gateway : state.gateway,
+      model,
+      effort: titleEffort(modelInUse(state.models, model)),
+      prompt,
+    };
+    hosted.titleAsked += 1;
+    hosted.titling = true;
+    provider
+      .writeTitle(request)
+      .then(cleanTitle, (error: unknown) => {
+        console.error('A session’s title could not be written:', error);
+        return undefined;
+      })
+      .then((title) => {
+        delete hosted.titling;
+        const live = this.sessions.get(hosted.id) === hosted && !hosted.state.closed;
+        if (title === undefined || !live || hosted.state.title !== undefined) return;
+        hosted.titled = title;
+        this.keep(hosted);
+        this.report(hosted);
+        this.giveTitle(hosted, title);
+      }, reportTitle);
+  }
+
+  // Gives the session's provider the title written for it, where the provider keeps titles.
+  private giveTitle(hosted: Hosted, title: string): void {
+    hosted.session?.setTitle?.(title).catch((error: unknown) => {
+      console.error('A session’s title could not be given to its provider:', error);
+    });
+  }
+
+  // The title the lists show: the one the provider keeps for the session, its own, the user's or the
+  // app's as the provider took it, then the one the app wrote for it, then its first message.
+  private titleOf(hosted: Hosted): string | undefined {
+    const { state, titled } = hosted;
+    return state.title ?? titled ?? firstPrompt(state);
   }
 
   // Keeps the text of the session's messages as they are now, once the provider has started it and
@@ -816,7 +1235,7 @@ export class SessionHost {
     const { sessionId, state, chosen } = hosted;
     if (sessionId === undefined) return;
     const before = this.records.get(hosted.id);
-    const title = titleOf(state) ?? before?.title;
+    const title = this.titleOf(hosted) ?? before?.title;
     const context = state.context ?? before?.context;
     const record: SessionRecord = {
       id: hosted.id,
@@ -824,6 +1243,8 @@ export class SessionHost {
       sessionId,
       cwd: hosted.cwd,
       ...(title === undefined ? {} : { title }),
+      ...(hosted.titled === undefined ? {} : { titled: hosted.titled }),
+      ...(hosted.parent === undefined ? {} : { parent: hosted.parent }),
       activeAt: hosted.activeAt,
       ...(hosted.archived ? { archived: true } : {}),
       ...(context === undefined ? {} : { context }),
@@ -840,6 +1261,7 @@ export class SessionHost {
   // and stays so changes nothing there, unless the window has shown it.
   private report(hosted: Hosted): void {
     if (hosted.sessionId === undefined) return;
+    if (hosted.sending === true && firstPrompt(hosted.state) === undefined) return;
     const summary = this.summaryOf(hosted, hosted.sessionId);
     const before = hosted.summary;
     if (before !== undefined && sameFields(before, summary)) return;
@@ -884,7 +1306,7 @@ export class SessionHost {
   // in for the title, and until the history of a session of an earlier run is read, the title the
   // records kept.
   private summaryOf(hosted: Hosted, sessionId: string): SessionSummary {
-    const title = titleOf(hosted.state) ?? this.records.get(hosted.id)?.title;
+    const title = this.titleOf(hosted) ?? this.records.get(hosted.id)?.title;
     const own = sessionStatus(hosted.state);
     const asked = own === 'waiting' ? openRequests(hosted.state)[0]?.requestedAt : undefined;
     const approved = own === 'closed' ? undefined : hosted.approvalsSince;
@@ -903,6 +1325,7 @@ export class SessionHost {
       activeAt: hosted.activeAt,
       ...(waitingSince === undefined ? {} : { waitingSince }),
       ...(hosted.archived ? { archived: true } : {}),
+      ...(hosted.parent === undefined ? {} : { parent: hosted.parent }),
     };
   }
 }
@@ -942,6 +1365,10 @@ function pastSession(record: SessionRecord): Hosted {
     activeAt: record.activeAt,
     archived: record.archived === true,
     chosen: { mode, gateway, model, effort, sandbox },
+    ...(record.titled === undefined ? {} : { titled: record.titled }),
+    ...(record.parent === undefined ? {} : { parent: record.parent }),
+    progress: { turns: 0, turnMs: 0 },
+    titleAsked: 0,
     state: {
       ...initialSessionState(true),
       closed: true,
@@ -973,11 +1400,6 @@ function sameFields<Value extends object>(left: Value, right: Value): boolean {
   return fields.every((field) => left[field] === right[field]);
 }
 
-// The title the provider keeps for the session, or else its first message, as the list shows it.
-function titleOf(state: SessionState): string | undefined {
-  return state.title ?? firstPrompt(state);
-}
-
 // The session's first message on one line, shortened to a title's length, or nothing before it.
 function firstPrompt(state: SessionState): string | undefined {
   for (const item of state.timeline) {
@@ -1007,6 +1429,34 @@ function withoutSecrets(
       ]),
     ),
   };
+}
+
+// A session as the session tools list it.
+function coordinated(summary: SessionSummary): CoordinatedSession {
+  return {
+    id: summary.id,
+    title: summary.title ?? '',
+    provider: summary.provider,
+    folder: summary.cwd,
+    status: summary.status,
+    ...(summary.parent === undefined ? {} : { parent: summary.parent }),
+  };
+}
+
+function noticeOf({ id, from, fromTitle, summary, sentAt }: InboxMessage): InboxNotice {
+  return { id, from, fromTitle, summary, sentAt };
+}
+
+function entryOf(message: InboxMessage): InboxEntry {
+  return { ...noticeOf(message), read: message.readAt !== undefined };
+}
+
+function reportClose(error: unknown): void {
+  console.error('A session could not be closed:', error);
+}
+
+function reportTitle(error: unknown): void {
+  console.error('A session’s title could not be kept:', error);
 }
 
 function reportText(error: unknown): void {

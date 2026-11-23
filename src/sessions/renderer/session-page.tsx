@@ -3,12 +3,12 @@ import { useTranslation } from 'react-i18next';
 import type { SelectOption } from '../../ui/renderer/select';
 import type {
   MessageImage,
-  ModelOption,
   PermissionMode,
   ProviderId,
   ReasoningEffort,
   SandboxLevel,
 } from '../shared/events';
+import { effortInUse, startingEffort } from '../shared/efforts';
 import type { RememberedChoice, SessionsBridge, SessionSummary } from '../shared/sessions';
 import { Attachments, useAttachments } from './attachments';
 import { SessionSettings, type Setting } from './session-settings';
@@ -47,20 +47,10 @@ const firstChoice: Choice = {
 const modes: PermissionMode[] = ['auto', 'yolo'];
 const sandboxes: SandboxLevel[] = ['read-only', 'workspace-write', 'full-access'];
 
-// The effort a session starts with unless the user chooses another, whatever the provider's own
-// default: medium wherever the model takes it, as every provider's models that take an effort do;
-// otherwise the model's own default where the provider names it, or else the provider's default.
-const STARTING_EFFORT: ReasoningEffort = 'medium';
-
 // How many more of the activity's last items the page renders at a time when many come at once, as a
 // history does, until they fill its view; those before them follow in a render that leaves the
 // window free meanwhile, so that the end shows at once.
 const FIRST_ITEMS = 24;
-
-function startingEffort(model: ModelOption | undefined): ReasoningEffort | null {
-  if (model?.efforts.includes(STARTING_EFFORT) === true) return STARTING_EFFORT;
-  return model?.defaultEffort ?? null;
-}
 
 // What the page shows of the providers' accounts, which whoever composes the page gives it.
 export interface AccountViews {
@@ -95,6 +85,9 @@ interface SessionPageProps {
   hostRequests?: ReactNode;
   // The providers' sign-ins and usage limits.
   accounts?: AccountViews;
+  // For a child session, its parent's title, which names the sender of its first message
+  // (ADR-0036).
+  parentTitle?: string;
 }
 
 // A session page. Before its first message it chooses the provider, gateway, model, reasoning effort,
@@ -125,6 +118,7 @@ export function SessionPage({
   aboveComposer,
   hostRequests,
   accounts,
+  parentTitle,
 }: SessionPageProps) {
   const { t } = useTranslation();
   const state = useSession(bridge, sessionId);
@@ -197,11 +191,16 @@ export function SessionPage({
   const efforts = model?.efforts ?? [];
   // A choice of the default model itself shows as the default.
   const modelValue = chosenModel === defaultModel?.id ? '' : (chosenModel ?? '');
-  // The effort without a choice: before the session starts the page's starting effort, and for a
-  // session without one the provider's default, under its own name where the provider says. While the
-  // page chooses, an effort the model does not take gives way to the effort without a choice.
+  // The effort without a choice: before the session starts the starting effort for the model, and
+  // for a session without one the model's own default where the provider names it, or else the
+  // starting effort, which the host sets for a running session whose model takes an effort
+  // (`effortToSet`), so that an effort shows as a level of the model's whatever the provider says
+  // of its default. While the page chooses, an effort the model does not take gives way to the
+  // effort without a choice.
   const unchosenEffort =
-    sessionId === null ? startingEffort(model) : (model?.defaultEffort ?? null);
+    sessionId === null
+      ? startingEffort(model)
+      : (effortInUse(model, null) ?? startingEffort(model));
   const chosenEffort =
     choosing && model !== undefined && !efforts.includes(settings.effort ?? '')
       ? null
@@ -456,14 +455,9 @@ export function SessionPage({
             label: t('sessions.page.effort'),
             summary: true,
             value: effort ?? '',
+            // The model's levels alone: an effort always shows as one of them, never as a default.
             options: withChosen(
-              [
-                // Where the default is not known, the app's Default stands for it.
-                ...(unchosenEffort === null
-                  ? [{ value: '', label: t('sessions.page.defaultEffort') }]
-                  : []),
-                ...efforts.map((level) => ({ value: level, label: effortLabel(level) })),
-              ],
+              efforts.map((level) => ({ value: level, label: effortLabel(level) })),
               effort,
               effortLabel,
             ),
@@ -517,6 +511,7 @@ export function SessionPage({
               state={state}
               from={rendered.from}
               agent={providerName}
+              {...(parentTitle === undefined ? {} : { firstFrom: parentTitle })}
               {...(pending === null ? {} : { pending })}
               {...(renderRequest === undefined ? {} : { renderRequest })}
               {...(renderToolExtra === undefined ? {} : { renderToolExtra })}

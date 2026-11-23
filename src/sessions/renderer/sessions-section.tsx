@@ -41,12 +41,13 @@ interface SessionsSectionProps {
 
 // The sidebar's Sessions section: its heading with New session just after it, then, while there are
 // folders to choose, the filter, and a magnifying glass that opens a search field in the filter's
-// place; then the sessions, each labelled with its folder, which a click or Return shows, whose
-// presses go to whoever drags them elsewhere and whose menu a secondary click offers, of which only
-// the rows in view are rendered. The filter narrows the list to the sessions in one folder or below
-// it, and a search narrows it further, as the main process answers, to the sessions whose title or
-// conversation holds every word of the query, saying how many sessions it has yet to read, or, once
-// it knows, that none match. Escape, or leaving the field empty, closes the search. The heading's row keeps its height whatever it shows, its items
+// place; then the sessions, each child indented beneath its parent, each labelled with its folder,
+// which a click or Return shows, whose presses go to whoever drags them elsewhere and whose menu a
+// secondary click offers, of which only the rows in view are rendered. The filter narrows the list
+// to the sessions in one folder or below it, and a search narrows it further, as the main process
+// answers, to the sessions whose title or conversation holds every word of the query, saying how
+// many sessions it has yet to read, or, once it knows, that none match. Escape, or leaving the
+// field empty, closes the search. The heading's row keeps its height whatever it shows, its items
 // on one centre line. Without sessions the section shows the heading row alone.
 export function SessionsSection({
   sessions,
@@ -144,7 +145,7 @@ export function SessionsSection({
       {found.none && <p className="px-2 text-[11px] text-faint">{t('sessions.search.none')}</p>}
       {found.sessions.length > 0 && (
         <SessionRows
-          sessions={found.sessions}
+          rows={nested(found.sessions)}
           labelledBy={heading}
           className="min-h-0"
           {...(onOpenSession === undefined ? {} : { onOpen: onOpenSession })}
@@ -157,9 +158,37 @@ export function SessionsSection({
   );
 }
 
+// A session's row: the session, and how deep it lies, 1 for a child beneath its parent.
+interface Row {
+  session: SessionSummary;
+  depth: 0 | 1;
+}
+
+// The sessions in the list's order, each child beneath its parent, indented, where both are shown,
+// the children following their parent in the list's order, and otherwise on its own (ADR-0036).
+function nested(sessions: readonly SessionSummary[]): Row[] {
+  const shown = new Set(sessions.map((session) => session.id));
+  const beneath = new Map<string, SessionSummary[]>();
+  for (const session of sessions) {
+    if (session.parent === undefined || !shown.has(session.parent)) continue;
+    beneath.set(session.parent, [...(beneath.get(session.parent) ?? []), session]);
+  }
+  return sessions.flatMap((session): Row[] =>
+    session.parent !== undefined && shown.has(session.parent)
+      ? []
+      : [
+          { session, depth: 0 },
+          ...(beneath.get(session.id) ?? []).map((child) => ({
+            session: child,
+            depth: 1 as const,
+          })),
+        ],
+  );
+}
+
 interface SessionRowsProps {
-  // The sessions, in the order the list shows them.
-  sessions: SessionSummary[];
+  // The sessions' rows, in the order the list shows them.
+  rows: Row[];
   // The id of what names the list for VoiceOver, such as its heading.
   labelledBy?: string;
   // Sizes the scroll area, such as how tall it may grow.
@@ -179,7 +208,7 @@ interface SessionRowsProps {
 // lies in the whole list, and the row with the keyboard focus stays while it is scrolled out of view,
 // keeping the focus.
 function SessionRows({
-  sessions,
+  rows,
   labelledBy,
   className,
   onOpen,
@@ -190,8 +219,8 @@ function SessionRows({
   const [area, setArea] = useState<HTMLDivElement | null>(null);
   // The session whose row has the keyboard focus.
   const [focused, setFocused] = useState<string | null>(null);
-  const count = sessions.length;
-  const kept = focused === null ? -1 : sessions.findIndex((session) => session.id === focused);
+  const count = rows.length;
+  const kept = focused === null ? -1 : rows.findIndex((row) => row.session.id === focused);
   const rendered = useVisibleRows(area, count, ROW_HEIGHT, kept);
 
   return (
@@ -199,13 +228,15 @@ function SessionRows({
     <div ref={setArea} className={`relative overflow-y-auto ${className}`}>
       <ul aria-labelledby={labelledBy} className="relative" style={{ height: count * ROW_HEIGHT }}>
         {rendered.map((index) => {
-          const session = sessions[index];
-          if (session === undefined) return null;
+          const row = rows[index];
+          if (row === undefined) return null;
+          const { session, depth } = row;
           return (
             <li
               key={session.id}
               aria-setsize={count}
               aria-posinset={index + 1}
+              aria-level={depth + 1}
               onFocus={() => {
                 setFocused(session.id);
               }}
@@ -217,6 +248,7 @@ function SessionRows({
             >
               <SessionRow
                 session={session}
+                depth={depth}
                 {...(onOpen === undefined ? {} : { onOpen })}
                 {...(onMenu === undefined ? {} : { onMenu })}
                 {...(onPress === undefined ? {} : { onPress })}
@@ -232,6 +264,8 @@ function SessionRows({
 
 interface SessionRowProps {
   session: SessionSummary;
+  // 1 for a child beneath its parent, which the row indents.
+  depth?: 0 | 1;
   // Shows the session; the row is disabled without it.
   onOpen?: (session: SessionSummary) => void;
   // Offers the session's menu.
@@ -247,7 +281,7 @@ interface SessionRowProps {
 // Return shows it, a press goes to whoever drags it elsewhere, and a secondary click or VoiceOver's
 // menu command offers its menu. The history of a session that is not running is read ahead as the
 // user reaches for the row.
-function SessionRow({ session, onOpen, onMenu, onPress, onReadAhead }: SessionRowProps) {
+function SessionRow({ session, depth = 0, onOpen, onMenu, onPress, onReadAhead }: SessionRowProps) {
   const { t } = useTranslation();
   const readAhead = useReadAhead(session, onReadAhead);
   return (
@@ -270,7 +304,7 @@ function SessionRow({ session, onOpen, onMenu, onPress, onReadAhead }: SessionRo
         event.preventDefault();
         onMenu(session);
       }}
-      className="flex h-full w-full items-center gap-2 rounded-md px-2 text-left enabled:hover:bg-hover"
+      className={`flex h-full w-full items-center gap-2 rounded-md pr-2 text-left enabled:hover:bg-hover ${depth === 1 ? 'pl-6' : 'pl-2'}`}
     >
       <StatusDot status={statusDots[session.status]} />
       <span className="sr-only">{t(`sessions.status.${session.status}`)}</span>

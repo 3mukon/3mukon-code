@@ -7,6 +7,7 @@ import type { SessionAction, SessionList, SessionSettings } from '../shared/sess
 import { SessionHost, type SessionsMenuUi } from './host';
 import type { Provider, ProviderSession, ResumeOptions, SessionEventListener } from './provider';
 import { SessionRecords, type SessionRecord } from './records';
+import { memoryInboxStorage, SessionInboxes } from './inbox';
 import { memoryTextStorage, type TextStorage } from './texts';
 
 // Sessions start in real folders, which the host checks.
@@ -33,6 +34,8 @@ function sessionCalls() {
     setGateway: vi.fn<ProviderSession['setGateway']>(() => Promise.resolve()),
     answerApproval: vi.fn<ProviderSession['answerApproval']>(() => Promise.resolve()),
     answerQuestion: vi.fn<ProviderSession['answerQuestion']>(() => Promise.resolve()),
+    setTitle: vi.fn<NonNullable<ProviderSession['setTitle']>>(() => Promise.resolve()),
+    deliverContext: vi.fn<NonNullable<ProviderSession['deliverContext']>>(() => Promise.resolve()),
   };
 }
 
@@ -44,10 +47,11 @@ const pastEvents: SessionEvent[] = [
 ];
 
 // A provider whose sessions the test drives: it reports the sandbox while starting; resuming, it
-// replays the session's past and then reports the mode and the settings it was given, as the adapters
-// do; its sessions report that they closed as they close. Each session's listener and calls go to the
-// test.
-function fakeProvider(id: ProviderId, fail = false) {
+// replays the session's past and then reports the mode and the settings it was given, as the
+// adapters do; its sessions report that they closed as they close, and, where they echo, a message
+// sent to them at once, with the turn it starts, as the adapters do. Each session's listener and
+// calls go to the test.
+function fakeProvider(id: ProviderId, fail = false, echo = false) {
   const listeners: SessionEventListener[] = [];
   const sessions: ReturnType<typeof sessionCalls>[] = [];
   const closed: string[] = [];
@@ -57,6 +61,21 @@ function fakeProvider(id: ProviderId, fail = false) {
   const open = (sessionId: string, onEvent: SessionEventListener): Promise<ProviderSession> => {
     listeners.push(onEvent);
     const calls = sessionCalls();
+    // A turn of the app's own starts at once, with its context accepted, as the adapters start one.
+    calls.deliverContext.mockImplementation((_context, delivery) => {
+      onEvent({ type: 'turn-started' });
+      delivery.accepted();
+      return Promise.resolve();
+    });
+    if (echo) {
+      let turns = 0;
+      calls.send.mockImplementation((text) => {
+        turns += 1;
+        onEvent({ type: 'turn-started' });
+        onEvent({ type: 'message', id: `sent-${String(turns)}`, role: 'user', text });
+        return Promise.resolve();
+      });
+    }
     sessions.push(calls);
     return Promise.resolve({
       id: sessionId,
@@ -170,6 +189,70 @@ describe('SessionHost', () => {
       shown: [],
     });
     expect(changes).toEqual([host.list()]);
+  });
+
+  it('lists a session started with a message once the message is in it, so that its row first shows the message and the running turn', async () => {
+    const claude = fakeProvider('claude-code', false, true);
+    const host = new SessionHost([claude.provider], memoryRecords().records);
+    const rows: [string, string | undefined][] = [];
+    host.onChange((list) => {
+      for (const summary of list.sessions) rows.push([summary.status, summary.title]);
+    });
+    const id = await host.start(
+      'claude-code',
+      { cwd: folder('web') },
+      { text: 'Fix the build', images: [] },
+    );
+    expect(claude.sessions[0]?.send).toHaveBeenCalledExactlyOnceWith('Fix the build', []);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row).toEqual(['running', 'Fix the build']);
+    expect(host.list().sessions.map((summary) => summary.id)).toEqual([id]);
+  });
+
+  it('lists a session whose first message its provider refused, and says so', async () => {
+    const claude = fakeProvider('claude-code');
+    const open = claude.provider.start.bind(claude.provider);
+    claude.provider.start = async (options, onEvent) => {
+      const session = await open(options, onEvent);
+      claude.sessions[0]?.send.mockRejectedValueOnce(new Error('Refused.'));
+      return session;
+    };
+    const host = new SessionHost([claude.provider], memoryRecords().records);
+    await expect(
+      host.start('claude-code', { cwd: folder('web') }, { text: 'Hi', images: [] }),
+    ).rejects.toThrow('Refused.');
+    expect(host.list().sessions).toMatchObject([{ status: 'idle', cwd: folder('web') }]);
+  });
+
+  it('sets the starting effort for a running session whose model takes one but which has none whose default the provider names', async () => {
+    const claude = fakeProvider('claude-code');
+    const host = new SessionHost([claude.provider], memoryRecords().records);
+    await host.start('claude-code', { cwd: folder('web') });
+    const emit = claude.listeners[0];
+    const session = claude.sessions[0];
+    if (emit === undefined || session === undefined) throw new Error('no session');
+    const models: ModelOption[] = [
+      { id: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high'], default: true },
+      { id: 'haiku', label: 'Haiku', efforts: [] },
+      { id: 'gpt', label: 'GPT', efforts: ['low', 'medium'], defaultEffort: 'low' },
+    ];
+    emit({ type: 'settings', model: 'haiku', effort: null });
+    emit({ type: 'models', models });
+    // A model that takes no effort needs none.
+    expect(session.setEffort).not.toHaveBeenCalled();
+    emit({ type: 'settings', model: null });
+    await settle();
+    expect(session.setEffort.mock.calls).toEqual([['medium']]);
+    // Asked once for each model and effort, until the session reports one.
+    emit({ type: 'models', models });
+    await settle();
+    expect(session.setEffort).toHaveBeenCalledOnce();
+    emit({ type: 'settings', effort: 'medium' });
+    // A model whose default the provider names runs with it, and an effort set stays.
+    emit({ type: 'settings', model: 'gpt', effort: null });
+    emit({ type: 'settings', model: 'opus', effort: 'high' });
+    await settle();
+    expect(session.setEffort).toHaveBeenCalledOnce();
   });
 
   it('reports a session when its title or status changes, not for every event', async () => {
@@ -499,6 +582,423 @@ describe('SessionHost', () => {
     await host.closeAll();
     expect(host.list().sessions.map((summary) => summary.status)).toEqual(['closed']);
     expect(texts.has(id)).toBe(true);
+  });
+});
+
+describe('SessionHost titles', () => {
+  // A session that ran a turn of the given length, from its start to its end.
+  const turn = (emit: SessionEventListener, ms: number, at: { now: number }) => {
+    emit({ type: 'turn-started' });
+    at.now += ms;
+    vi.setSystemTime(at.now);
+    emit({ type: 'turn-ended', outcome: 'completed' });
+  };
+  const settleTitle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const titled = (reply = 'Build fixes') => {
+    const claude = fakeProvider('claude-code', false, true);
+    const writeTitle = vi.fn<NonNullable<Provider['writeTitle']>>(() => Promise.resolve(reply));
+    const provider: Provider = { ...claude.provider, writeTitle };
+    return { ...claude, provider, writeTitle };
+  };
+
+  it('writes a title once the session has run three turns, with its model and title effort through its gateway, and keeps and gives it back', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const at = { now: 1_000 };
+    vi.setSystemTime(at.now);
+    const claude = titled('"Fix the flaky build."');
+    const { records, saved } = memoryRecords();
+    const host = new SessionHost([claude.provider], records);
+    const id = await host.start(
+      'claude-code',
+      { cwd: folder('web'), gateway: 'work' },
+      {
+        text: 'The build fails on CI',
+      },
+    );
+    const emit = claude.listeners[0];
+    if (emit === undefined) throw new Error('no session');
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    emit({ type: 'message', id: 'a1', role: 'agent', text: 'Looking into it.' });
+    emit({
+      type: 'models',
+      models: [{ id: 'opus', label: 'Opus', efforts: ['low', 'high'], default: true }],
+    });
+    emit({ type: 'settings', model: 'opus', effort: 'high' });
+    turn(emit, 1_000, at);
+    expect(claude.writeTitle).not.toHaveBeenCalled();
+    turn(emit, 1_000, at);
+    expect(claude.writeTitle).toHaveBeenCalledOnce();
+    const [request] = claude.writeTitle.mock.calls[0] ?? [];
+    expect(request).toMatchObject({ gateway: 'work', model: 'opus', effort: 'low' });
+    expect(request?.prompt).toContain('User: The build fails on CI\n\nAgent: Looking into it.');
+    // The list keeps the first message until the title comes.
+    expect(host.list().sessions[0]?.title).toBe('The build fails on CI');
+    await settleTitle();
+    expect(host.list().sessions[0]?.title).toBe('Fix the flaky build');
+    expect(saved.at(-1)?.find((record) => record.id === id)).toMatchObject({
+      title: 'Fix the flaky build',
+      titled: 'Fix the flaky build',
+    });
+    expect(claude.sessions[0]?.setTitle.mock.calls).toEqual([['Fix the flaky build']]);
+    // The provider reports the title it was given; nothing is asked again.
+    emit({ type: 'title', title: 'Fix the flaky build' });
+    turn(emit, 120_000, at);
+    expect(claude.writeTitle).toHaveBeenCalledOnce();
+  });
+
+  it('writes a title at the end of the first turn once the turns have run a minute in all', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const at = { now: 1_000 };
+    vi.setSystemTime(at.now);
+    const claude = titled();
+    const host = new SessionHost([claude.provider], memoryRecords().records);
+    await host.start('claude-code', { cwd: folder('web') }, { text: 'Refactor the list' });
+    const emit = claude.listeners[0];
+    if (emit === undefined) throw new Error('no session');
+    // The turn the message started runs for a minute.
+    at.now += 60_000;
+    vi.setSystemTime(at.now);
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    expect(claude.writeTitle).toHaveBeenCalledOnce();
+    expect(claude.writeTitle.mock.calls[0]?.[0]).toMatchObject({ model: null, effort: null });
+  });
+
+  it('tries a failed title again at the next turn’s end, three times at most', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const at = { now: 1_000 };
+    vi.setSystemTime(at.now);
+    const claude = titled('  ');
+    claude.writeTitle.mockRejectedValueOnce(new Error('Overloaded.'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const host = new SessionHost([claude.provider], memoryRecords().records);
+    await host.start('claude-code', { cwd: folder('web') }, { text: 'Hi' });
+    const emit = claude.listeners[0];
+    if (emit === undefined) throw new Error('no session');
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    for (let index = 0; index < 6; index += 1) {
+      turn(emit, 1_000, at);
+      await settleTitle();
+    }
+    expect(claude.writeTitle).toHaveBeenCalledTimes(3);
+    expect(host.list().sessions[0]?.title).toBe('Hi');
+    error.mockRestore();
+  });
+
+  it('keeps a title the provider gives, its own or the user’s, writing none, and writes one where it gives none', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const at = { now: 1_000 };
+    vi.setSystemTime(at.now);
+    const claude = titled();
+    const grok = fakeProvider('grok-build', false, true);
+    const grokTitle = vi.fn<NonNullable<Provider['writeTitle']>>(() =>
+      Promise.resolve('Search speed-up'),
+    );
+    const host = new SessionHost(
+      [claude.provider, { ...grok.provider, writeTitle: grokTitle }],
+      memoryRecords().records,
+    );
+    await host.start('claude-code', { cwd: folder('web') }, { text: 'Hi' });
+    await host.start('grok-build', { cwd: folder('api') }, { text: 'Make search faster' });
+    const [claudeEmit] = claude.listeners;
+    const [grokEmit] = grok.listeners;
+    if (claudeEmit === undefined || grokEmit === undefined) throw new Error('no session');
+    // Claude Code titles the session on its own after its first turn; Grok gives none.
+    claudeEmit({ type: 'turn-ended', outcome: 'completed' });
+    claudeEmit({ type: 'title', title: 'Greeting check' });
+    grokEmit({ type: 'turn-ended', outcome: 'completed' });
+    for (const emit of [claudeEmit, grokEmit]) {
+      turn(emit, 1_000, at);
+      turn(emit, 1_000, at);
+    }
+    await settleTitle();
+    expect(claude.writeTitle).not.toHaveBeenCalled();
+    expect(grokTitle).toHaveBeenCalledOnce();
+    const titles = () => host.list().sessions.map((summary) => summary.title);
+    expect(titles()).toEqual(expect.arrayContaining(['Greeting check', 'Search speed-up']));
+    expect(grok.sessions[0]?.setTitle).toHaveBeenCalledWith('Search speed-up');
+    // A title the provider reports later, as one the user gives in its own tools, stands.
+    grokEmit({ type: 'title', title: 'Renamed in Grok' });
+    claudeEmit({ type: 'title', title: 'Renamed in Claude Code' });
+    expect(titles()).toEqual(expect.arrayContaining(['Renamed in Claude Code', 'Renamed in Grok']));
+  });
+
+  it('drops a title that comes once the session has closed, and shows a kept one in later runs without asking again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const at = { now: 1_000 };
+    vi.setSystemTime(at.now);
+    const claude = titled();
+    let answer: (title: string) => void = () => undefined;
+    claude.writeTitle.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const host = new SessionHost([claude.provider], memoryRecords().records);
+    await host.start('claude-code', { cwd: folder('web') }, { text: 'Hi' });
+    const emit = claude.listeners[0];
+    if (emit === undefined) throw new Error('no session');
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    turn(emit, 1_000, at);
+    turn(emit, 1_000, at);
+    emit({ type: 'closed' });
+    answer('Too late');
+    await settleTitle();
+    expect(host.list().sessions[0]?.title).toBe('Hi');
+
+    const later = new SessionHost(
+      [claude.provider],
+      memoryRecords([kept({ title: 'Fix the build', titled: 'Fix the build' })]).records,
+    );
+    expect(later.list().sessions[0]?.title).toBe('Fix the build');
+  });
+});
+
+describe('SessionHost coordination', () => {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  // A parent session running Claude Code in the web folder, in workspace-write, with Opus at high.
+  const withParent = async (inboxes = new SessionInboxes(memoryInboxStorage())) => {
+    const claude = fakeProvider('claude-code', false, true);
+    const codex = fakeProvider('codex', false, true);
+    const { records, saved } = memoryRecords();
+    const host = new SessionHost(
+      [claude.provider, codex.provider],
+      records,
+      memoryTextStorage(),
+      undefined,
+      inboxes,
+    );
+    const parent = await host.start(
+      'claude-code',
+      { cwd: folder('web'), gateway: 'work', model: 'opus', effort: 'high' },
+      { text: 'Lead the work' },
+    );
+    const emit = claude.listeners[0];
+    if (emit === undefined) throw new Error('no session');
+    emit({
+      type: 'settings',
+      gateway: 'work',
+      model: 'opus',
+      effort: 'high',
+      sandbox: 'workspace-write',
+    });
+    return { host, claude, codex, parent, emit, saved, coordinator: host.coordinator() };
+  };
+
+  it('lists the sessions of the Sessions list with what addresses them', async () => {
+    const { coordinator, parent } = await withParent();
+    expect(coordinator.list(parent)).toEqual([
+      {
+        id: parent,
+        title: 'Lead the work',
+        provider: 'claude-code',
+        folder: folder('web'),
+        status: 'running',
+      },
+    ]);
+    expect(() => coordinator.list('stranger')).toThrow('does not know');
+  });
+
+  it('starts a child in its parent’s folder, in auto, with its parent’s settings, beneath it', async () => {
+    const { host, claude, coordinator, parent } = await withParent();
+    const child = await coordinator.start(parent, { prompt: 'Write the tests' });
+    expect(child).toMatchObject({
+      title: 'Write the tests',
+      provider: 'claude-code',
+      folder: folder('web'),
+      parent,
+    });
+    expect(claude.sessions[1]?.send).toHaveBeenCalledWith('Write the tests', []);
+    const summary = host.list().sessions.find((one) => one.id === child.id);
+    expect(summary?.parent).toBe(parent);
+    expect(host.snapshot(child.id)?.state.timeline[0]).toMatchObject({
+      role: 'user',
+      text: 'Write the tests',
+    });
+  });
+
+  it('starts a child of another provider, a narrower sandbox and a title of its parent’s choosing, which stands', async () => {
+    const { host, codex, coordinator, parent } = await withParent();
+    const child = await coordinator.start(parent, {
+      prompt: 'Review the change',
+      provider: 'codex',
+      sandbox: 'read-only',
+      title: 'Reviewer',
+    });
+    expect(child).toMatchObject({ provider: 'codex', title: 'Reviewer' });
+    expect(codex.sessions[0]?.setTitle).toHaveBeenCalledWith('Reviewer');
+    const kept = host.list().sessions.find((one) => one.id === child.id);
+    expect(kept?.title).toBe('Reviewer');
+    await expect(
+      coordinator.start(parent, { prompt: 'x', sandbox: 'full-access' }),
+    ).rejects.toThrow('wider sandbox');
+  });
+
+  it('starts no child from a child, and at most eight running children at once', async () => {
+    const { coordinator, parent } = await withParent();
+    const children = [];
+    for (let index = 0; index < 8; index += 1) {
+      children.push(await coordinator.start(parent, { prompt: `Task ${String(index)}` }));
+    }
+    expect(coordinator.mayStart(parent)).toBe(true);
+    expect(coordinator.mayStart(children[0]?.id ?? '')).toBe(false);
+    await expect(coordinator.start(children[0]?.id ?? '', { prompt: 'x' })).rejects.toThrow(
+      'cannot start sessions',
+    );
+    await expect(coordinator.start(parent, { prompt: 'One more' })).rejects.toThrow('at most 8');
+    // Children still starting count too.
+    await coordinator.end(parent, children[1]?.id ?? '');
+    const both = await Promise.allSettled([
+      coordinator.start(parent, { prompt: 'First of two' }),
+      coordinator.start(parent, { prompt: 'Second of two' }),
+    ]);
+    expect(both.map((result) => result.status)).toEqual(['fulfilled', 'rejected']);
+    await coordinator.end(parent, children[0]?.id ?? '');
+    await expect(coordinator.start(parent, { prompt: 'One more' })).resolves.toMatchObject({
+      parent,
+    });
+  });
+
+  it('ends a child, which stays listed and closed, lets a child end itself a moment later, and ends nothing else', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const { host, coordinator, parent } = await withParent();
+    const first = await coordinator.start(parent, { prompt: 'One' });
+    const second = await coordinator.start(parent, { prompt: 'Two' });
+    await coordinator.end(parent, first.id);
+    expect(host.list().sessions.find((one) => one.id === first.id)?.status).toBe('closed');
+    await expect(coordinator.end(second.id, parent)).rejects.toThrow('only the children');
+    await expect(coordinator.end(parent, parent)).rejects.toThrow('only the children');
+    await coordinator.end(second.id, second.id);
+    expect(host.list().sessions.find((one) => one.id === second.id)?.status).not.toBe('closed');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(host.list().sessions.find((one) => one.id === second.id)?.status).toBe('closed');
+  });
+
+  it('tells an idle session of a new message in a turn of its own, by its summary alone, and shows it', async () => {
+    const { host, claude, coordinator, parent, emit } = await withParent();
+    const child = await coordinator.start(parent, { prompt: 'Write the tests' });
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    await tick();
+    const sent = coordinator.send(child.id, parent, 'Tests written', 'All 12 pass.');
+    expect(sent).toMatchObject({
+      from: child.id,
+      fromTitle: 'Write the tests',
+      summary: 'Tests written',
+      read: false,
+    });
+    const [context] = claude.sessions[0]?.deliverContext.mock.calls[0] ?? [];
+    expect(context?.inboxNotices).toEqual([
+      {
+        id: sent.id,
+        from: child.id,
+        fromTitle: 'Write the tests',
+        summary: 'Tests written',
+        sentAt: sent.sentAt,
+      },
+    ]);
+    expect(JSON.stringify(context)).not.toContain('All 12 pass.');
+    expect(host.snapshot(parent)?.state.timeline.at(-1)).toMatchObject({
+      type: 'inbox',
+      notices: [{ id: sent.id }],
+    });
+    // Told once: the next moments carry nothing.
+    expect(coordinator.notices(parent)).toBeUndefined();
+    expect(coordinator.inbox(parent)).toMatchObject([{ id: sent.id, read: false }]);
+    expect(coordinator.read(parent, sent.id)).toMatchObject({ body: 'All 12 pass.', read: true });
+    expect(() => coordinator.read(child.id, sent.id)).toThrow('no message');
+  });
+
+  it('tells a session that is working with its next tool result, or beside the user’s next message', async () => {
+    const { host, claude, coordinator, parent, emit } = await withParent();
+    const child = await coordinator.start(parent, { prompt: 'Write the tests' });
+    const first = coordinator.send(child.id, parent, 'First', 'x');
+    // The parent's turn runs, so it is not woken.
+    expect(claude.sessions[0]?.deliverContext).not.toHaveBeenCalled();
+    const notices = coordinator.notices(parent);
+    expect(notices?.notices.map((notice) => notice.id)).toEqual([first.id]);
+    notices?.told();
+    expect(coordinator.notices(parent)).toBeUndefined();
+    const second = coordinator.send(child.id, parent, 'Second', 'y');
+    await host.send(parent, 'And then?');
+    const call = claude.sessions[0]?.send.mock.calls.at(-1);
+    expect(call?.[2]?.inboxNotices?.map((notice) => notice.id)).toEqual([second.id]);
+    call?.[3]?.accepted();
+    expect(coordinator.notices(parent)).toBeUndefined();
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    await tick();
+    expect(claude.sessions[0]?.deliverContext).not.toHaveBeenCalled();
+  });
+
+  it('wakes a session as its turn ends with messages untold, and never while it waits on the user', async () => {
+    const { claude, coordinator, parent, emit } = await withParent();
+    const child = await coordinator.start(parent, { prompt: 'Write the tests' });
+    // A question answered by message waits on the user after its turn.
+    emit({
+      type: 'question-asked',
+      request: { id: 'q1', questions: [], requestedAt: 1, byMessage: true },
+    });
+    coordinator.send(child.id, parent, 'Done', 'z');
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    await tick();
+    expect(claude.sessions[0]?.deliverContext).not.toHaveBeenCalled();
+    emit({ type: 'request-resolved', requestId: 'q1', outcome: 'answered' });
+    coordinator.send(child.id, parent, 'Also', 'w');
+    expect(claude.sessions[0]?.deliverContext).toHaveBeenCalledOnce();
+    const [context] = claude.sessions[0]?.deliverContext.mock.calls[0] ?? [];
+    expect(context?.inboxNotices?.map((notice) => notice.summary)).toEqual(['Done', 'Also']);
+  });
+
+  it('refuses a message to itself, to a session not in the list, or out of bounds', async () => {
+    const { coordinator, parent } = await withParent();
+    const child = await coordinator.start(parent, { prompt: 'Write the tests' });
+    expect(() => coordinator.send(parent, parent, 'Hi', '')).toThrow('itself');
+    expect(() => coordinator.send(parent, 'gone', 'Hi', '')).toThrow('no session');
+    expect(() => coordinator.send(parent, child.id, ' ', '')).toThrow('summary');
+    expect(() => coordinator.send(parent, child.id, 'x'.repeat(301), '')).toThrow('summary');
+    expect(() => coordinator.send(parent, child.id, 'Hi', 'x'.repeat(64 * 1024 + 1))).toThrow(
+      'body',
+    );
+  });
+
+  it('archives, unarchives and removes a parent’s children with it, asking first where a child works', async () => {
+    const inboxes = new SessionInboxes(memoryInboxStorage());
+    const { host, coordinator, parent, emit } = await withParent(inboxes);
+    const child = await coordinator.start(parent, { prompt: 'Write the tests' });
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    const ui = menuUi('archive', false);
+    expect(await host.act(parent, 'archive', ui)).toBeNull();
+    expect(ui.confirmArchive).toHaveBeenCalled();
+    await host.archive(parent);
+    expect(host.list().sessions).toEqual([]);
+    expect(
+      host
+        .archived()
+        .map((one) => one.id)
+        .sort(),
+    ).toEqual([child.id, parent].sort());
+    host.unarchive(parent);
+    expect(
+      host
+        .list()
+        .sessions.map((one) => one.id)
+        .sort(),
+    ).toEqual([child.id, parent].sort());
+    coordinator.send(parent, child.id, 'Hi', 'there');
+    await host.remove(parent);
+    expect(host.list().sessions).toEqual([]);
+    expect(inboxes.list(child.id)).toEqual([]);
+  });
+
+  it('keeps which session is whose child for later runs', async () => {
+    const { coordinator, parent, saved } = await withParent();
+    const child = await coordinator.start(parent, { prompt: 'Write the tests' });
+    const records = saved.at(-1) ?? [];
+    expect(records.find((record) => record.id === child.id)?.parent).toBe(parent);
+    const later = new SessionHost(
+      [fakeProvider('claude-code').provider],
+      memoryRecords(records).records,
+    );
+    expect(later.list().sessions.find((one) => one.id === child.id)?.parent).toBe(parent);
+    expect(later.coordinator().mayStart(child.id)).toBe(false);
   });
 });
 

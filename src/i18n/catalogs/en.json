@@ -100,12 +100,13 @@
       "sandbox": "Sandbox",
       "noGateway": "No gateway",
       "defaultModel": "Default model",
-      "defaultEffort": "Default effort",
       "loadingModels": "Loading models…",
       "settings": "Session settings",
       "settingsSummary": "Session settings: {{summary}}",
       "fromUser": "You:",
       "fromAgent": "{{agent}}:",
+      "fromSession": "{{session}}:",
+      "sentBy": "From {{session}}",
       "failed": "The turn failed.",
       "startFailed": "The session couldn’t start.",
       "resumeFailed": "The session couldn’t be resumed.",
@@ -311,6 +312,10 @@
         "endNamed": "End: {{grant}}",
         "endFailed": "It couldn’t be ended."
       }
+    },
+    "inbox": {
+      "notices": "New messages from other sessions",
+      "from": "Message from"
     }
   },
   "approvals": {

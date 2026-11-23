@@ -9,6 +9,7 @@ import {
   getSessionMessages,
   listSessions,
   query,
+  renameSession,
   type CanUseTool,
   type EffortLevel,
   type ModelInfo,
@@ -30,6 +31,7 @@ import {
   type ProviderSession,
   type SessionEventListener,
   type StartOptions,
+  type TitleRequest,
   type Toolset,
   type ToolsetAccess,
   type HostTurnContext,
@@ -41,6 +43,7 @@ import {
   presentationContext,
   selectPresentationNotices,
 } from '../../../sessions/shared/host-context';
+import { inboxContext, INBOX_CONTEXT_TITLE } from '../../../sessions/shared/inbox';
 import type {
   ApprovalAnswer,
   MessageImage,
@@ -77,6 +80,12 @@ const EFFORT_LEVELS = new Set<string>([
 
 // How long a probe gives Claude Code to start before the list of models fails.
 const PROBE_TIMEOUT_MS = 30_000;
+// How long a title may take to be written, from the start of its Claude Code, before it fails.
+const TITLE_TIMEOUT_MS = 120_000;
+// The system prompt a title is written with, in place of Claude Code's own, which is for a coding
+// agent.
+const TITLE_SYSTEM_PROMPT =
+  'You write short titles for conversations, and reply with the title alone.';
 // How long Claude Code's own count of the context may take before it is left out.
 const COUNT_TIMEOUT_MS = 5_000;
 // How long a gateway switch waits for the switches already sent to the process it ends.
@@ -170,6 +179,12 @@ export function createClaudeCodeProvider({
         gateway === null ? null : await existingGatewayPath(gatewaysDir, gateway),
       );
     },
+    // A title from a Claude Code of its own (ADR-0035).
+    async writeTitle(request) {
+      const gatewayFile =
+        request.gateway === null ? null : await existingGatewayPath(gatewaysDir, request.gateway);
+      return probeTitle(probes, gatewayFile, request);
+    },
     // The sign-in from Claude Code's own status; the usage through a running session's query on
     // Claude Code's own sign-in, or else through a probe.
     async readAccount(withUsage) {
@@ -251,9 +266,14 @@ interface ClaudeProbe extends ProbeProcess {
 // itself but without Claude Code's error output, so that the probe knows when the process has exited,
 // which takes Claude Code about two seconds once closed; the probes keep it until then. The answer
 // does not wait for it.
-function startProbe(probes: Probes, options: Options): Promise<ClaudeProbe> {
+function startProbe(
+  probes: Probes,
+  options: Options,
+  messages: readonly SDKUserMessage[] = [],
+): Promise<ClaudeProbe> {
   return probes.start(() => {
     const input = new InputQueue();
+    for (const message of messages) input.push(message);
     let spawned = false;
     let stopping = false;
     let markEnded: () => void = () => undefined;
@@ -353,6 +373,73 @@ async function probeModels(probes: Probes, gatewayFile: string | null): Promise<
   }
 }
 
+// A title from a Claude Code that answers one message and is closed (ADR-0035): in a throwaway
+// folder, with the session's model and effort, a system prompt of the app's own, no tools and no
+// servers, one turn and no transcript kept, so that no session is recorded; through the gateway's
+// file, or else on the user's own settings with their hooks off, as the models' probe reads them.
+async function probeTitle(
+  probes: Probes,
+  gatewayFile: string | null,
+  { model, effort, prompt }: TitleRequest,
+): Promise<string> {
+  const level = effortLevel(effort);
+  const cwd = await mkdtemp(join(tmpdir(), 'claude-code-title-'));
+  probeFolders.add(cwd);
+  let probe: ClaudeProbe | undefined;
+  try {
+    probe = await startProbe(
+      probes,
+      {
+        pathToClaudeCodeExecutable: bundledClaudeBinary(),
+        cwd,
+        persistSession: false,
+        env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+        ...(gatewayFile === null
+          ? { settingSources: ['user'], settings: { disableAllHooks: true } }
+          : { settingSources: [], settings: gatewayFile }),
+        systemPrompt: TITLE_SYSTEM_PROMPT,
+        tools: [],
+        mcpServers: {},
+        strictMcpConfig: true,
+        maxTurns: 1,
+        ...(model === null ? {} : { model }),
+        ...(level === null ? {} : { effort: level }),
+      },
+      [
+        {
+          type: 'user',
+          uuid: randomUUID(),
+          message: { role: 'user', content: prompt },
+          parent_tool_use_id: null,
+        },
+      ],
+    );
+    return await withinTime(
+      replyOf(probe.query),
+      TITLE_TIMEOUT_MS,
+      'Claude Code did not write the title in time.',
+    );
+  } finally {
+    void probe?.stop();
+    probeFolders.delete(cwd);
+    await rm(cwd, { recursive: true, force: true });
+  }
+}
+
+// The text of the turn's result, or its errors.
+async function replyOf(messages: AsyncIterable<SDKMessage>): Promise<string> {
+  for await (const message of messages) {
+    if (message.type !== 'result') continue;
+    if (message.subtype === 'success' && !message.is_error) return message.result;
+    throw new Error(
+      'errors' in message && message.errors.length > 0
+        ? message.errors.join(' ')
+        : 'Claude Code could not write the title.',
+    );
+  }
+  throw new Error('Claude Code ended before it wrote the title.');
+}
+
 // The models a session can choose, with the one it uses when it chooses none, as Claude Code reports
 // it, marked as the default. Claude Code's own default row stands for that model, so it goes unless no
 // other row is that model.
@@ -426,6 +513,10 @@ interface SessionSettings {
 // One Claude Code process serving the session; a gateway switch replaces it.
 interface Connection {
   readonly deliveries: Map<string, HostContextDelivery>;
+  // The message of a turn of the app's own, which carries host context alone and which Claude Code
+  // may not echo, as it echoes a message with text: its delivery is accepted, too, as the turn's
+  // first output comes.
+  contextOnly?: string;
   readonly access?: ToolsetAccess;
   // What the toolset last heard of the model's image input.
   images?: Availability['images'];
@@ -513,8 +604,6 @@ class ClaudeCodeSession implements ProviderSession {
       this.turnRunning = true;
       this.onEvent({ type: 'turn-started' });
     }
-    // From its first message on, Claude Code keeps a transcript that a new process can continue.
-    this.settings.resume = true;
     this.onEvent({
       type: 'message',
       id: randomUUID(),
@@ -522,10 +611,35 @@ class ClaudeCodeSession implements ProviderSession {
       text,
       ...(images.length === 0 ? {} : { images }),
     });
+    this.push(withImages(text, images), context, delivery);
+  }
+
+  // A turn of the app's own with the host context alone, as the notice of new messages (ADR-0036):
+  // no message of the user's goes with it or shows.
+  async deliverContext(context: HostTurnContext, delivery: HostContextDelivery): Promise<void> {
+    if (this.switching !== null) await this.switching;
+    if (this.closed) throw new Error('The session is closed.');
+    if (this.turnRunning) throw new Error('A turn is running.');
+    this.turnRunning = true;
+    this.onEvent({ type: 'turn-started' });
+    this.connection.contextOnly = this.push([], context, delivery);
+  }
+
+  // Sends Claude Code a user message of the content given, after the host context's blocks, each a
+  // document of its own: the presentation state, then the notices of new messages. Their delivery
+  // is accepted once Claude Code has taken the message, as it says.
+  private push(
+    content: ReturnType<typeof withImages>,
+    context?: HostTurnContext,
+    delivery?: HostContextDelivery,
+  ): string {
+    // From its first message on, Claude Code keeps a transcript that a new process can continue.
+    this.settings.resume = true;
     const notices = selectPresentationNotices(context?.presentationNotices ?? []);
     const host = presentationContext(notices);
+    const inbox = inboxContext(context?.inboxNotices ?? []);
     const uuid = randomUUID();
-    if (delivery && host)
+    if (delivery && (host || inbox))
       this.connection.deliveries.set(uuid, {
         accepted: () => {
           delivery.accepted(notices);
@@ -535,26 +649,21 @@ class ClaudeCodeSession implements ProviderSession {
         },
       });
     else delivery?.accepted([]);
+    const blocks = [
+      ...(host ? [documentBlock(host, 'App presentation state')] : []),
+      ...(inbox ? [documentBlock(inbox, INBOX_CONTEXT_TITLE)] : []),
+    ];
+    const only = content.length === 1 ? content[0] : undefined;
     this.connection.input.push({
       type: 'user',
       uuid,
       message: {
         role: 'user',
-        content: host
-          ? [
-              {
-                type: 'document',
-                source: { type: 'text', media_type: 'text/plain', data: host },
-                title: 'App presentation state',
-              },
-              ...withImages(text, images),
-            ]
-          : images.length === 0
-            ? text
-            : withImages(text, images),
+        content: blocks.length === 0 && only?.type === 'text' ? only.text : [...blocks, ...content],
       },
       parent_tool_use_id: null,
     });
+    return uuid;
   }
 
   async interrupt(): Promise<void> {
@@ -625,6 +734,14 @@ class ClaudeCodeSession implements ProviderSession {
       this.settings.sandbox = sandbox;
     });
     this.onEvent({ type: 'settings', sandbox });
+  }
+
+  // Claude Code keeps the title as the session's custom title, in its transcript, which its own
+  // tools show; the transcript is there from the first message.
+  async setTitle(title: string): Promise<void> {
+    await renameSession(this.settings.sessionId, title, { dir: this.settings.cwd });
+    this.title = title;
+    this.onEvent({ type: 'title', title });
   }
 
   async setGateway(gateway: string | null): Promise<void> {
@@ -888,6 +1005,13 @@ class ClaudeCodeSession implements ProviderSession {
         if (message.type === 'user' && message.uuid) {
           connection.deliveries.get(message.uuid)?.accepted();
           connection.deliveries.delete(message.uuid);
+          if (connection.contextOnly === message.uuid) delete connection.contextOnly;
+        }
+        const taken = connection.contextOnly;
+        if (taken !== undefined && (message.type === 'assistant' || message.type === 'result')) {
+          delete connection.contextOnly;
+          connection.deliveries.get(taken)?.accepted();
+          connection.deliveries.delete(taken);
         }
         if (connection !== this.connection && this.retired.has(connection)) continue;
         // A turn's first message names the model it runs, which the user may have switched.
@@ -1031,6 +1155,15 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
       }
     }
   }
+}
+
+// Text the app gives the model beside the user's, as a document of its own.
+function documentBlock(data: string, title: string) {
+  return {
+    type: 'document' as const,
+    source: { type: 'text' as const, media_type: 'text/plain' as const, data },
+    title,
+  };
 }
 
 // A message with images as Claude's content blocks: the images first, as Anthropic advises, then the

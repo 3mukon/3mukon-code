@@ -4,7 +4,12 @@ import type { ToolsetAccess } from '../../../sessions/main/provider';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getSessionInfo, getSessionMessages, listSessions } from '@anthropic-ai/claude-agent-sdk';
+import {
+  getSessionInfo,
+  getSessionMessages,
+  listSessions,
+  renameSession,
+} from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Availability } from '../../../sessions/shared/automation';
 import type { SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
@@ -126,7 +131,17 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   getSessionMessages: vi.fn(() => Promise.resolve([])),
   getSessionInfo: vi.fn(() => Promise.resolve({ sessionId: 's', summary: 'Fix the build' })),
   listSessions: vi.fn(() => Promise.resolve([])),
+  renameSession: vi.fn(() => Promise.resolve()),
 }));
+
+// A new message's notice, as the host gives it.
+const inboxNotice = {
+  id: 'm1',
+  from: 'child',
+  fromTitle: 'Write the tests',
+  summary: 'Tests written',
+  sentAt: 1,
+};
 
 const init = { type: 'system', subtype: 'init', permissionMode: 'auto', model: 'claude-opus-5' };
 const result = { type: 'result', subtype: 'success', is_error: false, result: 'Done' };
@@ -522,6 +537,176 @@ describe('a Claude Code session', () => {
     await waitFor(() => events.filter((event) => event.type === 'context').length === 4);
     expect(events.filter((event) => event.type === 'title')).toEqual([
       { type: 'title', title: 'Build fixes' },
+    ]);
+  });
+
+  it('writes a title in a Claude Code of its own that keeps no transcript and runs no tools, with the session’s model and effort', async () => {
+    const provider = createClaudeCodeProvider({ gatewaysDir });
+    const writing = provider.writeTitle?.({
+      gateway: 'work',
+      model: 'opus',
+      effort: 'low',
+      prompt: 'Title this: …',
+    });
+    await vi.waitFor(() => {
+      expect(fakes.queries).toHaveLength(1);
+    });
+    const probe = current();
+    expect(probe.params.options).toMatchObject({
+      settingSources: [],
+      settings: join(gatewaysDir, 'work.json'),
+      persistSession: false,
+      tools: [],
+      mcpServers: {},
+      strictMcpConfig: true,
+      maxTurns: 1,
+      model: 'opus',
+      effort: 'low',
+      env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+    });
+    expect(probe.params.options.systemPrompt).toEqual(expect.stringContaining('titles'));
+    await vi.waitFor(() => {
+      expect(probe.inputs).toMatchObject([
+        { type: 'user', message: { role: 'user', content: 'Title this: …' } },
+      ]);
+    });
+    probe.push({ ...result, result: 'Fix the build' });
+    expect(await writing).toBe('Fix the build');
+    expect(probe.closed).toBe(true);
+  });
+
+  it('fails a title whose turn ends in an error, on the user’s own settings without a gateway', async () => {
+    const provider = createClaudeCodeProvider({ gatewaysDir });
+    const writing = provider.writeTitle?.({
+      gateway: null,
+      model: null,
+      effort: null,
+      prompt: 'x',
+    });
+    await vi.waitFor(() => {
+      expect(fakes.queries).toHaveLength(1);
+    });
+    expect(current().params.options).toMatchObject({
+      settingSources: ['user'],
+      settings: { disableAllHooks: true },
+    });
+    expect(current().params.options).not.toHaveProperty('model');
+    expect(current().params.options).not.toHaveProperty('effort');
+    current().push({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      errors: ['Overloaded'],
+    });
+    await expect(writing).rejects.toThrow('Overloaded');
+  });
+
+  it('gives a session a title in Claude Code’s transcript, and reports it', async () => {
+    const { session, events } = await startSession();
+    await session.setTitle?.('Build fixes');
+    expect(vi.mocked(renameSession)).toHaveBeenCalledWith(session.id, 'Build fixes', {
+      dir: expect.any(String) as string,
+    });
+    expect(events).toContainEqual({ type: 'title', title: 'Build fixes' });
+  });
+
+  it('tells the agent of new messages in a document of its own beside the message, accepted once Claude Code takes it', async () => {
+    const { session, events } = await startSession();
+    const delivery = { accepted: vi.fn(), failed: vi.fn() };
+    await session.send(
+      'Go on',
+      [],
+      { presentationNotices: [], inboxNotices: [inboxNotice] },
+      delivery,
+    );
+    await waitFor(() => current().inputs.length === 1);
+    expect(current().inputs[0]).toMatchObject({
+      message: {
+        content: [
+          { type: 'document', title: 'App inbox', source: { type: 'text' } },
+          { type: 'text', text: 'Go on' },
+        ],
+      },
+    });
+    const [block] = (
+      current().inputs[0] as { message: { content: { source: { data: string } }[] } }
+    ).message.content;
+    expect(JSON.parse(block?.source.data ?? '')).toMatchObject({ messages: [inboxNotice] });
+    expect(events.filter((event) => event.type === 'message')).toEqual([
+      expect.objectContaining({ role: 'user', text: 'Go on' }),
+    ]);
+    expect(delivery.accepted).not.toHaveBeenCalled();
+    current().push(current().inputs[0]);
+    await waitFor(() => delivery.accepted.mock.calls.length === 1);
+  });
+
+  it('starts a turn of the app’s own with the notices alone, which shows no message of the user’s', async () => {
+    const { session, events } = await startSession();
+    const delivery = { accepted: vi.fn(), failed: vi.fn() };
+    await session.deliverContext?.(
+      { presentationNotices: [], inboxNotices: [inboxNotice] },
+      delivery,
+    );
+    expect(events).toContainEqual({ type: 'turn-started' });
+    expect(events.some((event) => event.type === 'message')).toBe(false);
+    await waitFor(() => current().inputs.length === 1);
+    expect(current().inputs[0]).toMatchObject({
+      message: { content: [{ type: 'document', title: 'App inbox' }] },
+    });
+    await expect(
+      session.deliverContext?.({ presentationNotices: [], inboxNotices: [inboxNotice] }, delivery),
+    ).rejects.toThrow('turn is running');
+  });
+
+  it('accepts a turn of the app’s own as its first output comes, where Claude Code echoes no message', async () => {
+    const { session } = await startSession();
+    const delivery = { accepted: vi.fn(), failed: vi.fn() };
+    await session.deliverContext?.(
+      { presentationNotices: [], inboxNotices: [inboxNotice] },
+      delivery,
+    );
+    await waitFor(() => current().inputs.length === 1);
+    expect(delivery.accepted).not.toHaveBeenCalled();
+    current().push(init);
+    current().push({
+      type: 'assistant',
+      uuid: 'a1',
+      parent_tool_use_id: null,
+      message: { id: 'a1', content: [{ type: 'text', text: 'Reading it.' }] },
+    });
+    await waitFor(() => delivery.accepted.mock.calls.length === 1);
+    current().push(result);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(delivery.accepted).toHaveBeenCalledOnce();
+  });
+
+  it('gives back the notices of new messages from Claude Code’s transcript', async () => {
+    const provider = createClaudeCodeProvider({ gatewaysDir });
+    vi.mocked(getSessionMessages).mockResolvedValueOnce([
+      {
+        type: 'user',
+        uuid: 'u1',
+        session_id: 's',
+        parent_tool_use_id: null,
+        parent_agent_id: null,
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              title: 'App inbox',
+              source: {
+                type: 'text',
+                media_type: 'text/plain',
+                data: JSON.stringify({ source: '3mukon-code:inbox', messages: [inboxNotice] }),
+              },
+            },
+          ],
+        },
+      },
+    ] as unknown as Awaited<ReturnType<typeof getSessionMessages>>);
+    expect(await provider.history('s', '/work')).toEqual([
+      { type: 'inbox', notices: [inboxNotice] },
     ]);
   });
 

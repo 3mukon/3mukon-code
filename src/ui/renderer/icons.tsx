@@ -15,6 +15,7 @@ import {
   FolderInput as LucideFolderInput,
   Gauge as LucideGauge,
   Globe as LucideGlobe,
+  Inbox as LucideInbox,
   Lock as LucideLock,
   Monitor as LucideMonitor,
   MousePointer2 as LucideMousePointer2,
@@ -86,3 +87,4 @@ export const Lock = decorative(LucideLock);
 export const Monitor = decorative(LucideMonitor);
 export const Pointer = decorative(LucideMousePointer2);
 export const PanelRight = decorative(LucidePanelRight);
+export const Inbox = decorative(LucideInbox);

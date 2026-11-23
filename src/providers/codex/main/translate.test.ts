@@ -349,6 +349,30 @@ describe('Translator.history', () => {
       { type: 'message', id: 'm1', role: 'agent', text: 'Hi' },
     ]);
   });
+
+  it('gives back the notices of new messages the app gave beside a message or alone, apart from its text', () => {
+    const translator = new Translator(cwd);
+    const notice = { id: 'n1', from: 'child', fromTitle: 'Tests', summary: 'Done', sentAt: 1 };
+    const block = JSON.stringify({ source: '3mukon-code:inbox', messages: [notice] });
+    const inbox = {
+      type: 'text',
+      text: block,
+      text_elements: [
+        { byteRange: { start: 0, end: block.length }, placeholder: '3mukon-code:inbox' },
+      ],
+    };
+    const beside = {
+      type: 'userMessage',
+      id: 'u1',
+      content: [inbox, { type: 'text', text: 'Go on', text_elements: [] }],
+    } as unknown as ThreadItem;
+    expect(translator.history(beside)).toEqual([
+      { type: 'message', id: 'u1', role: 'user', text: 'Go on' },
+      { type: 'inbox', notices: [notice] },
+    ]);
+    const alone = { type: 'userMessage', id: 'u2', content: [inbox] } as unknown as ThreadItem;
+    expect(translator.history(alone)).toEqual([{ type: 'inbox', notices: [notice] }]);
+  });
 });
 
 describe('web searches', () => {

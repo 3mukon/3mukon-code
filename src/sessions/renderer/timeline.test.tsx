@@ -229,6 +229,41 @@ describe('Timeline', () => {
     }
   });
 
+  it('shows the new messages the agent was told of as the app’s, by their senders and summaries', () => {
+    const state: SessionState = {
+      ...initialSessionState(),
+      timeline: [
+        {
+          type: 'inbox',
+          notices: [
+            { id: 'n1', from: 'c', fromTitle: 'Write the tests', summary: 'Tests pass', sentAt: 1 },
+            { id: 'n2', from: 'd', fromTitle: 'Review', summary: 'Two findings', sentAt: 2 },
+          ],
+        },
+      ],
+    };
+    render(<Timeline state={state} agent="Claude Code" />);
+    const notices = screen.getByRole('list', { name: 'New messages from other sessions' });
+    expect(notices.textContent).toBe(
+      'Message from Write the tests: Tests passMessage from Review: Two findings',
+    );
+  });
+
+  it('names a child’s first message as its parent’s, and the user’s later ones as theirs', () => {
+    const state: SessionState = {
+      ...initialSessionState(),
+      timeline: [
+        { type: 'message', id: 'u1', role: 'user', text: 'Write the tests' },
+        { type: 'message', id: 'a1', role: 'agent', text: 'On it' },
+        { type: 'message', id: 'u2', role: 'user', text: 'Also the lint' },
+      ],
+    };
+    render(<Timeline state={state} agent="Codex" firstFrom="Lead" />);
+    expect(screen.getByText('From Lead')).toBeDefined();
+    expect(screen.getByText('Lead:')).toBeDefined();
+    expect(screen.getAllByText('You:')).toHaveLength(1);
+  });
+
   it('leaves raw HTML in an agent’s message out', () => {
     const state: SessionState = {
       ...initialSessionState(),

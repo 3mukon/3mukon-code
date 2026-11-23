@@ -725,6 +725,7 @@ export function App({ bridge }: { bridge: Bridge }) {
           folder={content.folder}
           sessionId={sessionId}
           {...(summary === undefined ? {} : { summary })}
+          {...(summary?.parent === undefined ? {} : { parentTitle: sessionName(summary.parent) })}
           accounts={accountViews}
           {...(sessionId === null
             ? {}

@@ -552,14 +552,16 @@ export function serveBridge({
       ...options
     } = request;
     await makeDayFolder(homedir(), options.cwd);
-    const session = await sessions.start(chosen, {
-      ...options,
-      ...(gateway === null ? {} : { gateway }),
-      ...(model === null ? {} : { model }),
-      ...(level === null ? {} : { effort: level }),
-    });
-    await sessions.send(session, first, attached);
-    return session;
+    return sessions.start(
+      chosen,
+      {
+        ...options,
+        ...(gateway === null ? {} : { gateway }),
+        ...(model === null ? {} : { model }),
+        ...(level === null ? {} : { effort: level }),
+      },
+      { text: first, images: attached },
+    );
   });
   handle(
     channels.sessions.send,

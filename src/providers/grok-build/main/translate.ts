@@ -18,6 +18,7 @@ import type {
   SessionEvent,
   ToolStatus,
 } from '../../../sessions/shared/events';
+import { INBOX_CONTEXT_URI, inboxNoticesOf } from '../../../sessions/shared/inbox';
 import { displayPath, fileChange } from './patch';
 
 // Tool output is kept to this many characters, so that long command output stays cheap to hold.
@@ -67,7 +68,9 @@ export class Translator {
   update(update: SessionUpdate): SessionEvent[] {
     switch (update.sessionUpdate) {
       case 'user_message_chunk':
-        return this.chunk('user', update.content);
+        return update.content.type === 'resource'
+          ? inboxOf(update.content)
+          : this.chunk('user', update.content);
       case 'agent_message_chunk':
         return this.chunk('agent', update.content);
       case 'agent_thought_chunk':
@@ -239,4 +242,13 @@ function imagesOf(content: readonly ToolCallContent[]): MessageImage[] {
 
 function modeOf(modeId: string): PermissionMode | undefined {
   return (Object.keys(modeIds) as PermissionMode[]).find((mode) => modeIds[mode] === modeId);
+}
+
+// The notices of new messages the app gave beside a message, or alone, in a resource of its own
+// (ADR-0036); nothing for any other resource.
+function inboxOf(content: Extract<ContentBlock, { type: 'resource' }>): SessionEvent[] {
+  const { resource } = content;
+  if (resource.uri !== INBOX_CONTEXT_URI || !('text' in resource)) return [];
+  const notices = inboxNoticesOf(resource.text);
+  return notices === undefined || notices.length === 0 ? [] : [{ type: 'inbox', notices }];
 }

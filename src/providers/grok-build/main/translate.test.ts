@@ -11,6 +11,29 @@ function translate(updates: SessionUpdate[]): SessionEvent[] {
 }
 
 describe('messages', () => {
+  it('gives back the notices of new messages the app gave in a resource of its own, and no other resource', () => {
+    const notice = { id: 'n1', from: 'child', fromTitle: 'Tests', summary: 'Done', sentAt: 1 };
+    const resource = (uri: string, value: string) => ({
+      type: 'resource' as const,
+      resource: { uri, mimeType: 'text/plain', text: value },
+    });
+    expect(
+      translate([
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: resource(
+            'app://3mukon-code/inbox',
+            JSON.stringify({ source: '3mukon-code:inbox', messages: [notice] }),
+          ),
+        },
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: resource('app://3mukon-code/presentation-state', '{}'),
+        },
+      ]),
+    ).toEqual([{ type: 'inbox', notices: [notice] }]);
+  });
+
   it('streams chunks of one role into one message until something else comes between', () => {
     const events = translate([
       { sessionUpdate: 'agent_thought_chunk', content: text('Thinking') },

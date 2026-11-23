@@ -17,7 +17,7 @@ The app has one main window, built from the feature modules' renderer parts and 
 ## The window
 
 - **Title bar**: the window's top 40 pixels, which move the window and show no title. macOS's window buttons sit in it, and just after them, wherever they lie, the archived sessions' button, the accounts' gauge, the settings' gear and, while any session waits on the user, the count of waiting sessions. Over the main area, the title bar holds the headers of the panels at the top. (DOC-mod-app)
-- **Sidebar**, 220 pixels wide, which ⌘B hides and shows: the app's name; the Workspaces section, with Add workspace and the workspaces as a tree of their folders and files (DOC-mod-workspaces); then the Sessions section, with New session, a filter by workspace and a search by title and conversation, and the sessions not archived, the most recently active first (DOC-mod-sessions).
+- **Sidebar**, 220 pixels wide, which ⌘B hides and shows: the app's name; the Workspaces section, with Add workspace and the workspaces as a tree of their folders and files (DOC-mod-workspaces); then the Sessions section, with New session, a filter by workspace and a search by title and conversation, and the sessions not archived, the most recently active first, each child session indented beneath the session that started it (ADR-0036), and each titled once it has run for a while (ADR-0035) (DOC-mod-sessions).
 - **Main area**: the panel area, empty until something opens in it (DOC-mod-panels).
 - The page itself never scrolls; each pane and list scrolls within itself (L-0001). The paper's grain lies behind the content, including on filled surfaces (L-0009). (DOC-mod-ui)
 
@@ -28,7 +28,7 @@ Each panel is a pane with a header, which can lie in the title bar, holding its 
 | Panel | Shows | Module |
 |---|---|---|
 | Session page | A new session's settings and composer; once its first message is sent, the session itself | DOC-mod-sessions |
-| Session | A session's activity, its approvals and questions in place, its settings and composer | DOC-mod-sessions, DOC-mod-approvals |
+| Session | A session's activity, its approvals and questions in place, the notices of new messages from other sessions as the app's, its settings and composer; a child's first message, its task, named as its parent's (ADR-0036) | DOC-mod-sessions, DOC-mod-approvals |
 | File | A file rendered in its format, or its raw text in the editor, with a toggle between them at the header's end (ADR-0011, ADR-0018) | DOC-mod-files |
 | Terminal | The user's login shell in a folder, or a provider's sign-in command (ADR-0015, ADR-0016) | DOC-mod-terminal |
 | Archived sessions | The archived sessions, searchable, each unarchived or removed from its row | DOC-mod-sessions |

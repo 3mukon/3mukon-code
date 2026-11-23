@@ -15,6 +15,9 @@ interface MessageProps {
   images?: MessageImage[];
   // The provider's name, which VoiceOver reads before each of the agent's messages.
   agent: string;
+  // For a message in the user's place that another session sent, as a parent sends its child its
+  // task (ADR-0036): that session's title, which names the message's sender in place of the user.
+  from?: string;
 }
 
 // The line above thinking gives way, near its end, to MD or TXT and Copy while they show: its mask cuts
@@ -32,7 +35,7 @@ const notched =
 // on the message, near its top end: on a bubble, as a tab of the bubble's paper over its top edge; above
 // thinking, over its line, which gives way beneath them, as the context in use sits in the divider above
 // the composer. Out of the flow, they never widen a short bubble.
-export function Message({ role, text, images = [], agent }: MessageProps) {
+export function Message({ role, text, images = [], agent, from }: MessageProps) {
   const { t } = useTranslation();
   const [markdown, setMarkdown] = useState(role !== 'user');
   const body =
@@ -67,11 +70,29 @@ export function Message({ role, text, images = [], agent }: MessageProps) {
   }
   const user = role === 'user';
   const shown = images.length === 0 ? null : <Images images={images} />;
+  const sender =
+    from !== undefined
+      ? t('sessions.page.fromSession', { session: from })
+      : user
+        ? t('sessions.page.fromUser')
+        : t('sessions.page.fromAgent', { agent });
   return (
-    <div className={`my-3 flex min-w-0 first:mt-0 ${user ? 'justify-end' : 'justify-start'}`}>
-      <span className="sr-only">
-        {user ? t('sessions.page.fromUser') : t('sessions.page.fromAgent', { agent })}
-      </span>
+    <div
+      className={`my-3 flex min-w-0 first:mt-0 ${
+        from === undefined
+          ? user
+            ? 'justify-end'
+            : 'justify-start'
+          : `flex-col gap-0.5 ${user ? 'items-end' : 'items-start'}`
+      }`}
+    >
+      <span className="sr-only">{sender}</span>
+      {/* Another session's message in the user's place says whose it is, faintly, above it. */}
+      {from !== undefined && (
+        <span aria-hidden="true" className="max-w-[88%] truncate text-[11px] text-faint">
+          {t('sessions.page.sentBy', { session: from })}
+        </span>
+      )}
       <div className="group paper-bubble relative flex max-w-[88%] min-w-0 flex-col gap-1.5 rounded-lg px-2.5 py-1.5 text-ink [--notch:3.5rem]">
         {/* The tools 6px from the bubble's right end; or, for the agent's bubble, 6px from its left end
             where the bubble is narrower than they are, so that they reach out over the empty side. */}

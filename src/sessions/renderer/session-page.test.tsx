@@ -379,7 +379,7 @@ describe('SessionPage', () => {
     expect(bridge.start.mock.calls[0]?.[0]).toMatchObject({ model: null, effort: 'medium' });
   });
 
-  it('takes a model’s own default effort where it has no medium, and Default where it names none', async () => {
+  it('takes a model’s own default effort where it has no medium, and its level nearest medium where it names none', async () => {
     const { bridge } = fakeBridge();
     bridge.models.mockResolvedValue(MODELS);
     render(page(bridge));
@@ -392,11 +392,10 @@ describe('SessionPage', () => {
     expect(chooser('Reasoning effort').value).toBe('low');
     choose('Model', 'terra');
     expect(options('Reasoning effort')).toEqual([
-      ['', 'Default effort'],
       ['low', 'Low'],
       ['max', 'Max'],
     ]);
-    expect(chooser('Reasoning effort').value).toBe('');
+    expect(chooser('Reasoning effort').value).toBe('low');
     choose('Model', 'mono');
     expect(screen.queryByRole('combobox', { name: 'Reasoning effort' })).toBeNull();
   });
@@ -840,6 +839,67 @@ describe('SessionPage', () => {
     fireEvent.change(composer(), { target: { value: 'Thanks' } });
     fireEvent.keyDown(composer(), { key: 'Enter' });
     expect(bridge.send.mock.calls.at(-1)).toEqual(['s1', 'Thanks', []]);
+  });
+});
+
+describe('SessionPage’s reasoning effort', () => {
+  // A running session of a provider that names no model's default effort, as Claude Code does.
+  const runningAt = (effort: string | null): SessionState => ({
+    ...initialSessionState(),
+    mode: 'auto',
+    sandbox: 'workspace-write',
+    model: 'opus',
+    effort,
+    models: [
+      { id: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high', 'max'], default: true },
+    ],
+    timeline: [{ type: 'message', id: 'm1', role: 'user', text: 'Fix the build' }],
+  });
+  const running = (state: SessionState) => {
+    const { bridge } = fakeBridge(state);
+    render(
+      <SessionPage
+        bridge={bridge}
+        folder="/Users/me/web"
+        sessionId="s1"
+        summary={{
+          id: 's1',
+          provider: 'claude-code',
+          sessionId: 'p1',
+          cwd: '/Users/me/web',
+          status: 'idle',
+          activeAt: 0,
+        }}
+        onStarted={vi.fn()}
+      />,
+    );
+    return bridge;
+  };
+
+  it('offers a running session the model’s levels alone, never a default', async () => {
+    const bridge = running(runningAt('high'));
+    await settle();
+    expect(options('Reasoning effort')).toEqual([
+      ['low', 'Low'],
+      ['medium', 'Medium'],
+      ['high', 'High'],
+      ['max', 'Max'],
+    ]);
+    expect(chooser('Reasoning effort').value).toBe('high');
+    choose('Reasoning effort', 'low');
+    expect(bridge.setEffort.mock.calls).toEqual([['s1', 'low']]);
+  });
+
+  it('shows the starting effort for a session without one whose provider names no default', async () => {
+    running(runningAt(null));
+    await settle();
+    expect(options('Reasoning effort').map(([value]) => value)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'max',
+    ]);
+    expect(chooser('Reasoning effort').value).toBe('medium');
   });
 });
 

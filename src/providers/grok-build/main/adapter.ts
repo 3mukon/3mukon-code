@@ -25,6 +25,7 @@ import {
   type ProviderSession,
   type SessionEventListener,
   type StartOptions,
+  type TitleRequest,
   type Toolset,
   type ToolsetAccess,
   type HostTurnContext,
@@ -36,6 +37,7 @@ import {
   selectPresentationNotices,
   PRESENTATION_CONTEXT_URI,
 } from '../../../sessions/shared/host-context';
+import { inboxContext, INBOX_CONTEXT_URI } from '../../../sessions/shared/inbox';
 import type {
   ApprovalAnswer,
   HistoryEntry,
@@ -114,6 +116,13 @@ function launchArgs(sandbox: SandboxLevel, hostTools: readonly string[] = []): s
 
 // Tells Grok Build that the app shows the questions of its own question tool.
 const SESSION_META = { askUserQuestion: true };
+
+// Grok's undocumented requests that give a session a title and delete one from its history, each
+// answering { success: true }: rename takes { sessionId, title } and delete { sessionId }.
+const SESSION_RENAME = '_x.ai/session/rename';
+const SESSION_DELETE = '_x.ai/session/delete';
+// How long a title may take to be written, from its session's start, before it fails.
+const TITLE_TIMEOUT_MS = 120_000;
 
 const NO_GATEWAYS = 'Grok Build has no gateways; its custom models are among its models.';
 
@@ -275,6 +284,18 @@ export function createGrokBuildProvider(
         await rm(cwd, { recursive: true, force: true });
       }
     },
+    // A title from a session of a short-lived process in a throwaway folder (ADR-0035), read-only,
+    // which is deleted from Grok's history once it has answered.
+    async writeTitle(request) {
+      const cwd = await mkdtemp(join(tmpdir(), 'grok-title-'));
+      probeFolders.add(cwd);
+      try {
+        return await writeTitle(probeConnect, cwd, request);
+      } finally {
+        probeFolders.delete(cwd);
+        await rm(cwd, { recursive: true, force: true });
+      }
+    },
     // Through a running session's process, or else a short-lived one in a throwaway folder.
     async readAccount(withUsage) {
       for (const session of link.sessions) {
@@ -402,6 +423,82 @@ async function withGrok<Result>(
   } finally {
     stopAgent(agent).catch(() => undefined);
   }
+}
+
+// The reply to a title's prompt from a new session of a short-lived, read-only process in the
+// folder given, with the model and effort given; the session is deleted from Grok's history once it
+// has answered or failed. Grok's agent mode keeps its built-in tools, so a title whose agent starts
+// a tool call is cancelled and fails, and the permissions Grok asks for are refused.
+async function writeTitle(
+  connect: Connect,
+  cwd: string,
+  { model, effort, prompt }: TitleRequest,
+): Promise<string> {
+  let sessionId: string | undefined;
+  let reply = '';
+  let tooled = false;
+  let cancel: (() => void) | undefined;
+  return withGrok(
+    connect,
+    cwd,
+    async ({ connection }) => {
+      cancel = () => {
+        if (sessionId !== undefined) {
+          connection.agent.notify('session/cancel', { sessionId }).catch(() => undefined);
+        }
+      };
+      const created = await connection.agent.request('session/new', {
+        cwd,
+        mcpServers: [],
+        _meta: SESSION_META,
+      });
+      const id = created.sessionId;
+      sessionId = id;
+      try {
+        const option = (configId: string, value: string) =>
+          connection.agent.request('session/set_config_option', { sessionId: id, configId, value });
+        if (model !== null) await option('model', model);
+        if (effort !== null) await option('reasoning_effort', effort);
+        const answered = await withinTime(
+          connection.agent.request('session/prompt', {
+            sessionId: id,
+            prompt: [{ type: 'text', text: prompt }],
+          }),
+          TITLE_TIMEOUT_MS,
+          'Grok did not write the title in time.',
+        );
+        if (tooled) throw new Error('Grok started a tool instead of writing the title.');
+        if (answered.stopReason !== 'end_turn') {
+          throw new Error(`Grok stopped before it wrote the title: ${answered.stopReason}.`);
+        }
+        return reply;
+      } finally {
+        await connection.agent.request(SESSION_DELETE, { sessionId: id }).catch(() => undefined);
+      }
+    },
+    ({ sessionId: from, update }) => {
+      if (from !== sessionId) return;
+      if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') {
+        reply += update.content.text;
+      } else if (update.sessionUpdate === 'tool_call' && !tooled) {
+        tooled = true;
+        cancel?.();
+      }
+    },
+  );
+}
+
+// The promise's value, or a rejection with the message once ms have passed without one.
+function withinTime<Value>(promise: Promise<Value>, ms: number, message: string): Promise<Value> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(message));
+    }, ms);
+  });
+  return Promise.race([promise, late]).finally(() => {
+    clearTimeout(timer);
+  });
 }
 
 // The models the account can choose and their defaults, which Grok lists as it starts.
@@ -580,14 +677,25 @@ interface Message {
 }
 function contextBlocks(context?: HostTurnContext): ContentBlock[] {
   const text = presentationContext(context?.presentationNotices ?? []);
-  return text
-    ? [
-        {
-          type: 'resource',
-          resource: { uri: PRESENTATION_CONTEXT_URI, mimeType: 'text/plain', text },
-        },
-      ]
-    : [];
+  const inbox = inboxContext(context?.inboxNotices ?? []);
+  return [
+    ...(text
+      ? [
+          {
+            type: 'resource' as const,
+            resource: { uri: PRESENTATION_CONTEXT_URI, mimeType: 'text/plain', text },
+          },
+        ]
+      : []),
+    ...(inbox
+      ? [
+          {
+            type: 'resource' as const,
+            resource: { uri: INBOX_CONTEXT_URI, mimeType: 'text/plain', text: inbox },
+          },
+        ]
+      : []),
+  ];
 }
 
 // An image as Grok takes it, in a prompt or an interjection.
@@ -758,12 +866,16 @@ class GrokSession implements ProviderSession {
     const notices = selectPresentationNotices(
       messages.flatMap((message) => message.context?.presentationNotices ?? []),
     );
+    const seen = new Set<string>();
+    const inboxNotices = messages
+      .flatMap((message) => message.context?.inboxNotices ?? [])
+      .filter((notice) => !seen.has(notice.id) && Boolean(seen.add(notice.id)));
     const text = messages
       .map((message) => message.text)
       .filter((part) => part !== '')
       .join('\n\n');
     const prompt: ContentBlock[] = [
-      ...contextBlocks({ presentationNotices: notices }),
+      ...contextBlocks({ presentationNotices: notices, inboxNotices }),
       ...(text === '' ? [] : [{ type: 'text' as const, text }]),
       ...messages.flatMap((message) => message.images).map(imageBlock),
     ];
@@ -883,6 +995,25 @@ class GrokSession implements ProviderSession {
 
   setGateway(gateway: string | null): Promise<void> {
     return gateway === null ? Promise.resolve() : Promise.reject(new Error(NO_GATEWAYS));
+  }
+
+  // A turn of the app's own with the host context alone, as the notice of new messages (ADR-0036):
+  // no message of the user's goes with it or shows.
+  async deliverContext(context: HostTurnContext, delivery: HostContextDelivery): Promise<void> {
+    await this.ready();
+    if (this.turnRunning) throw new Error('A turn is running.');
+    this.translator.endMessage();
+    this.turnRunning = true;
+    this.onEvent({ type: 'turn-started' });
+    this.deliveries.add(delivery);
+    this.prompt([{ text: '', images: [], context, delivery }]);
+  }
+
+  // Grok keeps the title with the session in its history, which its own tools show.
+  async setTitle(title: string): Promise<void> {
+    await this.ready();
+    await this.agent.connection.agent.request(SESSION_RENAME, { sessionId: this.sessionId, title });
+    this.onEvent({ type: 'title', title });
   }
 
   async close(): Promise<void> {

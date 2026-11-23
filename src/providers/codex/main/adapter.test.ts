@@ -748,6 +748,64 @@ describe('the Codex provider', () => {
     });
   });
 
+  it('writes a title in an ephemeral thread of a short-lived app-server, read-only and never asking, with the model and effort given', async () => {
+    const codex = provider();
+    const writing = codex.writeTitle?.({
+      gateway: null,
+      model: 'gpt-small',
+      effort: 'low',
+      prompt: 'Title this: …',
+    });
+    await waitFor(() => fakes.length === 1 && current().params('turn/start') !== undefined);
+    const probe = current();
+    expect(probe.params('thread/start')).toMatchObject({
+      ephemeral: true,
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+      model: 'gpt-small',
+      cwd: probe.cwd,
+    });
+    expect(probe.params('turn/start')).toEqual({
+      threadId: 'th1',
+      input: [{ type: 'text', text: 'Title this: …', text_elements: [] }],
+      effort: 'low',
+    });
+    probe.emit('item/completed', {
+      item: { type: 'agentMessage', id: 'a1', text: 'Fix the build' },
+    });
+    probe.emit('turn/completed', completed('turn-1'));
+    expect(await writing).toBe('Fix the build');
+    expect(probe.closed).toBe(true);
+  });
+
+  it('writes a title through the gateway’s provider, and fails one whose turn fails, without the file’s text', async () => {
+    const codex = provider();
+    const writing = codex.writeTitle?.({ gateway: 'work', model: null, effort: null, prompt: 'x' });
+    await waitFor(() => fakes.length === 1 && current().params('turn/start') !== undefined);
+    const probe = current();
+    expect(probe.launch?.args).toEqual(expect.arrayContaining(['model_provider="proxy"']));
+    expect(probe.params('thread/start')).toMatchObject({ modelProvider: 'proxy' });
+    expect(probe.params('thread/start')).not.toHaveProperty('model');
+    expect(probe.params('turn/start')).not.toHaveProperty('effort');
+    probe.emit('turn/completed', {
+      threadId: 'th1',
+      turn: { id: 'turn-1', items: [], status: 'failed', error: { message: 'Overloaded' } },
+    });
+    await expect(writing).rejects.toThrow('Overloaded');
+    await expect(writing).rejects.not.toThrow('secret-token-value');
+  });
+
+  it('fails a title whose thread starts a tool, and stops its app-server', async () => {
+    const codex = provider();
+    const writing = codex.writeTitle?.({ gateway: null, model: null, effort: null, prompt: 'x' });
+    await waitFor(() => fakes.length === 1 && current().params('turn/start') !== undefined);
+    current().emit('item/started', {
+      item: { type: 'commandExecution', id: 'c1', command: 'ls', status: 'inProgress' },
+    });
+    await expect(writing).rejects.toThrow('started a tool');
+    expect(current().closed).toBe(true);
+  });
+
   it('resumes a thread and replays its history, page by page', async () => {
     const events: SessionEvent[] = [];
     const session = await provider().resume(
@@ -1182,6 +1240,42 @@ describe('a Codex session', () => {
       events.some((event) => event.type === 'settings' && event.gateway === 'work'),
     );
     expect(fakes).toHaveLength(2);
+  });
+
+  it('tells the agent of new messages in an input of its own, beside a message or in a turn of the app’s own', async () => {
+    const { session, events } = await startSession();
+    const notice = { id: 'n1', from: 'child', fromTitle: 'Tests', summary: 'Done', sentAt: 1 };
+    const context = { presentationNotices: [], inboxNotices: [notice] };
+    await session.send('Go on', [], context, { accepted: vi.fn(), failed: vi.fn() });
+    expect(current().params('turn/start')?.input).toEqual([
+      expect.objectContaining({
+        type: 'text',
+        text_elements: [expect.objectContaining({ placeholder: '3mukon-code:inbox' })],
+      }),
+      { type: 'text', text: 'Go on', text_elements: [] },
+    ]);
+    const input = current().params('turn/start')?.input as { text: string }[];
+    expect(JSON.parse(input[0]?.text ?? '')).toMatchObject({ messages: [notice] });
+    const delivery = { accepted: vi.fn(), failed: vi.fn() };
+    await expect(session.deliverContext?.(context, delivery)).rejects.toThrow('turn is running');
+    current().emit('turn/completed', completed('turn-1'));
+    await waitFor(() => events.filter((event) => event.type === 'turn-ended').length === 1);
+    const messages = events.filter((event) => event.type === 'message').length;
+    await session.deliverContext?.(context, delivery);
+    expect(delivery.accepted).toHaveBeenCalledOnce();
+    expect(current().params('turn/start')?.input).toEqual([
+      expect.objectContaining({
+        text_elements: [expect.objectContaining({ placeholder: '3mukon-code:inbox' })],
+      }),
+    ]);
+    expect(events.filter((event) => event.type === 'message')).toHaveLength(messages);
+    expect(events.filter((event) => event.type === 'turn-started')).toHaveLength(2);
+  });
+
+  it('gives the thread a name, which Codex keeps as the session’s title', async () => {
+    const { session } = await startSession();
+    await session.setTitle?.('Build fixes');
+    expect(current().params('thread/name/set')).toEqual({ threadId: 'th1', name: 'Build fixes' });
   });
 
   it('closes when closed, and reports an unexpected exit, cancelling what was open', async () => {

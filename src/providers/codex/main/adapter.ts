@@ -10,6 +10,7 @@ import {
   type ProviderSession,
   type SessionEventListener,
   type StartOptions,
+  type TitleRequest,
   type Toolset,
   type ToolsetAccess,
 } from '../../../sessions/main/provider';
@@ -55,9 +56,11 @@ import type { ThreadReadParams } from './protocol/v2/ThreadReadParams';
 import type { ThreadReadResponse } from './protocol/v2/ThreadReadResponse';
 import type { ThreadResumeParams } from './protocol/v2/ThreadResumeParams';
 import type { ThreadResumeResponse } from './protocol/v2/ThreadResumeResponse';
+import type { ThreadSetNameParams } from './protocol/v2/ThreadSetNameParams';
 import type { ThreadStartParams } from './protocol/v2/ThreadStartParams';
 import type { ThreadStartResponse } from './protocol/v2/ThreadStartResponse';
 import type { ThreadTurnsListResponse } from './protocol/v2/ThreadTurnsListResponse';
+import type { TurnCompletedNotification } from './protocol/v2/TurnCompletedNotification';
 import type { ToolRequestUserInputParams } from './protocol/v2/ToolRequestUserInputParams';
 import type { TurnStartParams } from './protocol/v2/TurnStartParams';
 import type { TurnStartResponse } from './protocol/v2/TurnStartResponse';
@@ -90,6 +93,7 @@ import {
   PRESENTATION_CONTEXT,
   selectPresentationNotices,
 } from '../../../sessions/shared/host-context';
+import { inboxContext, INBOX_CONTEXT, type InboxNotice } from '../../../sessions/shared/inbox';
 import type { HostTurnContext, HostContextDelivery } from '../../../sessions/main/provider';
 
 // Codex's approval settings behind each of the app's two permission modes (ADR-0006), for a thread
@@ -146,6 +150,13 @@ const TOOLSET_VARIABLE = 'TOOLSET_3MUKON_CODE_TOKEN';
 // The folders of the probes still listing models, removed as the app's process exits, should it quit
 // during a probe, so that quitting leaves none behind.
 const probeFolders = new Set<string>();
+// How long a title may take to be written, from the start of its app-server, before it fails.
+const TITLE_TIMEOUT_MS = 120_000;
+// The items a title's turn may hold: the prompt, the agent's reasoning and its reply.
+const TITLE_ITEMS = new Set<string>(['userMessage', 'reasoning', 'agentMessage']);
+// The instructions a title's thread runs with beside Codex's own.
+const TITLE_INSTRUCTIONS =
+  'You write short titles for conversations. Reply with the title alone, and run no commands.';
 process.on('exit', () => {
   for (const folder of probeFolders) rmSync(folder, { recursive: true, force: true });
 });
@@ -317,6 +328,20 @@ export function createCodexProvider({
         await rm(cwd, { recursive: true, force: true });
       }
     },
+    // A title from an ephemeral thread of a short-lived app-server (ADR-0035), which Codex keeps no
+    // rollout of.
+    async writeTitle(request) {
+      const gateway =
+        request.gateway === null ? null : await readGateway(gatewaysDir, request.gateway);
+      const cwd = await mkdtemp(join(tmpdir(), 'codex-title-'));
+      probeFolders.add(cwd);
+      try {
+        return await writeTitle(probeConnect, cwd, request, request.gateway, gateway);
+      } finally {
+        probeFolders.delete(cwd);
+        await rm(cwd, { recursive: true, force: true });
+      }
+    },
     readAccount(withUsage) {
       return withAccount((rpc) => readCodexAccount(rpc, withUsage));
     },
@@ -397,6 +422,96 @@ async function withCodex<Result>(
   } finally {
     await rpc.close();
   }
+}
+
+// The reply to a title's prompt from an ephemeral thread, which keeps no rollout, in a short-lived
+// app-server in the folder given, through the gateway where one is named, with the model and effort
+// given, read-only and never asking; the thread's last agent message once its turn completes.
+async function writeTitle(
+  connect: Connect,
+  cwd: string,
+  { model, effort, prompt }: TitleRequest,
+  name: string | null,
+  gateway: GatewaySettings | null,
+): Promise<string> {
+  let reply = '';
+  let settle: { done: (text: string) => void; fail: (error: Error) => void } | undefined;
+  const completed = new Promise<string>((resolve, reject) => {
+    settle = { done: resolve, fail: reject };
+  });
+  const launch =
+    name === null || gateway === null
+      ? undefined
+      : { args: gatewayLaunchArgs(name, gateway), env: {} };
+  const rpc = await connect(
+    cwd,
+    {
+      notification: (method, params) => {
+        if (method === 'item/started') {
+          // The thread runs no tools: one that starts fails the title, and closing the app-server
+          // stops it.
+          const { item } = params as ItemCompletedNotification;
+          if (!TITLE_ITEMS.has(item.type)) {
+            settle?.fail(new Error('Codex started a tool instead of writing the title.'));
+          }
+        } else if (method === 'item/completed') {
+          const { item } = params as ItemCompletedNotification;
+          if (item.type === 'agentMessage' && item.text.trim() !== '') reply = item.text;
+        } else if (method === 'turn/completed') {
+          const { turn } = params as TurnCompletedNotification;
+          if (turn.status === 'completed') settle?.done(reply);
+          else settle?.fail(new Error(turn.error?.message ?? 'Codex did not write the title.'));
+        }
+      },
+      request: (method) => Promise.reject(new Error(`3mukon-code does not answer ${method} here.`)),
+      exit: () => {
+        settle?.fail(new Error('Codex ended before it wrote the title.'));
+      },
+    },
+    launch,
+  );
+  try {
+    const params: ThreadStartParams = {
+      cwd,
+      ephemeral: true,
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+      developerInstructions: TITLE_INSTRUCTIONS,
+      ...(model === null ? {} : { model }),
+      ...(gateway === null ? {} : { config: gateway.config }),
+      ...(gateway?.modelProvider === undefined ? {} : { modelProvider: gateway.modelProvider }),
+    };
+    const { thread } = await rpc.request<ThreadStartResponse>('thread/start', params);
+    const turn: TurnStartParams = {
+      threadId: thread.id,
+      input: [{ type: 'text', text: prompt, text_elements: [] }],
+      ...(effort === null ? {} : { effort }),
+    };
+    await rpc.request<TurnStartResponse>('turn/start', turn);
+    return await withinTime(completed, TITLE_TIMEOUT_MS, 'Codex did not write the title in time.');
+  } catch (error) {
+    // Without the original error as its cause, since that may show the gateway's settings.
+    const kind = error instanceof CodexError ? error.kind : undefined;
+    throw new CodexError(
+      redact(error instanceof Error ? error.message : String(error), gateway),
+      kind,
+    );
+  } finally {
+    await rpc.close();
+  }
+}
+
+// The promise's value, or a rejection with the message once ms have passed without one.
+function withinTime<Value>(promise: Promise<Value>, ms: number, message: string): Promise<Value> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(message));
+    }, ms);
+  });
+  return Promise.race([promise, late]).finally(() => {
+    clearTimeout(timer);
+  });
 }
 
 // The models the account can choose, page by page.
@@ -730,6 +845,24 @@ class CodexSession implements ProviderSession {
     this.sandboxChanged = true;
     this.onEvent({ type: 'settings', sandbox });
     return Promise.resolve();
+  }
+
+  // A turn of the app's own with the host context alone, as the notice of new messages (ADR-0036):
+  // no message of the user's goes with it or shows.
+  async deliverContext(context: HostTurnContext, delivery: HostContextDelivery): Promise<void> {
+    if (this.switching !== null) await this.switching;
+    if (this.closed) throw new Error('The session is closed.');
+    if (this.turnRunning) throw new Error('A turn is running.');
+    this.announceTurn();
+    await this.startTurn([{ text: '', images: [], context, delivery }]);
+  }
+
+  // Codex keeps the title as the thread's name, which it then reports.
+  async setTitle(title: string): Promise<void> {
+    if (this.switching !== null) await this.switching;
+    if (this.closed) throw new Error('The session is closed.');
+    const params: ThreadSetNameParams = { threadId: this.threadId, name: title };
+    await this.rpc.request('thread/name/set', params);
   }
 
   async setGateway(gateway: string | null): Promise<void> {
@@ -1098,6 +1231,7 @@ class CodexSession implements ProviderSession {
         presentationNotices: selectPresentationNotices(
           messages.flatMap((entry) => entry.context?.presentationNotices ?? []),
         ),
+        inboxNotices: uniqueNotices(messages.flatMap((entry) => entry.context?.inboxNotices ?? [])),
       },
     };
     const params = this.turnParams(message);
@@ -1221,9 +1355,16 @@ interface Message {
   delivery?: HostContextDelivery;
 }
 
+// The notices once each, the first of each id.
+function uniqueNotices(notices: readonly InboxNotice[]): InboxNotice[] {
+  const seen = new Set<string>();
+  return notices.filter((notice) => !seen.has(notice.id) && Boolean(seen.add(notice.id)));
+}
+
 // A message as Codex takes it: its text, then its images as data URLs.
 function turnInput({ text, images, context }: Message): UserInput[] {
   const host = presentationContext(context?.presentationNotices ?? []);
+  const inbox = inboxContext(context?.inboxNotices ?? []);
   return [
     ...(host
       ? [
@@ -1234,6 +1375,20 @@ function turnInput({ text, images, context }: Message): UserInput[] {
               {
                 byteRange: { start: 0, end: Buffer.byteLength(host, 'utf8') },
                 placeholder: PRESENTATION_CONTEXT,
+              },
+            ],
+          },
+        ]
+      : []),
+    ...(inbox
+      ? [
+          {
+            type: 'text' as const,
+            text: inbox,
+            text_elements: [
+              {
+                byteRange: { start: 0, end: Buffer.byteLength(inbox, 'utf8') },
+                placeholder: INBOX_CONTEXT,
               },
             ],
           },
