@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+  type Ref,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   ApprovalAnswer,
@@ -568,6 +576,9 @@ function useFocusOn(focusKey: number | undefined) {
 
 // A request's block lies on the window's paper, grain and all, under a dashed line, so that only what
 // it holds, such as a diff, is paper set apart.
+//
+// The keys that show while the block has the focus widen its buttons, so a press on one leaves the
+// focus where it is, and its click takes it, once the pointer has let go over the button it pressed.
 function Block({
   label,
   ref,
@@ -585,11 +596,21 @@ function Block({
       aria-label={label}
       tabIndex={-1}
       onKeyDown={onKeyDown}
+      onMouseDown={(event) => {
+        if (buttonAt(event) !== null) event.preventDefault();
+      }}
+      onClickCapture={(event) => {
+        buttonAt(event)?.focus();
+      }}
       className="group/request my-3 rounded-md border border-dashed border-line px-3 py-2"
     >
       {children}
     </section>
   );
+}
+
+function buttonAt(event: MouseEvent<HTMLElement>): HTMLButtonElement | null {
+  return event.target instanceof Element ? event.target.closest('button') : null;
 }
 
 function Heading({ text, header }: { text: string; header?: string }) {

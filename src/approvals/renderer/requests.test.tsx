@@ -51,6 +51,18 @@ describe('ApprovalBlock', () => {
     ]);
   });
 
+  it('gives a button the focus with its click, not its press, as the keys that show with the focus move the buttons', () => {
+    const message = { ...command, denialMessage: true };
+    render(<ApprovalBlock request={message} onAnswer={() => Promise.resolve()} />);
+    const deny = screen.getByRole('button', { name: 'Deny' });
+    expect(fireEvent.mouseDown(within(deny).getByText('⎋'))).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(deny);
+    expect(document.activeElement).toBe(deny);
+    expect(fireEvent.mouseDown(screen.getByRole('textbox'))).toBe(true);
+    expect(fireEvent.mouseDown(screen.getByText('pnpm test'))).toBe(true);
+  });
+
   it('draws Deny as the default where the provider asks, and leaves out what the provider cannot remember', () => {
     render(
       <ApprovalBlock
