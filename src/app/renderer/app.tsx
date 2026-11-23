@@ -379,10 +379,17 @@ export function App({ bridge }: { bridge: Bridge }) {
       }),
     [bridge.setup],
   );
+  const allowChromeProfiles = async () => {
+    const result = await bridge.setup.act({ kind: 'allow-chrome-profiles' });
+    if (result.status === 'cancelled-before-dispatch') return null;
+    if (result.status !== 'verified') throw new Error('Chrome profiles could not be read.');
+    return (await bridge.setup.snapshot()).chrome;
+  };
   // The steps of a session's Chrome connection notice.
   const browserSteps: BrowserSetupSteps = {
     chrome: () => bridge.setup.snapshot().then((snapshot) => snapshot.chrome),
     watchChrome,
+    allowProfiles: allowChromeProfiles,
     connectChrome: (profileId) =>
       setupStep({ kind: 'connect-browser', browser: 'chrome', profileId }),
     copyFolder: (path) => bridge.sessions.copyText(path),
@@ -666,6 +673,7 @@ export function App({ bridge }: { bridge: Bridge }) {
               setup={setup}
               onClearSignIns={() => setupStep({ kind: 'clear-app-sign-ins' })}
               chromeSteps={{
+                allowProfiles: allowChromeProfiles,
                 connect: (profileId) =>
                   setupStep({ kind: 'connect-browser', browser: 'chrome', profileId }),
                 disconnect: (profileId) =>

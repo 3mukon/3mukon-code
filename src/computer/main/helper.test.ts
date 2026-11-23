@@ -182,6 +182,26 @@ it('starts lazily, coalesces status requests, checks permissions on the child, a
   expect(launch).toHaveBeenCalledOnce();
 });
 
+it('caches permissions from an idle probe without leaving the probe running', async () => {
+  const probe = childFixture();
+  const launch = vi.fn(() => Promise.resolve(probe.child));
+  const registerShortcut = vi.fn();
+  const helper = new NativeHelper(launch, undefined, undefined, registerShortcut);
+  try {
+    await expect(helper.check({ transient: true })).resolves.toMatchObject({ status: 'verified' });
+    expect(helper.status()).toMatchObject({
+      connection: 'idle',
+      generation: null,
+      permissions: { accessibility: 'granted', screenRecording: 'granted' },
+    });
+    expect(probe.counts).toEqual(['hello', 'permissions']);
+    expect(probe.stop).toHaveBeenCalledOnce();
+    expect(registerShortcut).not.toHaveBeenCalled();
+  } finally {
+    await helper.close();
+  }
+});
+
 it('accepts only current native control clicks, and the stop shortcut while a control shows, even with no outstanding tool request', async () => {
   const fixture = childFixture();
   const clicked = vi.fn();

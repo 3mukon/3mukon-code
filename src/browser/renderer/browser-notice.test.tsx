@@ -43,6 +43,7 @@ function steps(read: ChromeSetup = chromeOf()) {
         receivers.delete(receive);
       };
     }),
+    allowProfiles: vi.fn<() => Promise<ChromeSetup | null>>().mockResolvedValue(null),
     connectChrome: vi.fn(() => Promise.resolve(true)),
     copyFolder: vi.fn(() => Promise.resolve()),
     report: (chrome: ChromeSetup) => {
@@ -136,6 +137,17 @@ describe('BrowserSetupNotice', () => {
     expect(screen.getByText('Copied')).toBeDefined();
     given.report(chromeOf({ connection: 'connected', profile: PERSONAL }));
     expect(screen.queryByRole('button', { name: 'Copy Folder Path' })).toBeNull();
+  });
+
+  it('asks for access on Connect and connects the profile that is found', async () => {
+    const given = steps(chromeOf({ profileAccessRequired: true }, []));
+    given.allowProfiles.mockResolvedValueOnce(chromeOf());
+    render(<BrowserSetupNotice steps={given} />);
+    expect(given.allowProfiles).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await settle();
+    expect(given.allowProfiles).toHaveBeenCalledOnce();
+    expect(given.connectChrome).toHaveBeenCalledExactlyOnceWith('Default');
   });
 
   it('says a connection that did not go didn’t work, and offers Connect again', async () => {

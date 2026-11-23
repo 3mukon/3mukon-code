@@ -678,6 +678,7 @@
       "connected": "已连接",
       "connect": "连接",
       "disconnect": "断开连接",
+      "profileFolder": "选择 Chrome 文件夹，查找可连接的个人资料。",
       "tooOld": "需要 {{version}} 或更高版本",
       "profileLine": "“{{profile}}”个人资料，含其登录信息",
       "connecting": "正在连接",
@@ -716,6 +717,7 @@
       }
     },
     "state": {
+      "unknown": "正在检查…",
       "granted": "已允许",
       "restart-required": "重启后生效",
       "unavailable": "不可用"

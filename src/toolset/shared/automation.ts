@@ -40,7 +40,7 @@ export type SetupAction =
       kind: 'open-permission';
       permission: 'accessibility' | 'screen-recording' | 'input-monitoring';
     }
-  | { kind: 'clear-app-sign-ins' | 'restart-helper' };
+  | { kind: 'clear-app-sign-ins' | 'restart-helper' | 'allow-chrome-profiles' };
 export interface UserSetupBridge {
   snapshot(): Promise<SetupSnapshot>;
   subscribe(listener: (snapshot: SetupSnapshot) => void): () => void;

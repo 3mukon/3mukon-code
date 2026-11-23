@@ -332,6 +332,7 @@ export interface SetupSnapshot {
     profile: ProfileSummary | null;
     rememberedProfile?: ProfileSummary | null;
     profiles?: readonly ProfileSummary[];
+    profileAccessRequired?: true;
     extensionFolder?: string;
   };
   computer: {

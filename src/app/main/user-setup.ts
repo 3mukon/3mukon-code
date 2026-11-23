@@ -1,7 +1,11 @@
-import type { ChromeProfileConnection } from '../../browser/main/chrome-profile';
+import type {
+  ChromeFolderPicker,
+  ChromeProfileConnection,
+  ChromeProfileList,
+} from '../../browser/main/chrome-profile';
 import { MINIMUM_CHROME_VERSION, supportsChrome } from '../../browser/main/chrome-version';
 import type { HelperSetup } from '../../computer/shared/helper';
-import type { Outcome, ProfileSummary, SetupSnapshot } from '../../sessions/shared/automation';
+import type { Outcome, SetupSnapshot } from '../../sessions/shared/automation';
 import type { SetupAction, UserSetupBridge } from '../../toolset/shared/automation';
 
 type Permission = Extract<SetupAction, { kind: 'open-permission' }>['permission'];
@@ -14,12 +18,21 @@ const PERMISSION_PANES: Record<Permission, string> = {
   'input-monitoring': 'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent',
 };
 
+const PERMISSION_REFRESH_MS = 60_000;
+
 const verified: Outcome<null> = { status: 'verified', value: null };
+const noProfiles: ChromeProfileList = { status: 'read', profiles: [] };
+const chromeUnavailable: Outcome<null> = {
+  status: 'refused',
+  code: 'background-unavailable',
+  dispatched: false,
+};
 type ChromeSetupPort = Pick<
   ChromeProfileConnection,
   | 'profile'
   | 'rememberedProfile'
   | 'profiles'
+  | 'allowProfileAccess'
   | 'connecting'
   | 'extensionFolder'
   | 'connect'
@@ -29,16 +42,21 @@ type ChromeSetupPort = Pick<
 
 // What the window's settings and setup notices show of browser and computer use, and the steps the
 // user's click takes there: the app's browser, whose sign-ins Clear Sign-Ins clears through the
-// embedded browser, and the macOS permissions, which the helper reports. Reading the settings
-// returns cached facts and checks permission status asynchronously under the helper's identity.
-// Only the first read waits for Chrome's version and profiles, so that a notice's Connect, which
-// may be the first read since the app started, finds the profiles Chrome has.
+// embedded browser, and the macOS permissions, which the helper reports. Permissions are checked
+// from startup, periodically and on focus without opening System Settings. The first settings or
+// notice read waits for Chrome's version and profiles; later reads return cached facts.
 export class UserSetup implements UserSetupBridge {
   private readonly listeners = new Set<(snapshot: SetupSnapshot) => void>();
+  private readonly stopWatchingChrome: (() => void) | undefined;
+  private permissionsTimer?: ReturnType<typeof setInterval>;
+  private checkingPermissions = false;
+  private lastPublished?: string;
+  private closed = false;
   private chromeVersion: string | null = null;
-  private checkingChrome?: Promise<void>;
+  private checkingChrome?: Promise<ChromeProfileList>;
+  private authorizingChrome = false;
   private chromeChecked = false;
-  private chromeProfiles: ProfileSummary[] = [];
+  private chromeProfiles: ChromeProfileList = noProfiles;
 
   constructor(
     private readonly ports: {
@@ -50,37 +68,66 @@ export class UserSetup implements UserSetupBridge {
       openUrl: (url: string) => Promise<void>;
     },
   ) {
-    ports.chrome?.subscribe(() => {
+    this.stopWatchingChrome = ports.chrome?.subscribe(() => {
       this.publish();
     });
   }
 
+  start(): void {
+    if (this.closed || this.permissionsTimer !== undefined) return;
+    this.refreshPermissions();
+    this.permissionsTimer = setInterval(() => {
+      this.refreshPermissions();
+    }, PERMISSION_REFRESH_MS);
+    this.permissionsTimer.unref();
+  }
+
+  focused(): void {
+    this.refreshPermissions();
+  }
+
+  close(): void {
+    this.closed = true;
+    clearInterval(this.permissionsTimer);
+    this.stopWatchingChrome?.();
+    this.listeners.clear();
+  }
+
   snapshot(): Promise<SetupSnapshot> {
     const known = this.current();
-    const publish = () => {
+    if (this.closed) return Promise.resolve(known);
+    this.refreshPermissions();
+    const checkingChrome = this.refreshChrome();
+    return this.chromeChecked ? Promise.resolve(known) : checkingChrome.then(() => this.current());
+  }
+
+  private refreshPermissions(): void {
+    if (this.closed || this.checkingPermissions) return;
+    this.checkingPermissions = true;
+    const settled = () => {
+      this.checkingPermissions = false;
       this.publish();
     };
-    void this.ports.helper.check().then(publish, publish);
+    void this.ports.helper.check({ transient: true }).then(settled, settled);
+  }
+
+  private refreshChrome(): Promise<ChromeProfileList> {
     this.checkingChrome ??= Promise.all([
       this.ports.installedChromeVersion(),
-      this.ports.chrome?.profiles() ?? Promise.resolve([]),
+      this.ports.chrome?.profiles() ?? Promise.resolve(noProfiles),
     ])
       .then(([version, profiles]) => {
-        const changed =
-          version !== this.chromeVersion ||
-          JSON.stringify(profiles) !== JSON.stringify(this.chromeProfiles);
         this.chromeVersion = version;
         this.chromeProfiles = profiles;
-        if (changed) this.publish();
+        this.publish();
+        return profiles;
       })
-      .catch(() => undefined)
+      .catch(() => this.chromeProfiles)
       .finally(() => {
         this.chromeChecked = true;
         this.checkingChrome = undefined;
       });
-    return this.chromeChecked
-      ? Promise.resolve(known)
-      : this.checkingChrome.then(() => ({ ...known, chrome: this.current().chrome }));
+    return this.checkingChrome;
   }
 
   subscribe(listener: (snapshot: SetupSnapshot) => void): () => void {
@@ -90,7 +137,7 @@ export class UserSetup implements UserSetupBridge {
     };
   }
 
-  async act(action: SetupAction): Promise<Outcome<null>> {
+  async act(action: SetupAction, pickChromeFolder?: ChromeFolderPicker): Promise<Outcome<null>> {
     switch (action.kind) {
       case 'clear-app-sign-ins':
         return this.ports.clearAppSignIns();
@@ -111,12 +158,38 @@ export class UserSetup implements UserSetupBridge {
           return { status: 'refused', code: 'not-found', dispatched: false };
         }
       }
+      case 'allow-chrome-profiles':
+        return this.allowChromeProfiles(pickChromeFolder);
       case 'connect-browser':
         if (this.ports.chrome) return this.ports.chrome.connect(action.profileId);
-        return { status: 'refused', code: 'background-unavailable', dispatched: false };
+        return chromeUnavailable;
       case 'disconnect-browser':
         if (this.ports.chrome) return this.ports.chrome.disconnect(action.profileId);
-        return { status: 'refused', code: 'background-unavailable', dispatched: false };
+        return chromeUnavailable;
+    }
+  }
+
+  private async allowChromeProfiles(pick?: ChromeFolderPicker): Promise<Outcome<null>> {
+    const chrome = this.ports.chrome;
+    const closed = () => this.closed;
+    if (!chrome || !pick || closed()) return chromeUnavailable;
+    if (this.authorizingChrome) return { status: 'refused', code: 'busy', dispatched: false };
+    this.authorizingChrome = true;
+    try {
+      const before = await this.refreshChrome();
+      if (closed()) return chromeUnavailable;
+      if (before.status === 'read') return verified;
+      if (before.status !== 'access-required') return chromeUnavailable;
+      const selected = await chrome.allowProfileAccess(pick);
+      if (selected.status !== 'verified') return selected;
+      // Wait for a read that may have started behind the sheet, then read with the new access.
+      await this.checkingChrome;
+      if (closed()) return chromeUnavailable;
+      return (await this.refreshChrome()).status === 'read' ? verified : chromeUnavailable;
+    } catch {
+      return chromeUnavailable;
+    } finally {
+      this.authorizingChrome = false;
     }
   }
 
@@ -125,6 +198,7 @@ export class UserSetup implements UserSetupBridge {
     const remembered = this.ports.chrome?.rememberedProfile() ?? null;
     const extensionFolder = this.ports.chrome?.extensionFolder();
     const supported = this.ports.chrome && this.chromeVersion && supportsChrome(this.chromeVersion);
+    const profiles = this.chromeProfiles;
     return {
       appProfile: { id: this.ports.appProfileId, canClear: true },
       chrome: {
@@ -143,7 +217,13 @@ export class UserSetup implements UserSetupBridge {
         ...(remembered ? { rememberedProfile: remembered } : {}),
         ...(extensionFolder ? { extensionFolder } : {}),
         ...(this.ports.chrome
-          ? { profiles: this.chromeProfiles.map((entry) => ({ ...entry })) }
+          ? {
+              profiles:
+                profiles.status === 'read' ? profiles.profiles.map((entry) => ({ ...entry })) : [],
+              ...(profiles.status === 'access-required' && {
+                profileAccessRequired: true as const,
+              }),
+            }
           : {}),
       },
       computer: this.ports.helper.status().permissions,
@@ -151,7 +231,11 @@ export class UserSetup implements UserSetupBridge {
   }
 
   private publish(): void {
+    if (this.closed) return;
     const snapshot = this.current();
+    const serialized = JSON.stringify(snapshot);
+    if (serialized === this.lastPublished) return;
+    this.lastPublished = serialized;
     for (const listener of this.listeners) listener(snapshot);
   }
 }

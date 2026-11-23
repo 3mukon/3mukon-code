@@ -63,6 +63,7 @@ describe('BrowserUseSetting', () => {
 
   it('shows Chrome once installed: connected with its profile and Disconnect, or Connect, which asks which profile where it has several', async () => {
     const chromeSteps = {
+      allowProfiles: vi.fn(),
       connect: vi.fn(() => Promise.resolve(true)),
       disconnect: vi.fn(() => Promise.resolve(true)),
       copyFolder: vi.fn(() => Promise.resolve()),
@@ -146,8 +147,53 @@ describe('BrowserUseSetting', () => {
     expect(chromeSteps.connect).toHaveBeenLastCalledWith('Default');
   });
 
+  it('can connect a profile after access is granted, while a known empty list disables Connect', async () => {
+    const empty: SetupSnapshot['chrome'] = {
+      installedVersion: '158.0.8127.37',
+      minimumVersion: '158.0.8127.2',
+      connection: 'disconnected',
+      profile: null,
+      profiles: [],
+    };
+    const steps = {
+      allowProfiles: vi
+        .fn<() => Promise<SetupSnapshot['chrome'] | null>>()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ ...empty, profiles: [{ id: 'Default', name: 'Personal' }] }),
+      connect: vi.fn(() => Promise.resolve(true)),
+      disconnect: vi.fn(),
+    };
+    const props = { onClearSignIns: () => Promise.resolve(true), chromeSteps: steps };
+    const view = render(
+      <BrowserUseSetting {...props} setup={{ ...snapshot(true), chrome: empty }} />,
+    );
+    const connect = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Connect' });
+    expect(connect().disabled).toBe(true);
+    expect(steps.allowProfiles).not.toHaveBeenCalled();
+
+    view.rerender(
+      <BrowserUseSetting
+        {...props}
+        setup={{ ...snapshot(true), chrome: { ...empty, profileAccessRequired: true } }}
+      />,
+    );
+    expect(connect().disabled).toBe(false);
+    fireEvent.click(connect());
+    await settle();
+    expect(steps.connect).not.toHaveBeenCalled();
+    expect(screen.queryByRole('status')).toBeNull();
+
+    fireEvent.click(connect());
+    await settle();
+    expect(steps.connect).toHaveBeenCalledExactlyOnceWith('Default');
+  });
+
   it('says which version a Chrome too old to connect needs, offering nothing, and hides a Chrome not installed unless a profile is still connected to it', async () => {
-    const steps = { connect: vi.fn(), disconnect: vi.fn(() => Promise.resolve(true)) };
+    const steps = {
+      allowProfiles: vi.fn(),
+      connect: vi.fn(),
+      disconnect: vi.fn(() => Promise.resolve(true)),
+    };
     render(
       <BrowserUseSetting
         setup={{

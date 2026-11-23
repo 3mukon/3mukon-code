@@ -15,7 +15,8 @@ export interface HelperStatus {
 // The Settings / setup host can read cached status without starting a process.
 export interface HelperSetup {
   status(): HelperStatus;
-  check(): Promise<Outcome<HelperStatus>>;
+  // An automatic check may use a short-lived probe when the operating helper is idle.
+  check(options?: { transient?: boolean }): Promise<Outcome<HelperStatus>>;
   restart(): Promise<Outcome<HelperStatus>>;
   // Has macOS ask the user for a permission, after which System Settings lists the helper there, and
   // says whether macOS's prompt, whose button opens System Settings, is in front.

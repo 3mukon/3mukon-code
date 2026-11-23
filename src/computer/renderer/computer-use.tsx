@@ -18,6 +18,7 @@ export interface ComputerSteps {
 }
 
 const permissionStateTones = {
+  unknown: 'muted',
   granted: 'success',
   'restart-required': 'muted',
   unavailable: 'error',
@@ -27,8 +28,8 @@ const permissionStateTones = {
 // applications, Accessibility and Screen Recording, and Input Monitoring only where telling the
 // user's input from the agent's needs it, and the name under which System Settings lists the app's
 // helper, which holds them. A permission that is allowed says so after its name; one
-// that is not offers Open System Settings, and one that takes effect only once the app's helper
-// restarts offers Restart Helper. Those actions start from the user's click.
+// that is not offers Open System Settings only after checking, and one that takes effect only once
+// the app's helper restarts offers Restart Helper. Those actions start from the user's click.
 export function ComputerUseSetting({
   setup,
   steps,
@@ -63,7 +64,7 @@ export function ComputerUseSetting({
       detail={t('computer.setting.detail', { helper: HELPER_NAME })}
     >
       {permissions.map(([permission, state]) => {
-        const said = stateWords(state);
+        const said = state === 'not-granted' ? null : state;
         return (
           <SettingItem
             key={permission}
@@ -73,7 +74,7 @@ export function ComputerUseSetting({
               : { state: t(`computer.state.${said}`), stateTone: permissionStateTones[said] })}
             line={t(`computer.permission.${permission}.line`)}
           >
-            {(state === 'unknown' || state === 'not-granted') && (
+            {state === 'not-granted' && (
               <Button
                 label={t('computer.open')}
                 onClick={() => {
@@ -95,12 +96,6 @@ export function ComputerUseSetting({
       {failed && <SettingProblem text={t('computer.failed')} />}
     </SettingGroup>
   );
-}
-
-function stateWords(state: PermissionState): keyof typeof permissionStateTones | null {
-  return state === 'granted' || state === 'restart-required' || state === 'unavailable'
-    ? state
-    : null;
 }
 
 // A session's notice that computer use needs a permission, or the app's helper to restart, as the

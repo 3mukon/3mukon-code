@@ -24,13 +24,14 @@ function status(
 
 function setup(installedChromeVersion: () => Promise<string | null> = () => Promise.resolve(null)) {
   let current = status({});
+  let reported = status({ accessibility: 'granted', screenRecording: 'not-granted' }, 'ready');
   const restart = vi.fn(() =>
     Promise.resolve<Outcome<HelperStatus>>({ status: 'verified', value: current }),
   );
   const helper = {
     status: () => current,
     check: vi.fn(() => {
-      current = status({ accessibility: 'granted', screenRecording: 'not-granted' }, 'ready');
+      current = reported;
       return Promise.resolve<Outcome<HelperStatus>>({ status: 'verified', value: current });
     }),
     restart: (): Promise<Outcome<HelperStatus>> => restart(),
@@ -52,32 +53,61 @@ function setup(installedChromeVersion: () => Promise<string | null> = () => Prom
     helper,
     openUrl,
   });
-  return { host, helper, restart, clearAppSignIns, openUrl };
+  const reportPermissions = (permissions: Partial<HelperStatus['permissions']>) => {
+    reported = status(permissions, 'ready');
+  };
+  return { host, helper, restart, clearAppSignIns, openUrl, reportPermissions };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('UserSetup', () => {
-  it('returns cached facts and automatically checks permissions on each settings read', async () => {
-    const { host, helper, restart, openUrl } = setup();
+  it('caches startup permissions, refreshes them on focus and at intervals, and stops on close', async () => {
+    vi.useFakeTimers();
+    const installed = vi.fn(() => Promise.resolve(null));
+    const { host, helper, restart, openUrl, reportPermissions } = setup(installed);
     const heard: SetupSnapshot[] = [];
     host.subscribe((snapshot) => heard.push(snapshot));
-    const first = await host.snapshot();
-    expect(first.computer.accessibility).toBe('unknown');
-    expect(first.appProfile).toEqual({ id: 'embedded-app', canClear: true });
-    expect(first.chrome.connection).toBe('unavailable');
-    await settle();
-    expect(helper.check).toHaveBeenCalledOnce();
-    expect(heard.at(-1)?.computer).toMatchObject({
-      accessibility: 'granted',
-      screenRecording: 'not-granted',
-    });
-    await host.snapshot();
-    await settle();
-    expect(helper.check).toHaveBeenCalledTimes(2);
-    expect(heard).toHaveLength(2);
-    expect(restart).not.toHaveBeenCalled();
-    expect(openUrl).not.toHaveBeenCalled();
+    try {
+      host.start();
+      host.start();
+      host.focused();
+      expect(helper.check).toHaveBeenCalledExactlyOnceWith({ transient: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(installed).not.toHaveBeenCalled();
+      expect(heard).toHaveLength(1);
+
+      const first = await host.snapshot();
+      expect(installed).toHaveBeenCalledOnce();
+      expect(first.computer).toMatchObject({
+        accessibility: 'granted',
+        screenRecording: 'not-granted',
+      });
+      expect(first.appProfile).toEqual({ id: 'embedded-app', canClear: true });
+      expect(heard).toHaveLength(1);
+
+      reportPermissions({ accessibility: 'granted', screenRecording: 'granted' });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(heard.at(-1)?.computer.screenRecording).toBe('granted');
+      expect(helper.check).toHaveBeenCalledTimes(3);
+
+      reportPermissions({ accessibility: 'not-granted', screenRecording: 'granted' });
+      host.focused();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(heard.at(-1)?.computer.accessibility).toBe('not-granted');
+      expect(helper.check).toHaveBeenCalledTimes(4);
+      expect(installed).toHaveBeenCalledOnce();
+      expect(restart).not.toHaveBeenCalled();
+      expect(helper.request).not.toHaveBeenCalled();
+      expect(openUrl).not.toHaveBeenCalled();
+
+      host.close();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(helper.check).toHaveBeenCalledTimes(4);
+    } finally {
+      host.close();
+      vi.useRealTimers();
+    }
   });
 
   it('takes only the steps it can: clearing the sign-ins, restarting the helper, opening a permission’s pane', async () => {
@@ -159,15 +189,23 @@ describe('UserSetup', () => {
     expect(openUrl).not.toHaveBeenCalled();
   });
 
-  it('gives the first read since the app started Chrome’s profiles, as a notice’s Connect needs', async () => {
+  it('publishes the profiles immediately after the user confirms access', async () => {
     const pending = () => new Promise<Outcome<HelperStatus>>(() => undefined);
+    const profiles = [{ id: 'Default', name: 'Personal' }];
+    let allowed = false;
+    const pick = vi.fn((folder: string) => Promise.resolve(folder));
     const host = new UserSetup({
       appProfileId: 'embedded-app',
       installedChromeVersion: () => Promise.resolve('158.0.8127.18'),
       chrome: {
         profile: () => null,
         rememberedProfile: () => null,
-        profiles: () => Promise.resolve([{ id: 'Default', name: 'Personal' }]),
+        profiles: () =>
+          Promise.resolve(allowed ? { status: 'read', profiles } : { status: 'access-required' }),
+        async allowProfileAccess(pickFolder) {
+          allowed = (await pickFolder('/tmp/synthetic-chrome')) !== undefined;
+          return { status: 'verified', value: null };
+        },
         connecting: () => false,
         extensionFolder: () => undefined,
         connect: () => Promise.resolve({ status: 'verified', value: null }),
@@ -183,11 +221,20 @@ describe('UserSetup', () => {
       },
       openUrl: () => Promise.resolve(),
     });
+    const heard: SetupSnapshot[] = [];
+    host.subscribe((snapshot) => heard.push(snapshot));
     expect((await host.snapshot()).chrome).toMatchObject({
       installedVersion: '158.0.8127.18',
       connection: 'disconnected',
-      profiles: [{ id: 'Default', name: 'Personal' }],
+      profiles: [],
+      profileAccessRequired: true,
     });
+    expect(pick).not.toHaveBeenCalled();
+    expect(await host.act({ kind: 'allow-chrome-profiles' }, pick)).toMatchObject({
+      status: 'verified',
+    });
+    expect(heard.at(-1)?.chrome.profiles).toEqual(profiles);
+    expect(heard.at(-1)?.chrome.profileAccessRequired).toBeUndefined();
   });
 
   it('passes on a restart the helper refused', async () => {

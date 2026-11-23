@@ -28,10 +28,16 @@ interface Pairing {
   resolve(outcome: Outcome<null>): void;
 }
 
+export type ChromeProfileList =
+  { status: 'read'; profiles: ProfileSummary[] } | { status: 'access-required' | 'unavailable' };
+
+export type ChromeFolderPicker = (directory: string) => Promise<string | undefined>;
+
 export interface ChromeProfilePorts {
   // The build of the extension the app carries, the only one it works with.
   build: string;
-  profiles(): Promise<ProfileSummary[]>;
+  profiles(): Promise<ChromeProfileList>;
+  selectProfileFolder?: (pick: ChromeFolderPicker) => Promise<Outcome<null>>;
   // Installs the host and the extension for Chrome, or renews what is installed of them.
   install(): Promise<void>;
   renew(): Promise<void>;
@@ -106,8 +112,13 @@ export class ChromeProfileConnection {
     return { kind: 'browser', browser: 'chrome', step: 'connect' };
   }
 
-  profiles(): Promise<ProfileSummary[]> {
+  profiles(): Promise<ChromeProfileList> {
     return this.ports.profiles();
+  }
+
+  async allowProfileAccess(pick: ChromeFolderPicker): Promise<Outcome<null>> {
+    if (!this.canPair()) return refused('busy');
+    return this.ports.selectProfileFolder?.(pick) ?? refused('background-unavailable');
   }
 
   subscribe(listener: () => void): () => void {
@@ -118,7 +129,10 @@ export class ChromeProfileConnection {
   async connect(id: string): Promise<Outcome<null>> {
     if (!profileId.safeParse(id).success) return refused('invalid-request');
     if (!this.canPair()) return refused('busy');
-    const profile = (await this.profiles()).find((entry) => entry.id === id);
+    const available = await this.profiles();
+    if (available.status === 'access-required') return refused('needs-user-action');
+    const profile =
+      available.status === 'read' ? available.profiles.find((entry) => entry.id === id) : undefined;
     if (!profile) return refused('not-found');
     if (!this.canPair()) return refused('busy');
 

@@ -108,10 +108,10 @@ export class NativeHelper implements HelperSetup {
     return this.wire?.control(revision, frame) ?? false;
   }
 
-  check(): Promise<Outcome<HelperStatus>> {
+  check(options?: { transient?: boolean }): Promise<Outcome<HelperStatus>> {
     if (this.closed) return Promise.resolve(unavailable());
     if (this.restarting) return this.restarting;
-    return this.refreshPermissions();
+    return this.refreshPermissions(options?.transient);
   }
 
   runningApplications(): Promise<Outcome<ApplicationInventory>> {
@@ -191,12 +191,25 @@ export class NativeHelper implements HelperSetup {
     return this.stop();
   }
 
-  private refreshPermissions(): Promise<Outcome<HelperStatus>> {
+  private refreshPermissions(transient = false): Promise<Outcome<HelperStatus>> {
     if (this.closed) return Promise.resolve(unavailable());
-    this.checking ??= this.readPermissions().finally(() => {
+    this.checking ??= (
+      transient && this.wire === undefined ? this.readIdlePermissions() : this.readPermissions()
+    ).finally(() => {
       this.checking = undefined;
     });
     return this.checking;
+  }
+
+  // Reading status for Settings does not need to keep the operating helper running. If an
+  // operation started it meanwhile, read that generation so restart requirements are correct.
+  private async readIdlePermissions(): Promise<Outcome<HelperStatus>> {
+    const epoch = this.epoch;
+    const permissions = await this.freshPermissions();
+    if (!this.isCurrent(epoch)) return unavailable();
+    if (this.wire) return this.readPermissions();
+    this.current = inactive(permissions === undefined ? 'unavailable' : 'idle');
+    return permissions === undefined ? unavailable() : okay(this.savePermissions(permissions));
   }
 
   private async readPermissions(): Promise<Outcome<HelperStatus>> {
@@ -209,28 +222,30 @@ export class NativeHelper implements HelperSetup {
       !has.screenRecording ||
       (this.inputMonitoringRequired && !has.inputMonitoring);
     const fresh = running && lacks ? await this.freshPermissions() : undefined;
-    return this.forCurrentGeneration(outcome, () => {
-      const accessibility = permission(has.accessibility, fresh?.accessibility);
-      const screenRecording = permission(has.screenRecording, fresh?.screenRecording);
-      const state = permission(has.inputMonitoring, fresh?.inputMonitoring);
-      const needed = [
+    return this.forCurrentGeneration(outcome, () => this.savePermissions(has, fresh));
+  }
+
+  private savePermissions(has: Permissions, fresh?: Permissions): HelperStatus {
+    const accessibility = permission(has.accessibility, fresh?.accessibility);
+    const screenRecording = permission(has.screenRecording, fresh?.screenRecording);
+    const state = permission(has.inputMonitoring, fresh?.inputMonitoring);
+    const needed = [
+      accessibility,
+      screenRecording,
+      ...(this.inputMonitoringRequired ? [state] : []),
+    ];
+    this.current = {
+      ...this.current,
+      checkedAt: Date.now(),
+      permissions: {
+        helperName: HELPER_NAME,
         accessibility,
         screenRecording,
-        ...(this.inputMonitoringRequired ? [state] : []),
-      ];
-      this.current = {
-        ...this.current,
-        checkedAt: Date.now(),
-        permissions: {
-          helperName: HELPER_NAME,
-          accessibility,
-          screenRecording,
-          inputMonitoring: { required: false, state },
-          restartRequired: needed.includes('restart-required'),
-        },
-      };
-      return this.status();
-    });
+        inputMonitoring: { required: false, state },
+        restartRequired: needed.includes('restart-required'),
+      },
+    };
+    return this.status();
   }
 
   // What macOS gives the helper as it starts. A permission the user allowed while the helper runs
@@ -336,7 +351,8 @@ export class NativeHelper implements HelperSetup {
         return dispatched ? this.lostAction(binding) : unavailable();
       }
       if (this.current.generation !== wire.generation) {
-        this.current = { ...inactive('idle'), connection: 'ready', generation: wire.generation };
+        const cached = this.current.connection === 'idle' ? this.current : inactive('idle');
+        this.current = { ...cached, connection: 'ready', generation: wire.generation };
       }
       return okay(reply);
     } catch (error) {

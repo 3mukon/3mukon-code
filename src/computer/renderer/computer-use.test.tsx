@@ -77,11 +77,17 @@ describe('ComputerUseSetting', () => {
     ).toBeDefined();
   });
 
-  it('offers the steps before the helper has reported, and says when a step did not go', async () => {
+  it('shows a pending check until the helper reports, then offers only steps the user needs', async () => {
     const given = steps();
     given.open.mockResolvedValue(false);
-    render(<ComputerUseSetting setup={null} steps={given} />);
-    fireEvent.click(row('Accessibility').getByRole('button', { name: 'Open System Settings' }));
+    const view = render(<ComputerUseSetting setup={null} steps={given} />);
+    expect(screen.getAllByText('Checking…')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Open System Settings' })).toBeNull();
+
+    view.rerender(<ComputerUseSetting setup={setup({})} steps={given} />);
+    expect(screen.queryByText('Checking…')).toBeNull();
+    expect(row('Accessibility').queryByRole('button')).toBeNull();
+    fireEvent.click(row('Screen Recording').getByRole('button', { name: 'Open System Settings' }));
     await settle();
     expect(screen.getByRole('status').textContent).toBe('That didn’t work.');
   });

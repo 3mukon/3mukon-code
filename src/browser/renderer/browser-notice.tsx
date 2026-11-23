@@ -12,6 +12,7 @@ export interface BrowserSetupSteps {
   chrome: () => Promise<ChromeSetup>;
   // Each later report of it, until the returned function is called.
   watchChrome: (receive: (chrome: ChromeSetup) => void) => () => void;
+  allowProfiles: () => Promise<ChromeSetup | null>;
   connectChrome: (profileId: string) => Promise<boolean>;
   copyFolder?: (path: string) => Promise<void>;
 }
@@ -61,21 +62,27 @@ export function BrowserSetupNotice({ steps }: { steps: BrowserSetupSteps }) {
       },
     );
   };
+  const discover = async () => {
+    const known = await steps.chrome();
+    read.current = true;
+    setChrome(known);
+    if (chromeState(known, t) !== null || !known.profileAccessRequired) return known;
+    const allowed = await steps.allowProfiles();
+    if (allowed !== null) setChrome(allowed);
+    return allowed;
+  };
   const start = (event: MouseEvent<HTMLButtonElement>) => {
     const { left, bottom } = event.currentTarget.getBoundingClientRect();
     setFailed(false);
     setRunning(true);
-    steps.chrome().then(
+    void discover().then(
       (known) => {
-        read.current = true;
         setRunning(false);
-        setChrome(known);
-        if (chromeState(known, t) !== null) return;
+        if (known === null || chromeState(known, t) !== null) return;
         const profiles = known.profiles ?? [];
         const [only] = profiles;
         if (profiles.length === 1 && only !== undefined) connect(only.id);
         else if (profiles.length > 1) setChoosing({ at: { x: left, y: bottom + 4 }, profiles });
-        else setFailed(true);
       },
       () => {
         setRunning(false);
@@ -98,7 +105,14 @@ export function BrowserSetupNotice({ steps }: { steps: BrowserSetupSteps }) {
       <p className="mt-0.5 text-muted">{t('browser.notice.connectDetail')}</p>
       <div className="mt-2 flex min-w-0 items-baseline gap-3">
         {state === null ? (
-          <Button label={t('browser.chrome.connect')} disabled={running} onClick={start} />
+          <Button
+            label={t('browser.chrome.connect')}
+            disabled={
+              running ||
+              (chrome !== null && !chrome.profileAccessRequired && !chrome.profiles?.length)
+            }
+            onClick={start}
+          />
         ) : (
           <p className="flex min-w-0 items-baseline gap-1.5">
             <span className={toneColors[state.tone]}>{state.state}</span>

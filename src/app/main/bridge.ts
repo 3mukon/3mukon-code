@@ -22,7 +22,8 @@ import type { Settings } from '../../settings/main/settings';
 import type { AppSettings } from '../../settings/shared/settings';
 import type { TerminalUi } from '../../terminal/main/native';
 import type { TerminalViewer, Terminals } from '../../terminal/main/terminals';
-import type { AutomationBridge, UserSetupBridge } from '../../toolset/shared/automation';
+import type { AutomationBridge } from '../../toolset/shared/automation';
+import type { UserSetup } from './user-setup';
 import { MAX_COLUMNS, MAX_ROWS } from '../../terminal/shared/terminal';
 import type { Workspaces, WorkspacesUi } from '../../workspaces/main/workspaces';
 import { channels } from '../shared/bridge';
@@ -43,7 +44,8 @@ interface BridgeServices {
   };
   automation: AutomationBridge;
   isAuxiliary?: (contents: WebContents) => boolean;
-  setup: UserSetupBridge;
+  setup: Pick<UserSetup, 'snapshot' | 'subscribe' | 'act'>;
+  pickChromeFolder?: (window: BrowserWindow, directory: string) => Promise<string | undefined>;
   workspaces: Workspaces;
   sessions: SessionHost;
   // The settings each folder's sessions last used.
@@ -189,7 +191,9 @@ const setupAction = z.discriminatedUnion('kind', [
       permission: z.enum(['accessibility', 'screen-recording', 'input-monitoring']),
     })
     .strict(),
-  z.object({ kind: z.enum(['clear-app-sign-ins', 'restart-helper']) }).strict(),
+  z
+    .object({ kind: z.enum(['clear-app-sign-ins', 'restart-helper', 'allow-chrome-profiles']) })
+    .strict(),
 ]);
 
 const browserTab = z.strictObject({
@@ -238,6 +242,7 @@ export function serveBridge({
   automation,
   isAuxiliary,
   setup,
+  pickChromeFolder,
   workspaces,
   sessions,
   choices,
@@ -632,7 +637,11 @@ export function serveBridge({
   );
   handle(channels.files.image, z.tuple([path]), (_window, file) => files.image(file));
   handle(channels.setup.snapshot, z.tuple([]), () => setup.snapshot());
-  handle(channels.setup.act, z.tuple([setupAction]), (_window, action) => setup.act(action));
+  handle(channels.setup.act, z.tuple([setupAction]), (window, action) =>
+    action.kind === 'allow-chrome-profiles' && pickChromeFolder
+      ? setup.act(action, (directory) => pickChromeFolder(window, directory))
+      : setup.act(action),
+  );
   handle(channels.settings.get, z.tuple([]), () => settings.get());
   handle(channels.settings.set, z.tuple([settingsChange]), (_window, given) => {
     const change: Partial<AppSettings> = {};

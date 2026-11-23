@@ -8,10 +8,7 @@ import { z } from 'zod';
 import { embeddedBrowser } from '../../src/app/main/browser-automation';
 import { waitForLocalChromeExtension } from '../../src/browser/main/chrome-local-setup';
 import { ChromeProfileConnection } from '../../src/browser/main/chrome-profile';
-import {
-  chromeProfileConnection,
-  chromeProfileNames,
-} from '../../src/browser/main/chrome-profile-installation';
+import { chromeProfileConnection } from '../../src/browser/main/chrome-profile-installation';
 import type { EmbeddedEngine } from '../../src/browser/main/page';
 import { AutomationBroker, type BrokerAccess } from '../../src/toolset/main/broker';
 
@@ -59,7 +56,7 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
   const folder = await mkdtemp('/private/tmp/chrome-profile-');
   const setup = Promise.withResolvers<string>();
   const ports = {
-    profiles: vi.fn(() => Promise.resolve([name])),
+    profiles: vi.fn(() => Promise.resolve({ status: 'read' as const, profiles: [name] })),
     build,
     install: vi.fn(() => Promise.resolve()),
     renew: vi.fn(() => Promise.resolve()),
@@ -142,23 +139,58 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
   }
 });
 
-it('lists the browser display names from profile metadata', async () => {
+it('reads the correct profile names only after the Chrome folder is selected', async () => {
   const folder = await mkdtemp('/private/tmp/chrome-names-');
+  const browserData = join(folder, 'Chrome');
+  const app = chromeProfileConnection({
+    appData: join(folder, 'app'),
+    browserData,
+    browserBundle: join(folder, 'unused'),
+    browserExecutable: join(folder, 'unused'),
+    hostExecutable: join(folder, 'unused'),
+    extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+    bundledExtension: join(folder, 'unused'),
+    build,
+    requireProfileConsent: true,
+  });
   try {
+    expect(await app.profiles()).toEqual({ status: 'read', profiles: [] });
+    await mkdir(browserData);
     await writeFile(
-      join(folder, 'Local State'),
+      join(browserData, 'Local State'),
       JSON.stringify({
         profile: {
           info_cache: {
             'Profile 3': { name: name.name, unneeded: 'fixture' },
+            Default: { missingDisplayName: true },
             'Guest Profile': { name: 'Guest' },
             '../elsewhere': { name: 'Not a profile' },
           },
         },
       }),
     );
-    expect(await chromeProfileNames(folder)).toEqual([name]);
+    expect(await app.profiles()).toEqual({ status: 'access-required' });
+    expect(await app.connect(name.id)).toMatchObject({
+      status: 'refused',
+      code: 'needs-user-action',
+    });
+    const cancel = vi.fn(() => Promise.resolve(undefined));
+    expect(await app.allowProfileAccess(cancel)).toMatchObject({
+      status: 'cancelled-before-dispatch',
+    });
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(browserData);
+    expect(await app.allowProfileAccess(() => Promise.resolve(folder))).toMatchObject({
+      status: 'refused',
+      code: 'invalid-request',
+    });
+    expect(await app.profiles()).toEqual({ status: 'access-required' });
+    expect(await app.allowProfileAccess((directory) => Promise.resolve(directory))).toEqual({
+      status: 'verified',
+      value: null,
+    });
+    expect(await app.profiles()).toEqual({ status: 'read', profiles: [name] });
   } finally {
+    app.close();
     await rm(folder, { recursive: true, force: true });
   }
 });
@@ -371,7 +403,7 @@ it('asks before the first use of a task tab in the connected profile, opens it o
   const folder = await mkdtemp('/private/tmp/chrome-task-');
   const ticket = Promise.withResolvers<string>();
   const ports = {
-    profiles: vi.fn(() => Promise.resolve([name])),
+    profiles: vi.fn(() => Promise.resolve({ status: 'read' as const, profiles: [name] })),
     build,
     install: vi.fn(() => Promise.resolve()),
     renew: vi.fn(() => Promise.resolve()),

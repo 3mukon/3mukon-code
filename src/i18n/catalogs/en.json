@@ -684,6 +684,7 @@
       "connected": "Connected",
       "connect": "Connect",
       "disconnect": "Disconnect",
+      "profileFolder": "Select the Chrome folder to find profiles you can connect.",
       "tooOld": "Needs version {{version}} or later",
       "profileLine": "{{profile}} profile, with its sign-ins",
       "connecting": "Connecting",
@@ -722,6 +723,7 @@
       }
     },
     "state": {
+      "unknown": "Checking…",
       "granted": "Allowed",
       "restart-required": "Takes effect after a restart",
       "unavailable": "Unavailable"

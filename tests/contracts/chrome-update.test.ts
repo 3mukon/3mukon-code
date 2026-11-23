@@ -23,7 +23,7 @@ describe('the saved connection', () => {
   const proof = 'a'.repeat(64);
   const ports = () => ({
     build: 'build2',
-    profiles: vi.fn(() => Promise.resolve([profile])),
+    profiles: vi.fn(() => Promise.resolve({ status: 'read' as const, profiles: [profile] })),
     install: vi.fn(() => Promise.resolve()),
     renew: vi.fn(() => Promise.resolve()),
     openSetup: vi.fn(() => Promise.resolve()),

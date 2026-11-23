@@ -104,8 +104,11 @@ export function chromeConnector(setup: {
       await renewFile(manifest, Buffer.from(wanted), 0o600);
     },
     async renew() {
-      if ((await owned(extension)) !== null) await renewExtension();
-      if ((await owned(host))?.isFile()) await renewHost();
+      const installed = (await owned(extension)) !== null;
+      const installedHost = (await owned(host))?.isFile();
+      if (!installed && !installedHost) return;
+      if (installed) await renewExtension();
+      if (installedHost) await renewHost();
       if ((await registered()) === 'own') await renewFile(manifest, Buffer.from(wanted), 0o600);
     },
   };

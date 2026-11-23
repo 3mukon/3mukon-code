@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { app, BrowserWindow, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron';
 import { Accounts, usageStorage } from '../../accounts/main/accounts';
 import { windowAccountsUi } from '../../accounts/main/native';
 import type { AccountSource } from '../../accounts/main/source';
@@ -108,7 +108,7 @@ void app
         },
     });
     const chrome = app.isPackaged
-      ? await stagedChromeConnection(process.resourcesPath, data)
+      ? await stagedChromeConnection(process.resourcesPath, data, process.getSystemVersion())
       : undefined;
     const embedded = embeddedBrowser(
       new ElectronEmbeddedEngine(),
@@ -242,6 +242,14 @@ void app
       automation,
       isAuxiliary: (contents) => controlWindow?.owns(contents) ?? false,
       setup,
+      async pickChromeFolder(window, directory) {
+        const { canceled, filePaths } = await dialog.showOpenDialog(window, {
+          defaultPath: directory,
+          properties: ['openDirectory'],
+          message: t('browser.chrome.profileFolder'),
+        });
+        return canceled ? undefined : filePaths[0];
+      },
       workspaces,
       sessions,
       choices: new RememberedChoices(choiceStorage(data), dayRoot(homedir())),
@@ -257,7 +265,13 @@ void app
       accountsUi: (window) => windowAccountsUi(windowPrompts(window), t),
       page: pageUrl(),
     });
+    const refreshSetupOnFocus = (_event: Electron.Event, window: BrowserWindow) => {
+      if (!controlWindow?.owns(window.webContents)) setup.focused();
+    };
+    app.on('browser-window-focus', refreshSetupOnFocus);
     closeBeforeQuitting(adapters, async () => {
+      app.removeListener('browser-window-focus', refreshSetupOnFocus);
+      setup.close();
       stopWatchingControl?.();
       stopControlSettings?.();
       controlWindow?.dispose();
@@ -286,6 +300,7 @@ void app
     const openWindow = () => {
       keepUnsavedChanges(createMainWindow(settings.get()), t);
     };
+    setup.start();
     openWindow();
     setTimeout(() => {
       void sessions.catchUp();

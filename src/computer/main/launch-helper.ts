@@ -23,40 +23,50 @@ export function nativeHelper(options: {
   onControl?: (revision: number, command: ControlEvent) => void;
   onStopShortcut?: (registers: boolean) => void;
 }): NativeHelper {
+  const prepare = async () => {
+    if (Number(options.osVersion.split('.')[0]) < 14)
+      throw new Error('The native helper requires macOS 14.');
+    const artifacts = options.packaged
+      ? join(dirname(options.resourcesPath), 'Helpers')
+      : join(options.appPath, 'out', 'native');
+    const bundle = join(artifacts, HELPER_NAME + '.app');
+    const executable = join('Contents', 'MacOS', 'AutomationHelper');
+    const manifest = options.packaged
+      ? join(options.appPath, 'out', 'native-helper-identity.json')
+      : join(artifacts, 'native-helper-identity.json');
+    const file = await lstat(manifest);
+    if (!file.isFile() || file.size > 256) throw new Error('No native helper identity.');
+    const read: unknown = JSON.parse(await readFile(manifest, 'utf8'));
+    const { certificate } = identity.parse(read);
+    if (!(await lstat(bundle)).isDirectory() || !(await lstat(join(bundle, executable))).isFile())
+      throw new Error('The native helper bundle is missing.');
+    const requirement =
+      'identifier "' + BUNDLE_ID + '" and certificate leaf = H"' + certificate + '"';
+    const root = await privateFolder(join(options.data, 'computer-use'));
+    const locks = await privateFolder(join(root, 'coordination'));
+    const temporary = await privateFolder(join(root, 'temporary'));
+    const installed = await installHelper(bundle, root, async (checked) => {
+      await exec(
+        '/usr/bin/codesign',
+        ['--verify', '--strict', '--deep', '-R', '=' + requirement, checked],
+        {
+          timeout: 2_500,
+          maxBuffer: 4096,
+        },
+      );
+    });
+    return { binary: join(installed, executable), locks, temporary };
+  };
+  let preparing: ReturnType<typeof prepare> | undefined;
   return new NativeHelper(
     async () => {
-      if (Number(options.osVersion.split('.')[0]) < 14)
-        throw new Error('The native helper requires macOS 14.');
-      const artifacts = options.packaged
-        ? join(dirname(options.resourcesPath), 'Helpers')
-        : join(options.appPath, 'out', 'native');
-      const bundle = join(artifacts, HELPER_NAME + '.app');
-      const executable = join('Contents', 'MacOS', 'AutomationHelper');
-      const manifest = options.packaged
-        ? join(options.appPath, 'out', 'native-helper-identity.json')
-        : join(artifacts, 'native-helper-identity.json');
-      const file = await lstat(manifest);
-      if (!file.isFile() || file.size > 256) throw new Error('No native helper identity.');
-      const read: unknown = JSON.parse(await readFile(manifest, 'utf8'));
-      const { certificate } = identity.parse(read);
-      if (!(await lstat(bundle)).isDirectory() || !(await lstat(join(bundle, executable))).isFile())
-        throw new Error('The native helper bundle is missing.');
-      const requirement =
-        'identifier "' + BUNDLE_ID + '" and certificate leaf = H"' + certificate + '"';
-      const root = await privateFolder(join(options.data, 'computer-use'));
-      const locks = await privateFolder(join(root, 'coordination'));
-      const temporary = await privateFolder(join(root, 'temporary'));
-      const installed = await installHelper(bundle, root, async (checked) => {
-        await exec(
-          '/usr/bin/codesign',
-          ['--verify', '--strict', '--deep', '-R', '=' + requirement, checked],
-          {
-            timeout: 2_500,
-            maxBuffer: 4096,
-          },
-        );
+      // A status probe and the operating helper may start together. Prepare their shared bundle
+      // once, then give each process its own pipes.
+      preparing ??= prepare().finally(() => {
+        preparing = undefined;
       });
-      return launch(join(installed, executable), locks, temporary);
+      const { binary, locks, temporary } = await preparing;
+      return launch(binary, locks, temporary);
     },
     options.onGenerationEnded,
     options.onControl,

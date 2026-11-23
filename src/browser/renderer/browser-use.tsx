@@ -5,10 +5,11 @@ import { Menu } from '../../ui/renderer/menu';
 import { SettingGroup, SettingItem, SettingProblem } from '../../ui/renderer/setting-group';
 import type { ProfileSummary, SetupSnapshot } from '../../sessions/shared/automation';
 import { ChromeInstallHelp } from './chrome-install-help';
-import { chromeProfile, chromeState } from './chrome-state';
+import { chromeProfile, chromeState, type ChromeSetup } from './chrome-state';
 
 // Chrome setup connects a profile and guides the first local extension load.
 export interface ChromeSteps {
+  allowProfiles: () => Promise<ChromeSetup | null>;
   connect: (profileId: string) => Promise<boolean>;
   disconnect: (profileId: string) => Promise<boolean>;
   copyFolder?: (path: string) => Promise<void>;
@@ -67,7 +68,10 @@ function ChromeSetting({ chrome, steps }: { chrome: SetupSnapshot['chrome']; ste
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [choosing, setChoosing] = useState<{ x: number; y: number } | null>(null);
+  const [choosing, setChoosing] = useState<{
+    at: { x: number; y: number };
+    profiles: readonly ProfileSummary[];
+  } | null>(null);
   const run = (step: () => Promise<boolean>) => {
     setFailed(false);
     setRunning(true);
@@ -83,19 +87,36 @@ function ChromeSetting({ chrome, steps }: { chrome: SetupSnapshot['chrome']; ste
     );
   };
   const profile = chromeProfile(chrome);
-  const profiles = chrome.profiles ?? [];
   const state = chromeState(chrome, t);
   const connect = (chosen: ProfileSummary) => {
     run(() => steps.connect(chosen.id));
   };
-  const askProfile = (event: MouseEvent<HTMLButtonElement>) => {
+  const chooseProfile = (available: ChromeSetup, at: { x: number; y: number }) => {
+    if (chromeState(available, t) !== null) return;
+    const profiles = available.profiles ?? [];
     const [only] = profiles;
-    if (profiles.length === 1 && only !== undefined) {
-      connect(only);
+    if (profiles.length === 1 && only !== undefined) connect(only);
+    else if (profiles.length > 1) setChoosing({ at, profiles });
+  };
+  const askProfile = (event: MouseEvent<HTMLButtonElement>) => {
+    const { left, bottom } = event.currentTarget.getBoundingClientRect();
+    const at = { x: left, y: bottom + 4 };
+    if (!chrome.profileAccessRequired) {
+      chooseProfile(chrome, at);
       return;
     }
-    const { left, bottom } = event.currentTarget.getBoundingClientRect();
-    setChoosing({ x: left, y: bottom + 4 });
+    setFailed(false);
+    setRunning(true);
+    void steps.allowProfiles().then(
+      (available) => {
+        setRunning(false);
+        if (available !== null) chooseProfile(available, at);
+      },
+      () => {
+        setRunning(false);
+        setFailed(true);
+      },
+    );
   };
   return (
     <>
@@ -120,7 +141,7 @@ function ChromeSetting({ chrome, steps }: { chrome: SetupSnapshot['chrome']; ste
           state === null && (
             <Button
               label={t('browser.chrome.connect')}
-              disabled={running || profiles.length === 0}
+              disabled={running || (!chrome.profileAccessRequired && !chrome.profiles?.length)}
               onClick={askProfile}
             />
           )
@@ -136,11 +157,11 @@ function ChromeSetting({ chrome, steps }: { chrome: SetupSnapshot['chrome']; ste
       {failed && <SettingProblem text={t('browser.failed')} />}
       {choosing !== null && (
         <Menu
-          entries={profiles.map((entry) => ({ id: entry.id, label: entry.name }))}
-          at={choosing}
+          entries={choosing.profiles.map((entry) => ({ id: entry.id, label: entry.name }))}
+          at={choosing.at}
           onClose={(chosen) => {
             setChoosing(null);
-            const picked = profiles.find((entry) => entry.id === chosen);
+            const picked = choosing.profiles.find((entry) => entry.id === chosen);
             if (picked !== undefined) connect(picked);
           }}
         />
