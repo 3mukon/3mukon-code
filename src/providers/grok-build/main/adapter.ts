@@ -38,6 +38,7 @@ import {
   PRESENTATION_CONTEXT_URI,
 } from '../../../sessions/shared/host-context';
 import { inboxContext, INBOX_CONTEXT_URI } from '../../../sessions/shared/inbox';
+import { appCall, type McpCall } from '../../../sessions/shared/tools';
 import type {
   ApprovalAnswer,
   HistoryEntry,
@@ -65,7 +66,7 @@ import {
   type AskUserQuestionParams,
   type AskUserQuestionResult,
 } from './requests';
-import { currentChoices, modeIds, Translator } from './translate';
+import { currentChoices, grokServerName, modeIds, toolArguments, Translator } from './translate';
 import {
   completedTurn,
   INTERJECT,
@@ -91,13 +92,6 @@ const profiles: Record<SandboxLevel, string> = {
 // `grok agent stdio` at the level's profile, never through a shared leader process, and with Grok's own
 // plan mode off: the app's modes are auto and yolo (ADR-0006), and Grok asks to leave its plan mode
 // through an undocumented extension request.
-// The toolset's server as Grok knows it. Grok registers an MCP server's tools only if its name
-// starts with a letter or an underscore, and otherwise skips them all, while the toolset's name
-// starts with its 3; Grok gets the 3 as san, the Japanese word for three. The session's server, the
-// allow rules and the titles that route approvals and results all use this name.
-function grokServerName(name: string): string {
-  return name.replace(/^3/, 'san');
-}
 
 // A server name Grok admits, which an allow rule may also name.
 const GROK_SERVER_NAME = /^[A-Za-z_][A-Za-z0-9_-]*$/;
@@ -1136,6 +1130,7 @@ class GrokSession implements ProviderSession {
       update: ({ sessionId, update }) => {
         // Updates of other sessions, such as subagents', belong to those.
         if (!current() || sessionId !== this.sessionId) return;
+        let appTool: { id: string; call: McpCall } | undefined;
         if (
           !this.replaying &&
           (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update')
@@ -1148,6 +1143,13 @@ class GrokSession implements ProviderSession {
           const name = wrongKind
             ? undefined
             : this.resultTool(update.toolCallId, update.title, update._meta);
+          // One of the app's tools that Grok titles by its name alone, as its use_tool does.
+          if (name !== undefined && update.title === name) {
+            appTool = {
+              id: update.toolCallId,
+              call: appCall(name, toolArguments(update.rawInput)),
+            };
+          }
           if (name && (update.status === 'completed' || update.status === 'failed')) {
             const content = update.content?.flatMap((part) =>
               part.type === 'content' ? [part.content] : [],
@@ -1161,7 +1163,16 @@ class GrokSession implements ProviderSession {
           }
         }
         if (update.sessionUpdate === 'user_message_chunk' && !this.replaying) return;
-        for (const event of this.translator.update(update)) this.onEvent(event);
+        for (const event of this.translator.update(update)) {
+          this.onEvent(
+            appTool !== undefined &&
+              event.type === 'tool' &&
+              event.id === appTool.id &&
+              event.mcp === undefined
+              ? { ...event, mcp: appTool.call }
+              : event,
+          );
+        }
       },
       permission: (params, signal) =>
         current() ? this.askApproval(params, signal) : Promise.resolve(cancelledPermission),

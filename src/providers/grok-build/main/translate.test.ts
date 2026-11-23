@@ -92,6 +92,30 @@ describe('messages', () => {
 });
 
 describe('tool calls', () => {
+  it('names an MCP tool’s call by its server and tool, the app’s own by the name Grok knows it by, and no tool titled in words', () => {
+    const [app, other, own] = translate([
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 't1',
+        title: 'sanmukon-code__message_send',
+        kind: 'other',
+        rawInput: { to: 's2', summary: 'Done', body: 'x' },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 't2',
+        title: 'github__create_issue',
+        kind: 'other',
+      },
+      { sessionUpdate: 'tool_call', toolCallId: 't3', title: 'Read notes.md', kind: 'read' },
+    ]);
+    expect(app).toMatchObject({
+      mcp: { server: '3mukon-code', tool: 'message_send', app: true, subject: 'Done' },
+    });
+    expect(other).toMatchObject({ mcp: { server: 'github', tool: 'create_issue' } });
+    expect(own).not.toHaveProperty('mcp');
+  });
+
   it('shows a running call, then its status, command and output as they come', () => {
     expect(
       translate([

@@ -139,7 +139,39 @@
         "running": "运行中",
         "completed": "已完成",
         "failed": "失败"
-      }
+      },
+      "app": {
+        "session_list": "列出了会话",
+        "session_start": "启动了一个子会话",
+        "session_start_subject": "启动了子会话 {{subject}}",
+        "session_end": "结束了一个会话",
+        "message_send": "发送了一条消息",
+        "message_send_subject": "发送了一条消息：{{subject}}",
+        "message_read": "读取了一条消息",
+        "message_read_inbox": "查看了收件箱",
+        "panel_list": "列出了展示",
+        "panel_present": "展示了一个结果",
+        "panel_present_subject": "展示了 {{subject}}",
+        "panel_update": "更新了一个展示",
+        "panel_update_subject": "更新了 {{subject}}",
+        "panel_arrange": "排列了一个展示",
+        "panel_close": "关闭了一个展示",
+        "automation_capabilities": "检查了浏览器和电脑工具",
+        "browser_open": "打开了一个标签页",
+        "browser_navigate": "打开了一个页面",
+        "browser_navigate_subject": "打开了 {{subject}}",
+        "browser_snapshot": "读取了页面",
+        "browser_screenshot": "截取了页面的画面",
+        "browser_act": "操作了页面",
+        "browser_close": "关闭了一个标签页",
+        "computer_targets": "列出了正在运行的应用",
+        "computer_windows": "查找了应用的窗口",
+        "computer_select": "选择了一个应用",
+        "computer_observe": "查看了一个应用",
+        "computer_act": "在应用中进行了操作",
+        "computer_release": "停止使用一个应用"
+      },
+      "mcp": "{{server}} · {{tool}}"
     },
     "diff": {
       "notShown": "未显示的行：{{lines}}"

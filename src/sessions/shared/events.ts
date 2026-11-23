@@ -1,4 +1,5 @@
 import type { InboxNotice } from './inbox';
+import type { McpCall } from './tools';
 
 // The provider-neutral session model: the events a provider adapter reports, and the requests and
 // answers that pass between a session and the user. Everything here is plain JSON-serializable data,
@@ -180,6 +181,9 @@ export type SessionEvent =
       output?: string;
       // The images the call returned, such as an image file it read.
       images?: MessageImage[];
+      // For a call of an MCP tool, its server and tool in the terms every provider shares, which the
+      // activity names the call by in place of the provider's title.
+      mcp?: McpCall;
     }
   // Adds streamed output to the end of a tool call's output.
   | { type: 'tool-output'; id: string; text: string }

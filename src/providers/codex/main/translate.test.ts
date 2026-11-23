@@ -332,6 +332,46 @@ describe('Translator.live', () => {
   });
 });
 
+describe('MCP and dynamic tool calls', () => {
+  it('names an MCP tool’s call by its server and tool, the app’s own with what it acts on', () => {
+    const item = {
+      type: 'mcpToolCall',
+      id: 'm1',
+      server: '3mukon-code',
+      tool: 'panel_present',
+      status: 'inProgress',
+      arguments: { title: 'Benchmarks', reuseKey: 'b', version: 0, items: [] },
+      result: null,
+      error: null,
+    } as unknown as ThreadItem;
+    expect(new Translator(cwd).live('item/started', { ...turn, item })).toMatchObject([
+      {
+        type: 'tool',
+        id: 'm1',
+        title: '3mukon-code: panel_present',
+        mcp: { server: '3mukon-code', tool: 'panel_present', app: true, subject: 'Benchmarks' },
+      },
+    ]);
+  });
+
+  it('titles a dynamic tool’s call by its name in words', () => {
+    const item = {
+      type: 'dynamicToolCall',
+      id: 'd1',
+      namespace: null,
+      tool: 'view_image',
+      arguments: {},
+      status: 'inProgress',
+      contentItems: null,
+      success: null,
+      durationMs: null,
+    } as unknown as ThreadItem;
+    expect(new Translator(cwd).live('item/started', { ...turn, item })).toMatchObject([
+      { type: 'tool', id: 'd1', title: 'view image' },
+    ]);
+  });
+});
+
 describe('Translator.history', () => {
   it('replays the user’s messages and the rest as completed items', () => {
     const translator = new Translator(cwd);

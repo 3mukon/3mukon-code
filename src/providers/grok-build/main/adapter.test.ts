@@ -301,6 +301,16 @@ it.each([
     await session.send('Present the fixture');
     await fake().prompted();
     for (const update of useToolFixture('entry', name)) await fake().update(update);
+    // The activity names the call as the app's own tool, by the title it presents.
+    await until((events) =>
+      events.some(
+        (event) =>
+          event.type === 'tool' &&
+          event.mcp?.app === true &&
+          event.mcp.tool === 'panel_present' &&
+          event.mcp.subject === 'Fixture',
+      ),
+    );
     const receipt = { schemaVersion: 1, callId: 'synthetic-receipt' };
     await fake().update({
       sessionUpdate: 'tool_call_update',

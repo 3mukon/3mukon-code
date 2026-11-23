@@ -194,6 +194,50 @@ describe('Translator.live', () => {
     ]);
   });
 
+  it('names an MCP tool’s call by its server and tool, the app’s own with what it acts on', () => {
+    const tool = (name: string, input: Record<string, unknown>) =>
+      new Translator(cwd).live(assistant('u1', [{ type: 'tool_use', id: 't1', name, input }]))[0];
+    expect(
+      tool('mcp__3mukon-code__message_send', { to: 's2', summary: 'Done', body: 'x' }),
+    ).toEqual({
+      type: 'tool',
+      id: 't1',
+      kind: 'other',
+      status: 'running',
+      title: 'mcp__3mukon-code__message_send',
+      mcp: {
+        server: '3mukon-code',
+        tool: 'message_send',
+        app: true,
+        subject: 'Done',
+      },
+    });
+    expect(tool('mcp__github__create_issue', { title: 'Bug' })).toMatchObject({
+      mcp: { server: 'github', tool: 'create_issue' },
+    });
+  });
+
+  it('titles a subagent by its task, other tools by what they act on, and the rest by their names in words', () => {
+    const title = (name: string, input: Record<string, unknown>) =>
+      (
+        new Translator(cwd).live(
+          assistant('u1', [{ type: 'tool_use', id: 't1', name, input }]),
+        )[0] as {
+          title?: string;
+        }
+      ).title;
+    expect(title('Agent', { description: 'Find the flaky test', prompt: 'x' })).toBe(
+      'Find the flaky test',
+    );
+    expect(title('Skill', { skill: 'pdf' })).toBe('pdf');
+    expect(title('ToolSearch', { query: 'select:Monitor' })).toBe('select:Monitor');
+    expect(title('Monitor', { description: 'Watch the build', timeout_ms: 1 })).toBe(
+      'Watch the build',
+    );
+    expect(title('EnterWorktree', {})).toBe('Enter worktree');
+    expect(title('CronCreate', {})).toBe('Cron create');
+  });
+
   it('completes a tool call with its output, or fails it', () => {
     const translator = new Translator(cwd);
     translator.live(

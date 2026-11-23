@@ -19,6 +19,7 @@ import type {
   ToolStatus,
 } from '../../../sessions/shared/events';
 import { INBOX_CONTEXT_URI, inboxNoticesOf } from '../../../sessions/shared/inbox';
+import { mcpCall, TOOLSET_NAME, type McpCall } from '../../../sessions/shared/tools';
 import { displayPath, fileChange } from './patch';
 
 // Tool output is kept to this many characters, so that long command output stays cheap to hold.
@@ -143,6 +144,7 @@ export class Translator {
     };
     this.calls.set(id, call);
     const status = toolStatus(update.status) ?? (started ? 'running' : undefined);
+    const mcp = update.title == null ? undefined : mcpOfTitle(update.title, update.rawInput);
     const command = commandOf(update.rawInput);
     const output = outputOf(content);
     const images = imagesOf(content);
@@ -157,6 +159,7 @@ export class Translator {
         ...(paths.length === 0 ? {} : { paths: call.paths }),
         ...(output === undefined ? {} : { output }),
         ...(images.length === 0 ? {} : { images }),
+        ...(mcp === undefined ? {} : { mcp }),
       },
     ];
     if (status === 'completed') {
@@ -251,4 +254,28 @@ function inboxOf(content: Extract<ContentBlock, { type: 'resource' }>): SessionE
   if (resource.uri !== INBOX_CONTEXT_URI || !('text' in resource)) return [];
   const notices = inboxNoticesOf(resource.text);
   return notices === undefined || notices.length === 0 ? [] : [{ type: 'inbox', notices }];
+}
+
+// The toolset's server as Grok knows it. Grok registers an MCP server's tools only if its name
+// starts with a letter or an underscore, and otherwise skips them all, while the toolset's name
+// starts with its 3; Grok gets the 3 as san, the Japanese word for three. The session's server, the
+// allow rules and the titles that route approvals and results all use this name.
+export function grokServerName(name: string): string {
+  return name.replace(/^3/, 'san');
+}
+
+// A tool call's title as an MCP call where Grok titles one <server>__<tool>, the app's own toolset by
+// the name Grok knows it by; undefined for a title in words, as Grok titles its own tools.
+function mcpOfTitle(title: string, input: unknown): McpCall | undefined {
+  const match = /^([A-Za-z_][\w-]*)__([\w.-]+)$/.exec(title);
+  if (match?.[1] === undefined || match[2] === undefined) return undefined;
+  const server = match[1] === grokServerName(TOOLSET_NAME) ? TOOLSET_NAME : match[1];
+  return mcpCall(server, match[2], toolArguments(input));
+}
+
+// A call's own arguments: those Grok's use_tool passes on as its tool_input, or else its input.
+export function toolArguments(input: unknown): unknown {
+  if (typeof input !== 'object' || input === null) return input;
+  const { tool_name: name, tool_input: args } = input as Record<string, unknown>;
+  return typeof name === 'string' && typeof args === 'object' && args !== null ? args : input;
 }

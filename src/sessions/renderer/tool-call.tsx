@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { Fragment, useId, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Brain,
@@ -16,6 +16,7 @@ import {
 import { Tag } from '../../ui/renderer/tag';
 import type { FileChange, ToolKind, ToolStatus } from '../shared/events';
 import type { ToolItem } from '../shared/session-state';
+import { toolWords, type McpCall } from '../shared/tools';
 import { DiffView, linesChanged } from './diff-view';
 import { Images } from './images';
 
@@ -56,7 +57,8 @@ export function ToolCall({ item }: { item: ToolItem }) {
   const { t } = useTranslation();
   const kind = t(`sessions.tool.kind.${item.kind}`);
   const only = item.changes.length === 1 ? item.changes[0] : undefined;
-  let title = item.title === '' ? (item.command ?? kind) : item.title;
+  let title: ReactNode = item.title === '' ? (item.command ?? kind) : item.title;
+  if (item.mcp !== undefined) title = <McpTitle call={item.mcp} />;
   if (only !== undefined) title = changedPath(only);
   const command = item.command === title ? undefined : item.command;
   let body: ReactNode;
@@ -84,6 +86,36 @@ export function ToolCall({ item }: { item: ToolItem }) {
       {...(item.changes.length === 0 ? {} : { counts: countAll(item.changes) })}
       body={body}
     />
+  );
+}
+
+// Where a label's subject goes, which no translation holds.
+const SUBJECT = '\u0001';
+
+// A call of an MCP tool by what it did, rather than by the name its provider gives it: one of the
+// app's own tools in the app's words, with what it acted on in its place in them, apart in small
+// type, such as Sent a message: Tests pass; another server's tool by the server and the tool's name
+// in words, such as github · create issue.
+function McpTitle({ call }: { call: McpCall }) {
+  const { t, i18n } = useTranslation();
+  if (call.app !== true) {
+    return <>{t('sessions.tool.mcp', { server: call.server, tool: toolWords(call.tool) })}</>;
+  }
+  const key = `sessions.tool.app.${call.action ?? call.tool}`;
+  const about = `${key}_subject`;
+  if (call.subject === undefined || !i18n.exists(about)) {
+    return <>{t(key, { defaultValue: toolWords(call.tool) })}</>;
+  }
+  const parts = t(about, { subject: SUBJECT, defaultValue: SUBJECT }).split(SUBJECT);
+  return (
+    <>
+      {parts.map((part, index) => (
+        <Fragment key={index}>
+          {index > 0 && <span className="text-[12px]">{call.subject}</span>}
+          {part}
+        </Fragment>
+      ))}
+    </>
   );
 }
 

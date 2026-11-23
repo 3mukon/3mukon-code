@@ -1,5 +1,6 @@
 import type { SDKMessage, SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import { inboxNoticesOf } from '../../../sessions/shared/inbox';
+import { mcpCall, toolWords, type McpCall } from '../../../sessions/shared/tools';
 import type {
   FileChange,
   MessageImage,
@@ -95,10 +96,33 @@ export function describeTool(
     case 'WebFetch':
       return { title: str(input.url) };
     case 'WebSearch':
+    case 'ToolSearch':
       return { title: str(input.query) };
+    // A subagent, by the few words that say its task.
+    case 'Agent':
+    case 'Task':
+      return { title: str(input.description) || toolWords(name) };
+    case 'Monitor':
+      return { title: str(input.description) || str(input.command) || toolWords(name) };
+    case 'Skill':
+      return { title: str(input.skill) || toolWords(name) };
+    case 'ReadMcpResource':
+      return { title: str(input.uri) || toolWords(name) };
+    case 'ListMcpResources':
+      return { title: str(input.server) || toolWords(name) };
+    // Any other tool by its name in words, such as Enter plan mode for EnterPlanMode.
     default:
-      return { title: name };
+      return { title: toolWords(name) };
   }
+}
+
+// An MCP tool's call, which Claude Code names mcp__<server>__<tool>, in the terms every provider
+// shares; undefined for any other tool.
+export function mcpOf(name: string, input: Record<string, unknown>): McpCall | undefined {
+  const match = /^mcp__(.+?)__(.+)$/.exec(name);
+  return match?.[1] === undefined || match[2] === undefined
+    ? undefined
+    : mcpCall(match[1], match[2], input);
 }
 
 // Translates what the Claude Agent SDK reports, live or from a session's transcript, into session
@@ -235,13 +259,14 @@ export class Translator {
     this.tools.set(id, { name, input });
     if (TASK_TOOLS.has(name)) return this.taskCall(id, name, input);
     if (HIDDEN_TOOLS.has(name)) return [];
+    const mcp = mcpOf(name, input);
     return [
       {
         type: 'tool',
         id,
         kind: TOOL_KINDS[name] ?? 'other',
         status: 'running',
-        ...describeTool(name, input, this.cwd),
+        ...(mcp === undefined ? describeTool(name, input, this.cwd) : { title: name, mcp }),
       },
     ];
   }

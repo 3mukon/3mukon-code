@@ -21,8 +21,9 @@ import type { HostApproval } from '../../sessions/shared/automation';
 import { AutomationBroker, type BrokerAccess } from './broker';
 import { MAX_ARGUMENT_BYTES, type AutomationTool } from './execution';
 import { sessionTools } from './session-tools';
+import { TOOLSET_NAME } from '../../sessions/shared/tools';
 
-export const TOOLSET_NAME = '3mukon-code';
+export { TOOLSET_NAME } from '../../sessions/shared/tools';
 // How long the providers are told to wait on one of the toolset's calls: a day, which an approval
 // waiting for the user's answer needs and the backends' own deadlines never come near.
 export const TOOLSET_CALL_TIMEOUT_MS = 24 * 60 * 60_000;

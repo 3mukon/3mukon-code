@@ -16,6 +16,7 @@ import type {
   ToolStatus,
 } from './events';
 import type { InboxNotice } from './inbox';
+import type { McpCall } from './tools';
 
 export type SessionStatus = 'idle' | 'running' | 'waiting' | 'closed';
 
@@ -31,6 +32,8 @@ export interface ToolItem {
   // The files the call changed, in the order it reported them.
   changes: FileChange[];
   images?: MessageImage[];
+  // For a call of an MCP tool, its server and tool, by which the activity names it.
+  mcp?: McpCall;
 }
 
 export type TimelineItem =
@@ -180,6 +183,7 @@ function fold(state: SessionState, event: SessionEvent): SessionState {
       const command = event.command ?? base.command;
       const paths = event.paths ?? base.paths;
       const images = event.images ?? base.images;
+      const mcp = event.mcp ?? base.mcp;
       return put(state, index, {
         type: 'tool',
         id: event.id,
@@ -191,6 +195,7 @@ function fold(state: SessionState, event: SessionEvent): SessionState {
         ...(command === undefined ? {} : { command }),
         ...(paths === undefined ? {} : { paths }),
         ...withImages(images),
+        ...(mcp === undefined ? {} : { mcp }),
       });
     }
     case 'tool-output': {

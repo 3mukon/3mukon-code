@@ -141,7 +141,39 @@
         "running": "Running",
         "completed": "Done",
         "failed": "Failed"
-      }
+      },
+      "app": {
+        "session_list": "Listed the sessions",
+        "session_start": "Started a child session",
+        "session_start_subject": "Started child session {{subject}}",
+        "session_end": "Ended a session",
+        "message_send": "Sent a message",
+        "message_send_subject": "Sent a message: {{subject}}",
+        "message_read": "Read a message",
+        "message_read_inbox": "Read the inbox",
+        "panel_list": "Listed the presentations",
+        "panel_present": "Presented a result",
+        "panel_present_subject": "Presented {{subject}}",
+        "panel_update": "Updated a presentation",
+        "panel_update_subject": "Updated {{subject}}",
+        "panel_arrange": "Arranged a presentation",
+        "panel_close": "Closed a presentation",
+        "automation_capabilities": "Checked the browser and computer tools",
+        "browser_open": "Opened a tab",
+        "browser_navigate": "Opened a page",
+        "browser_navigate_subject": "Opened {{subject}}",
+        "browser_snapshot": "Read the page",
+        "browser_screenshot": "Took a screenshot of the page",
+        "browser_act": "Acted on the page",
+        "browser_close": "Closed a tab",
+        "computer_targets": "Listed the running apps",
+        "computer_windows": "Looked for an app’s windows",
+        "computer_select": "Chose an app",
+        "computer_observe": "Looked at an app",
+        "computer_act": "Acted in an app",
+        "computer_release": "Stopped using an app"
+      },
+      "mcp": "{{server}} · {{tool}}"
     },
     "diff": {
       "notShown": "Lines not shown: {{lines}}"

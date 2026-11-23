@@ -149,6 +149,69 @@ describe('ToolCall', () => {
   });
 });
 
+describe('ToolCall’s MCP calls', () => {
+  // The line's words, which the title's span holds.
+  const line = () => document.querySelector('.truncate')?.textContent;
+
+  it('names a call of the app’s own tools in the app’s words, with what it acted on, never by the provider’s name for it', () => {
+    const { rerender } = render(
+      <ToolCall
+        item={tool({
+          title: 'mcp__3mukon-code__message_send',
+          output: 'Sent to Lead (s1): Tests pass',
+          mcp: {
+            server: '3mukon-code',
+            tool: 'message_send',
+            app: true,
+            subject: 'Tests pass',
+          },
+        })}
+      />,
+    );
+    expect(line()).toBe('Sent a message: Tests pass');
+    expect(screen.getByText('Tests pass').className).toContain('text-[12px]');
+    expect(screen.queryByText(/mcp__/)).toBeNull();
+    // Opened, the entry shows what the tool answered.
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText('Sent to Lead (s1): Tests pass')).toBeDefined();
+    rerender(
+      <ToolCall
+        item={tool({
+          title: '3mukon-code: message_read',
+          mcp: {
+            server: '3mukon-code',
+            tool: 'message_read',
+            app: true,
+            action: 'message_read_inbox',
+          },
+        })}
+      />,
+    );
+    expect(line()).toBe('Read the inbox');
+    rerender(
+      <ToolCall
+        item={tool({
+          title: 'sanmukon-code__a_tool_to_come',
+          mcp: { server: '3mukon-code', tool: 'a_tool_to_come', app: true },
+        })}
+      />,
+    );
+    expect(line()).toBe('a tool to come');
+  });
+
+  it('names another server’s tool by the server and the tool’s name in words', () => {
+    render(
+      <ToolCall
+        item={tool({
+          title: 'mcp__github__create_issue',
+          mcp: { server: 'github', tool: 'create_issue' },
+        })}
+      />,
+    );
+    expect(line()).toBe('github · create issue');
+  });
+});
+
 describe('FileChangeEntry', () => {
   it('shows a change no tool call made as an entry of its own, which opens on its diff', () => {
     render(<FileChangeEntry change={change('src/a.ts', edit)} />);

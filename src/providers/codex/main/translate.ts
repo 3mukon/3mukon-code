@@ -189,6 +189,7 @@ export class Translator {
             id: item.id,
             kind: 'other',
             title: `${item.server}: ${item.tool}`,
+            mcp: mcpCall(item.server, item.tool, item.arguments),
             status: completed ? itemStatus(item.status) : 'running',
             ...(completed ? { output: mcpOutput(item.result, item.error) } : {}),
             ...(images.length === 0 ? {} : { images }),
@@ -208,7 +209,7 @@ export class Translator {
             type: 'tool',
             id: item.id,
             kind: 'other',
-            title: item.tool,
+            title: toolWords(item.tool),
             status: completed ? (item.success === false ? 'failed' : 'completed') : 'running',
           },
         ];
@@ -467,3 +468,4 @@ function mcpOutput(result: McpToolCallResult | null, error: McpToolCallError | n
 }
 import { PRESENTATION_CONTEXT } from '../../../sessions/shared/host-context';
 import { INBOX_CONTEXT, inboxNoticesOf } from '../../../sessions/shared/inbox';
+import { mcpCall, toolWords } from '../../../sessions/shared/tools';

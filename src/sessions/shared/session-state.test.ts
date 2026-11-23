@@ -465,3 +465,14 @@ describe('sessionStatus and openRequests', () => {
     ).toBe(state);
   });
 });
+
+describe('an MCP tool’s call', () => {
+  it('keeps the server and tool it was named by as its later updates leave them out', () => {
+    const mcp = { server: '3mukon-code', tool: 'session_list', app: true as const };
+    const state = [
+      { type: 'tool', id: 't1', kind: 'other', title: 'mcp__3mukon-code__session_list', mcp },
+      { type: 'tool', id: 't1', status: 'completed', output: 'lead: Lead' },
+    ].reduce((folded, event) => applyEvent(folded, event as SessionEvent), initialSessionState());
+    expect(state.timeline).toMatchObject([{ type: 'tool', id: 't1', status: 'completed', mcp }]);
+  });
+});
