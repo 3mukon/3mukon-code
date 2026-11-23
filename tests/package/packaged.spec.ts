@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
@@ -6,6 +6,13 @@ import { isolatedEnvironment } from '../smoke/app';
 
 // The packaged app, as scripts/package.sh builds it.
 const executable = join('dist', 'mac-arm64', '3mukon-code.app', 'Contents', 'MacOS', '3mukon-code');
+
+test('the packaged app names its Chrome extension’s build', () => {
+  const extension = join(executable, '..', '..', 'Resources', 'chrome-connector', 'extension');
+  expect(readFileSync(join(extension, 'build.js'), 'utf8')).toMatch(
+    /^export const build = '[a-f0-9]{16}';\n$/,
+  );
+});
 
 test('the packaged app starts, and runs each provider’s binary and a terminal from outside its archive', async () => {
   const data = mkdtempSync(join(tmpdir(), '3mukon-code-packaged-'));

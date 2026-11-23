@@ -1,26 +1,15 @@
 import { execFile, spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import {
-  chmod,
-  copyFile,
-  cp,
-  lstat,
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { chromeConnector, extensionBuild } from './chrome-connector';
 import { waitForLocalChromeExtension } from './chrome-local-setup';
 import { ChromeProfileConnection } from './chrome-profile';
 import { installedChrome, supportsChrome } from './chrome-version';
 
 const exec = promisify(execFile);
-const nativeHost = 'io.github.sanmukon.browser';
 const extensionId = z.string().regex(/^[a-p]{32}$/);
 const connectorDescriptor = z.strictObject({ extensionId });
 const profileDirectory = /^(Default|Profile [1-9][0-9]{0,3})$/;
@@ -61,7 +50,8 @@ export async function stagedChromeConnection(
     );
     const host = await lstat(hostExecutable);
     if (!host.isFile() || !(host.mode & 0o100)) return;
-    if (!(await lstat(bundledExtension)).isDirectory()) return;
+    const build = await extensionBuild(bundledExtension);
+    if (build === undefined) return;
     const browser = await installedChrome();
     if (!browser || !supportsChrome(browser.version)) return;
     return chromeProfileConnection({
@@ -72,6 +62,7 @@ export async function stagedChromeConnection(
       hostExecutable,
       extensionId,
       bundledExtension,
+      build,
     });
   } catch {
     return undefined;
@@ -87,20 +78,16 @@ export function chromeProfileConnection(setup: {
   hostExecutable: string;
   extensionId: string;
   bundledExtension: string;
+  build: string;
 }): ChromeProfileConnection {
   const id = extensionId.parse(setup.extensionId);
-  const origin = 'chrome-extension://' + id;
   const directory = join(setup.appData, 'chrome-link');
-  const installedHost = join(directory, 'BrowserHost');
-  const localExtension = join(directory, 'extension');
-  const manifests = join(setup.browserData, 'NativeMessagingHosts');
-  const manifestPath = join(manifests, nativeHost + '.json');
-  const manifest = JSON.stringify({
-    name: nativeHost,
-    description: 'The 3mukon-code Chrome browser connector',
-    path: installedHost,
-    type: 'stdio',
-    allowed_origins: [origin + '/'],
+  const connector = chromeConnector({
+    directory,
+    browserData: setup.browserData,
+    hostExecutable: setup.hostExecutable,
+    bundledExtension: setup.bundledExtension,
+    extensionId: id,
   });
   const openInProfile = (profile: string, address: string, signal: AbortSignal) => {
     signal.throwIfAborted();
@@ -118,67 +105,23 @@ export function chromeProfileConnection(setup: {
     });
   };
   return new ChromeProfileConnection(directory, {
+    build: setup.build,
     profiles: () => chromeProfileNames(setup.browserData),
-    async prepareHost() {
-      const host = await lstat(setup.hostExecutable);
-      if (!host.isFile() || !(host.mode & 0o100)) throw new Error('Browser host is unavailable.');
-      await keepExtensionFolder(setup.bundledExtension, localExtension);
-      await mkdir(manifests, { recursive: true });
-      const existing = await lstat(manifestPath).catch((error: unknown) => {
-        if ((error as NodeJS.ErrnoException | null)?.code !== 'ENOENT') throw error;
-      });
-      if (
-        existing &&
-        (!existing.isFile() ||
-          existing.uid !== process.getuid?.() ||
-          existing.size > 4096 ||
-          (await readFile(manifestPath, 'utf8')) !== manifest)
-      )
-        throw new Error('A different browser host is registered.');
-
-      const staging = installedHost + '.' + randomUUID();
-      try {
-        await copyFile(setup.hostExecutable, staging);
-        await chmod(staging, 0o700);
-        await rename(staging, installedHost);
-      } finally {
-        await rm(staging, { force: true });
-      }
-      if (!existing) await writeFile(manifestPath, manifest, { flag: 'wx', mode: 0o600 });
-    },
+    install: () => connector.install(),
+    renew: () => connector.renew(),
     async openSetup(profile, ticket, signal, install) {
       await waitForLocalChromeExtension(
-        id,
+        { id, build: setup.build },
         (url) => openInProfile(profile, url, signal),
         () => {
-          install(localExtension);
+          install(connector.extension);
         },
         signal,
       );
-      await openInProfile(profile, origin + '/pair.html#' + ticket, signal);
+      await openInProfile(profile, `chrome-extension://${id}/pair.html#${ticket}`, signal);
     },
     async activate() {
       await exec('/usr/bin/open', ['-a', setup.browserBundle], { timeout: 3000 });
     },
   });
-}
-
-// Chrome remembers the folder selected at Load unpacked. Keep its path in app data
-// so a moved app bundle or a process restart does not change that registration.
-async function keepExtensionFolder(source: string, destination: string): Promise<void> {
-  const existing = await lstat(destination).catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException | null)?.code !== 'ENOENT') throw error;
-  });
-  if (existing) {
-    if (!existing.isDirectory() || existing.uid !== process.getuid?.())
-      throw new Error('The Chrome extension folder is unavailable.');
-    return;
-  }
-  const stage = destination + '.' + randomUUID();
-  try {
-    await cp(source, stage, { recursive: true, force: false, errorOnExist: true });
-    await rename(stage, destination);
-  } finally {
-    await rm(stage, { recursive: true, force: true });
-  }
 }

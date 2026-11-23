@@ -4,10 +4,11 @@ import { z } from 'zod';
 const maxFrame = 1024 * 1024;
 const commandTimeout = 7500;
 const proof = z.string().regex(/^[a-f0-9]{64}$/);
+const build = z.string().regex(/^[a-z0-9]{1,64}$/);
 const tabId = z.int().positive();
 const message = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('pair'), ticket: proof }),
-  z.strictObject({ kind: z.literal('restore'), proof }),
+  z.strictObject({ kind: z.literal('pair'), ticket: proof, build }),
+  z.strictObject({ kind: z.literal('restore'), proof, build }),
   z.strictObject({ kind: z.literal('pair-saved') }),
   z.strictObject({
     kind: z.literal('reply'),

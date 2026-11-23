@@ -4,10 +4,22 @@ import { createServer } from 'node:http';
 
 export const CHROME_SETUP_TIMEOUT_MS = 5 * 60_000;
 
-// This page checks for the connector in the Chrome profile that opened it.
-// Browser authority stays in the separate native pairing exchange.
+// How often the page asks for the extension, and how many answers in a row must fail before setup
+// says that it is missing. An extension of another build reloads itself when asked, and meanwhile
+// does not answer.
+const ASK_MS = 500;
+const MISSING_AFTER = 4;
+
+interface Extension {
+  id: string;
+  build: string;
+}
+
+// This page checks for the connector in the Chrome profile that opened it: the extension of this
+// app's build, since an earlier one could not pair. Browser authority stays in the separate native
+// pairing exchange.
 export async function waitForLocalChromeExtension(
-  extensionId: string,
+  extension: Extension,
   open: (url: string) => Promise<void>,
   onMissing: () => void,
   signal: AbortSignal,
@@ -38,7 +50,7 @@ export async function waitForLocalChromeExtension(
     if (request.method === 'GET' && request.url === path + '/probe.js') {
       response
         .writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' })
-        .end(probe(extensionId));
+        .end(probe(extension));
       return;
     }
     if (request.method === 'POST' && request.headers.origin === origin) {
@@ -82,24 +94,27 @@ export async function waitForLocalChromeExtension(
   }
 }
 
-function probe(extensionId: string): string {
+function probe({ id, build }: Extension): string {
   return `
-const extensionId = ${JSON.stringify(extensionId)};
+const extensionId = ${JSON.stringify(id)};
+const build = ${JSON.stringify(build)};
 const expiresAt = Date.now() + ${String(CHROME_SETUP_TIMEOUT_MS)};
+let failed = 0;
 let reportedMissing = false;
 function report(installed) {
-  if (installed || !reportedMissing) {
+  failed = installed ? 0 : failed + 1;
+  if (installed || (failed >= ${String(MISSING_AFTER)} && !reportedMissing)) {
     fetch(location.pathname + (installed ? '/ready' : '/missing'), { method: 'POST' })
       .then((response) => {
         if (installed && response.ok) {
           document.querySelector('p').textContent = 'Connector found. Return to 3mukon-code.';
           window.close();
-        } else if (installed) setTimeout(check, 500);
+        } else if (installed) setTimeout(check, ${String(ASK_MS)});
         else reportedMissing = response.ok;
       })
-      .catch(() => { if (installed) setTimeout(check, 500); });
+      .catch(() => { if (installed) setTimeout(check, ${String(ASK_MS)}); });
   }
-  if (!installed) setTimeout(check, 500);
+  if (!installed) setTimeout(check, ${String(ASK_MS)});
 }
 function check() {
   if (Date.now() >= expiresAt) {
@@ -114,7 +129,7 @@ function check() {
   try {
     runtime.sendMessage(extensionId, { kind: 'connector-available' }, (result) => {
       void runtime.lastError;
-      report(result === true);
+      report(result === build);
     });
   } catch {
     report(false);

@@ -29,8 +29,12 @@ interface Pairing {
 }
 
 export interface ChromeProfilePorts {
+  // The build of the extension the app carries, the only one it works with.
+  build: string;
   profiles(): Promise<ProfileSummary[]>;
-  prepareHost(): Promise<void>;
+  // Installs the host and the extension for Chrome, or renews what is installed of them.
+  install(): Promise<void>;
+  renew(): Promise<void>;
   openSetup(
     profile: string,
     ticket: string,
@@ -55,6 +59,7 @@ export class ChromeProfileConnection {
   private active?: ChromeNativePeer;
   private pairing?: Pairing;
   private binding?: Promise<void>;
+  private readonly renewed: Promise<void>;
   private closed = false;
 
   constructor(
@@ -68,10 +73,16 @@ export class ChromeProfileConnection {
     } catch {
       // An absent or unreadable link cannot authorize a browser.
     }
+    // Before Chrome can connect, so that an extension of an earlier build finds its folder renewed.
+    this.renewed = this.ports.renew().catch((error: unknown) => {
+      console.error('Chrome’s connector could not be renewed:', error);
+    });
     if (this.saved)
-      void this.listen().catch(() => {
-        this.publish();
-      });
+      void this.renewed
+        .then(() => this.listen())
+        .catch(() => {
+          this.publish();
+        });
   }
 
   profile(): ProfileSummary | null {
@@ -124,9 +135,10 @@ export class ChromeProfileConnection {
     }, CHROME_SETUP_TIMEOUT_MS);
     this.publish();
     try {
+      await this.renewed;
       await this.listen();
       if (this.pairing !== pairing) return await result.promise;
-      await this.ports.prepareHost();
+      await this.ports.install();
       if (this.pairing !== pairing) return await result.promise;
       await this.ports.openSetup(
         profile.id,
@@ -218,6 +230,11 @@ export class ChromeProfileConnection {
   }
 
   private handshake(peer: ChromeNativePeer, event: ChromeNativeHandshake): void {
+    // An extension of another build reloads itself from its folder and connects again.
+    if (event.kind !== 'pair-saved' && event.build !== this.ports.build) {
+      peer.close();
+      return;
+    }
     const pairing = this.pairing;
     if (event.kind === 'pair' && pairing && !pairing.peer && event.ticket === pairing.ticket) {
       pairing.peer = peer;

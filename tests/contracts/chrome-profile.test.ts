@@ -22,6 +22,7 @@ vi.mock('electron', () => ({
 }));
 
 const name = { id: 'Profile 3', name: 'Synthetic Work' };
+const build = 'fixture1';
 
 function nativeBrowser(folder: string) {
   const socket = createConnection(join(folder, 'channel'));
@@ -59,7 +60,9 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
   const setup = Promise.withResolvers<string>();
   const ports = {
     profiles: vi.fn(() => Promise.resolve([name])),
-    prepareHost: vi.fn(() => Promise.resolve()),
+    build,
+    install: vi.fn(() => Promise.resolve()),
+    renew: vi.fn(() => Promise.resolve()),
     openSetup: vi.fn((_id: string, ticket: string) => {
       setup.resolve(ticket);
       return Promise.resolve();
@@ -84,13 +87,13 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
     );
     const wrong = nativeBrowser(folder);
     sockets.push(wrong.socket);
-    wrong.send({ kind: 'pair', ticket: randomBytes(32).toString('hex') });
+    wrong.send({ kind: 'pair', ticket: randomBytes(32).toString('hex'), build });
     await wrong.closed;
     expect(app.profile()).toBeNull();
 
     const browser = nativeBrowser(folder);
     sockets.push(browser.socket);
-    browser.send({ kind: 'pair', ticket });
+    browser.send({ kind: 'pair', ticket, build });
     const offer = (await browser.next()) as { kind: string; proof: string };
     expect(offer.kind).toBe('paired');
     browser.send({ kind: 'pair-saved' });
@@ -117,7 +120,7 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
     });
     const restored = nativeBrowser(folder);
     sockets.push(restored.socket);
-    restored.send({ kind: 'restore', proof: offer.proof });
+    restored.send({ kind: 'restore', proof: offer.proof, build });
     expect(await restored.next()).toEqual({ kind: 'ready' });
     expect(app.profile()).toEqual(name);
     expect(ports.openSetup).toHaveBeenCalledOnce();
@@ -129,7 +132,7 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
     expect(await ended).toEqual({ status: 'verified', value: null });
     const revoked = nativeBrowser(folder);
     sockets.push(revoked.socket);
-    revoked.send({ kind: 'restore', proof: offer.proof });
+    revoked.send({ kind: 'restore', proof: offer.proof, build });
     await revoked.closed;
     expect(app.rememberedProfile()).toBeNull();
   } finally {
@@ -181,11 +184,13 @@ it('waits for the local extension in the selected profile before opening its pai
     hostExecutable,
     extensionId,
     bundledExtension,
+    build,
   });
   try {
     await mkdir(browserData);
     await mkdir(bundledExtension);
     await writeFile(join(bundledExtension, 'manifest.json'), '{}');
+    await writeFile(join(bundledExtension, 'build.js'), `export const build = '${build}';\n`);
     await writeFile(
       join(browserData, 'Local State'),
       JSON.stringify({ profile: { info_cache: { [name.id]: { name: name.name } } } }),
@@ -196,13 +201,15 @@ it('waits for the local extension in the selected profile before opening its pai
       '#!/bin/sh\nprintf "%s|%s\\n" "$2" "${3%%#*}" >> "$CHROME_TRACE"\n',
       { mode: 0o700 },
     );
+    // A program starts in its own time on a busy Mac.
+    const soon = { timeout: 5_000 };
     const connection = app.connect(name.id);
     let setupUrl = '';
     await vi.waitFor(async () => {
       const output = await launches();
       expect(output.startsWith(`${selector}|http://127.0.0.1:`)).toBe(true);
       setupUrl = output.trim().split('|')[1] ?? '';
-    });
+    }, soon);
     const report = (status: string, origin = new URL(setupUrl).origin) =>
       fetch(setupUrl + '/' + status, { method: 'POST', headers: { origin } });
     expect((await report('ready', 'http://localhost')).status).toBe(404);
@@ -211,12 +218,12 @@ it('waits for the local extension in the selected profile before opening its pai
     await vi.waitFor(async () => {
       expect(await launches()).toBe(setupLines);
       expect(app.extensionFolder()).toBe(extensionFolder);
-    });
+    }, soon);
     expect(await readFile(join(extensionFolder, 'manifest.json'), 'utf8')).toBe('{}');
     expect((await report('ready')).status).toBe(204);
     await vi.waitFor(async () => {
       expect(await launches()).toBe(setupLines + pairLine);
-    });
+    }, soon);
     expect(app.profile()).toBeNull();
     app.close();
     expect(await connection).toMatchObject({ status: 'refused' });
@@ -235,7 +242,7 @@ it('skips Chrome extension settings when the chosen profile already answers the 
   });
   const missing = vi.fn();
   await waitForLocalChromeExtension(
-    'abcdefghijklmnopabcdefghijklmnop',
+    { id: 'abcdefghijklmnopabcdefghijklmnop', build },
     open,
     missing,
     controller.signal,
@@ -365,7 +372,9 @@ it('asks before the first use of a task tab in the connected profile, opens it o
   const ticket = Promise.withResolvers<string>();
   const ports = {
     profiles: vi.fn(() => Promise.resolve([name])),
-    prepareHost: vi.fn(() => Promise.resolve()),
+    build,
+    install: vi.fn(() => Promise.resolve()),
+    renew: vi.fn(() => Promise.resolve()),
     openSetup: vi.fn((_id: string, value: string) => {
       ticket.resolve(value);
       return Promise.resolve();
@@ -444,7 +453,7 @@ it('asks before the first use of a task tab in the connected profile, opens it o
     const invitation = await ticket.promise;
     const chrome = taskExtension(folder, answer);
     extension.current = chrome;
-    chrome.send({ kind: 'pair', ticket: invitation });
+    chrome.send({ kind: 'pair', ticket: invitation, build });
     await vi.waitFor(() => {
       expect(chrome.received).toContainEqual(expect.objectContaining({ kind: 'paired' }));
     });

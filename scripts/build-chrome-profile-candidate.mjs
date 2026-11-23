@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 import { promisify } from 'node:util';
+import { stampExtension } from './stamp-chrome-extension.mjs';
 
 const exec = promisify(run);
 const root = fileURLToPath(new URL('../src/browser/native/chrome/', import.meta.url));
@@ -29,6 +30,7 @@ await exec('/usr/bin/codesign', ['--force', '--sign', '-', host]);
 await exec('/usr/bin/codesign', ['--verify', '--strict', host]);
 const extension = join(stage, 'extension');
 await cp(join(root, 'extension'), extension, { recursive: true });
+await stampExtension(extension);
 const manifest = JSON.parse(await readFile(join(extension, 'manifest.json'), 'utf8'));
 const hash = createHash('sha256').update(Buffer.from(manifest.key, 'base64')).digest('hex');
 const extensionId = [...hash.slice(0, 32)]

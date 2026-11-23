@@ -1,9 +1,33 @@
+import { build } from './build.js';
 import { TaskTabs } from './task-tabs.js';
 
 const nativeHost = 'io.github.sanmukon.browser';
 const retryAlarm = 'connect-saved-browser';
 const proofFormat = /^[a-f0-9]{64}$/;
 let connection;
+
+// The build the extension's folder holds, which the app renews as it is updated. Chrome goes on
+// running the worker it loaded, after a restart too, until the extension reloads.
+async function folderBuild() {
+  try {
+    const response = await fetch(chrome.runtime.getURL('build.js'), { cache: 'no-store' });
+    return /'([a-z0-9]{1,64})'/.exec(await response.text())?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+// Whether this worker may go on. One whose folder holds another build reloads the extension instead,
+// once for each build, and never while it has a connection, whose task tabs the reload would leave.
+async function mayGoOn() {
+  const found = await folderBuild();
+  if (found === undefined || found === build) return true;
+  const { reloadedFor } = await chrome.storage.local.get('reloadedFor');
+  if (reloadedFor === found || connection) return true;
+  await chrome.storage.local.set({ reloadedFor: found });
+  chrome.runtime.reload();
+  return false;
+}
 
 function send(current, message) {
   if (connection !== current) return;
@@ -69,18 +93,24 @@ function connect(hello, reply) {
 }
 
 async function restore() {
+  if (connection || !(await mayGoOn())) return;
   const { proof } = await chrome.storage.local.get('proof');
-  if (typeof proof === 'string' && proofFormat.test(proof)) connect({ kind: 'restore', proof });
+  if (typeof proof === 'string' && proofFormat.test(proof))
+    connect({ kind: 'restore', proof, build });
 }
 
-// The temporary setup page learns only whether this profile can see the extension.
+// The temporary setup page learns only whether this profile can see the extension, and its build.
 chrome.runtime.onMessageExternal.addListener((message, sender, reply) => {
   if (
-    message?.kind === 'connector-available' &&
-    sender.frameId === 0 &&
-    /^http:\/\/127\.0\.0\.1:\d+\/chrome-setup\/[a-f0-9-]{36}$/.test(sender.url ?? '')
+    message?.kind !== 'connector-available' ||
+    sender.frameId !== 0 ||
+    !/^http:\/\/127\.0\.0\.1:\d+\/chrome-setup\/[a-f0-9-]{36}$/.test(sender.url ?? '')
   )
-    reply(true);
+    return false;
+  void mayGoOn().then((goesOn) => {
+    if (goesOn) reply(build);
+  });
+  return true;
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
@@ -100,7 +130,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     void pending.tabs.close();
   }
   const setupTab = sender.tab?.id;
-  connect({ kind: 'pair', ticket: message.ticket }, (ready) => {
+  connect({ kind: 'pair', ticket: message.ticket, build }, (ready) => {
     reply(ready);
     if (ready && Number.isInteger(setupTab))
       void chrome.tabs.remove(setupTab).catch(() => undefined);
@@ -123,11 +153,12 @@ chrome.debugger.onDetach.addListener((source) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === retryAlarm) void restore();
 });
+// Chrome started: a build that a reload did not bring before may be reloaded for again.
 chrome.runtime.onStartup.addListener(() => {
-  void restore();
+  void chrome.storage.local.remove('reloadedFor').then(restore);
 });
 void chrome.alarms.get(retryAlarm).then((alarm) => {
   if (!alarm) return chrome.alarms.create(retryAlarm, { periodInMinutes: 0.5 });
 });
 void restore();
-/* global chrome */
+/* global chrome, fetch */
