@@ -301,6 +301,40 @@ describe('trusted automation dispatch', () => {
     broker.imageInput('a', 'supported');
     expect((await call(target.ref, 'capture')).outcome.status).toBe('verified');
   });
+  it('names a navigation’s record and approval by the address it opens, not by the page the tab leaves', async () => {
+    const opening = new AutomationBroker([
+      tool('navigate', { effect: 'navigate', browserAddress: 'https://example.test/next' }),
+      tool('observe', { effect: 'observe' }),
+    ]);
+    await opening.bind('a', join(root, 'a'), policy);
+    const access = opening.openAccess('a');
+    opening.beginTurn('a');
+    const target = opening.register('a', {
+      backend: 'fixture-browser',
+      key: 'leaving',
+      kind: 'browser-tab',
+      mayActivate: false,
+      summary: { name: 'Synthetic site', address: 'https://example.test/', sharing: 'app' },
+    }).ref;
+    const run = (name: string) =>
+      opening.dispatch(access, name, { target }, { actionId: `address-${name}` });
+    const going = run('navigate');
+    await vi.waitFor(() => {
+      expect(opening.snapshot('a').value.pendingApprovals).toHaveLength(1);
+    });
+    const approval = required(opening.snapshot('a').value.pendingApprovals[0]);
+    expect(approval.target.address).toBe('https://example.test/next');
+    opening.answer('a', approval.id, { decision: 'allow-once' });
+    const address = (callId: string) => {
+      const record = required(opening.record('a', callId));
+      return record.family === 'browser' && record.target.state === 'resolved'
+        ? record.target.summary.address
+        : undefined;
+    };
+    expect(address((await going).automation.callId)).toBe('https://example.test/next');
+    expect(address((await run('observe')).automation.callId)).toBe('https://example.test/');
+    await opening.close();
+  });
   it('asks once per operation and retains session grants after Stop and turn end', async () => {
     const target = tab('a', 'app');
     const first = call(target.ref);

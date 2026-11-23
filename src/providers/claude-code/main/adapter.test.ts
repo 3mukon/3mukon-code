@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getSessionInfo, getSessionMessages, listSessions } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Availability } from '../../../sessions/shared/automation';
 import type { SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
 import { createClaudeCodeProvider } from './adapter';
 import { sandboxSettings } from './sandbox';
@@ -182,15 +183,43 @@ async function startSession(
   return { session, events };
 }
 
+// A session with the toolset bound, and what its adapter told the toolset of its availability.
+async function startBound(gateway?: string) {
+  const events: SessionEvent[] = [];
+  const availability = vi.fn<(value: Availability) => void>();
+  const session = await createClaudeCodeProvider({ gatewaysDir }).start(
+    {
+      cwd: '/work',
+      ...(gateway === undefined ? {} : { gateway }),
+      toolset: {
+        name: '3mukon-code',
+        callTimeoutMs: 86_400_000,
+        open: () => ({
+          url: 'http://127.0.0.1:4000/mcp',
+          credential: 'synthetic',
+          tools: ['panel_list'],
+          close: vi.fn(),
+          availability,
+        }),
+      },
+    },
+    (event) => {
+      events.push(event);
+    },
+  );
+  return { session, events, availability };
+}
+
 // Plays one turn: the session sends the message, and the fake process answers and ends the turn.
 async function playTurn(
   session: { send(text: string): Promise<void> },
   events: SessionEvent[],
   text: string,
+  first: Record<string, unknown> = init,
 ) {
   const ended = events.filter((event) => event.type === 'turn-ended').length;
   await session.send(text);
-  current().push(init);
+  current().push(first);
   current().push(result);
   await waitFor(() => events.filter((event) => event.type === 'turn-ended').length > ended);
 }
@@ -312,6 +341,35 @@ describe('the Claude Code provider', () => {
       expect(accesses[1]?.close).toHaveBeenCalled();
     },
   );
+  it.each([
+    ['a Claude model', 'claude-opus-5', undefined, 'supported'],
+    ['another model', 'other-model', undefined, 'unknown'],
+    ['a gateway, whatever its model’s name', 'claude-opus-5', 'work', 'unknown'],
+  ] as const)(
+    'tells the toolset whether the model takes images: %s',
+    async (_name, model, gateway, images) => {
+      fakes.usage.model = model;
+      const { availability } = await startBound(gateway);
+      expect(availability.mock.calls).toEqual([[{ tools: 'ready', images }]]);
+    },
+  );
+
+  it('tells the toolset of image input again as a turn starts on another kind of model, and only then', async () => {
+    const { session, events, availability } = await startBound();
+    await playTurn(session, events, 'hello');
+    expect(availability).toHaveBeenCalledOnce();
+    const servers = [{ name: '3mukon-code', status: 'connected' }];
+    await playTurn(session, events, 'on another model', {
+      ...init,
+      model: 'other-model',
+      mcp_servers: servers,
+    });
+    expect(availability).toHaveBeenLastCalledWith({ tools: 'ready', images: 'unknown' });
+    await playTurn(session, events, 'and back', { ...init, mcp_servers: servers });
+    expect(availability).toHaveBeenLastCalledWith({ tools: 'ready', images: 'supported' });
+    expect(availability).toHaveBeenCalledTimes(3);
+  });
+
   it('starts a session with the chosen gateway, model and effort, and reports them and the models', async () => {
     const { events } = await startSession({ gateway: 'work', model: 'opus', effort: 'high' });
     expect(current().params.options).toMatchObject({

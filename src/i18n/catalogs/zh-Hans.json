@@ -644,7 +644,7 @@
       "tooOld": "需要 {{version}} 或更高版本",
       "profileLine": "“{{profile}}”个人资料，含其登录信息",
       "connecting": "正在连接",
-      "loadExtension": "请保持设置标签页打开。在该 Chrome 窗口中选择“扩展程序 → 管理扩展程序”，开启“开发者模式”，再选择“加载已解压的扩展程序”，然后按 ⌘⇧G 并粘贴文件夹路径。",
+      "loadExtension": "请保持设置标签页打开。在该 Chrome 窗口中选择“扩展程序 → 管理扩展程序”，开启“开发者模式”，再选择“加载已解压的扩展程序”，然后按 ⇧⌘G 并粘贴文件夹路径。",
       "copyExtensionFolder": "复制文件夹路径",
       "folderCopied": "已复制",
       "waiting": "正在等待 Chrome",

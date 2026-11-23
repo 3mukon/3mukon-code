@@ -359,7 +359,7 @@
         "dialog": "Use the dialog {{app}} opened?"
       },
       "detail": {
-        "chrome": "{{agent}} wants to use the sign-ins of your {{profile}} profile, in a tab it opens in Chrome.",
+        "chrome": "{{agent}} wants to use the {{profile}} profile’s sign-ins, in a tab it opens in Chrome.",
         "chromeAnyProfile": "{{agent}} wants to use your Chrome sign-ins, in a tab it opens in Chrome.",
         "app": "{{agent}} wants to use the sign-ins the app’s browser shares with every session.",
         "background": "{{agent}} wants to see {{app}}’s windows and press its controls, without bringing it to the front.",
@@ -650,7 +650,7 @@
       "tooOld": "Needs version {{version}} or later",
       "profileLine": "{{profile}} profile, with its sign-ins",
       "connecting": "Connecting",
-      "loadExtension": "Keep the setup tab open. In that Chrome window, choose Extensions → Manage Extensions. Turn on Developer mode and choose Load unpacked, then press ⌘⇧G and paste the folder path.",
+      "loadExtension": "Keep the setup tab open. In that Chrome window, choose Extensions → Manage Extensions. Turn on Developer mode and choose Load unpacked, then press ⇧⌘G and paste the folder path.",
       "copyExtensionFolder": "Copy Folder Path",
       "folderCopied": "Copied",
       "waiting": "Waiting for Chrome",

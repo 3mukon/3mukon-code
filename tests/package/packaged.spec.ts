@@ -20,9 +20,10 @@ test('the packaged app starts, and runs each provider’s binary and a terminal 
   });
   try {
     expect(await app.evaluate(({ app: electronApp }) => electronApp.isPackaged)).toBe(true);
-    // It takes the login shell's PATH, which macOS's own startup files lengthen (ADR-0019).
-    expect(await app.evaluate(() => process.env.PATH)).toContain('/usr/local/bin');
     const window = await app.firstWindow();
+    // It has taken the login shell's PATH, which macOS's own startup files lengthen, by the time its
+    // window opens (ADR-0019).
+    expect(await app.evaluate(() => process.env.PATH)).toContain('/usr/local/bin');
     await expect(window.getByRole('heading', { name: 'Sessions' })).toBeVisible();
     // Each provider answers that it is signed in to nothing: Claude Code's and Codex's binaries run
     // from beside the archive, and Grok Build's is unpacked from inside it into the app's data.

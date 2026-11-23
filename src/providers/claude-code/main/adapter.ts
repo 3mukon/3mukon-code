@@ -35,6 +35,7 @@ import {
   type HostTurnContext,
   type HostContextDelivery,
 } from '../../../sessions/main/provider';
+import type { Availability } from '../../../sessions/shared/automation';
 import { registeredTool, toolsetReceipt } from '../../../sessions/shared/toolset-result';
 import {
   presentationContext,
@@ -384,6 +385,12 @@ function countContext(query: Query): Promise<SDKControlGetContextUsageResponse |
   ).catch(() => undefined);
 }
 
+// Whether the session's model takes images, which Claude Code does not say. Every Claude model does.
+// What another model takes, or one a gateway gives a Claude model's name, the app cannot know.
+function imageInput(gateway: string | null, model: string | undefined): Availability['images'] {
+  return gateway === null && model?.includes('claude-') === true ? 'supported' : 'unknown';
+}
+
 // The promise's value, or a rejection with the message once ms have passed without one.
 function withinTime<Value>(promise: Promise<Value>, ms: number, message: string): Promise<Value> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -420,6 +427,8 @@ interface SessionSettings {
 interface Connection {
   readonly deliveries: Map<string, HostContextDelivery>;
   readonly access?: ToolsetAccess;
+  // What the toolset last heard of the model's image input.
+  images?: Availability['images'];
   readonly toolNames: Map<string, string>;
   readonly input: InputQueue;
   readonly query: Query;
@@ -729,18 +738,11 @@ class ClaudeCodeSession implements ProviderSession {
     await this.connection.query.applyFlagSettings(
       sandboxSettings(this.settings.sandbox, this.settings.folders, false),
     );
-    if (this.connection.access) {
-      const status = await this.connection.query.mcpServerStatus().catch(() => []);
-      this.connection.access.availability?.({
-        tools: status.some(
-          (entry) => entry.name === this.settings.toolset?.name && entry.status === 'connected',
-        )
-          ? 'ready'
-          : 'unknown',
-        images: 'unknown',
-      });
-    }
     const usage = await countContext(this.connection.query);
+    if (this.connection.access) {
+      const servers = await this.connection.query.mcpServerStatus().catch(() => []);
+      this.reportAvailability(this.connection, servers, usage?.model);
+    }
     this.onEvent({ type: 'models', models: modelOptions(init.models, usage?.model) });
     if (usage !== undefined) {
       this.onEvent({ type: 'context', used: usage.totalTokens, size: usage.maxTokens });
@@ -768,6 +770,23 @@ class ClaudeCodeSession implements ProviderSession {
     } catch {
       // The transcript is not there yet; the next turn tries again.
     }
+  }
+
+  // Tells the toolset whether its tools are connected and whether the session's model takes images.
+  private reportAvailability(
+    connection: Connection,
+    servers: readonly { name: string; status: string }[],
+    model: string | undefined,
+  ): void {
+    connection.images = imageInput(this.settings.gateway, model);
+    connection.access?.availability?.({
+      tools: servers.some(
+        (entry) => entry.name === this.settings.toolset?.name && entry.status === 'connected',
+      )
+        ? 'ready'
+        : 'unknown',
+      images: connection.images,
+    });
   }
 
   // Gateway switches run one after another, between turns.
@@ -871,6 +890,13 @@ class ClaudeCodeSession implements ProviderSession {
           connection.deliveries.delete(message.uuid);
         }
         if (connection !== this.connection && this.retired.has(connection)) continue;
+        // A turn's first message names the model it runs, which the user may have switched.
+        if (
+          message.type === 'system' &&
+          message.subtype === 'init' &&
+          imageInput(this.settings.gateway, message.model) !== connection.images
+        )
+          this.reportAvailability(connection, message.mcp_servers, message.model);
         if (message.type === 'assistant' && message.parent_tool_use_id === null) {
           for (const block of message.message.content) {
             if (block.type !== 'tool_use' || !this.settings.toolset) continue;

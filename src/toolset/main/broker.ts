@@ -58,6 +58,10 @@ const refuse = (code: FailureCode, detail?: RefusalDetail): Refusal => ({
 });
 const okay = (): Outcome<null> => ({ status: 'verified', value: null });
 const cancelled = (): Outcome<never> => ({ status: 'cancelled-before-dispatch', effects: 'none' });
+// The target as a call's record and approval name it: a navigation's by the address it opens, rather
+// than by the page the tab leaves.
+const bound = (target: TargetSummary, address: string | undefined): TargetSummary =>
+  address === undefined ? target : { ...target, address };
 // The WeakMap, not this structural type or any model argument, proves a caller's binding.
 export interface BrokerAccess {
   readonly generation: number;
@@ -703,7 +707,13 @@ export class AutomationBroker {
         !!resource &&
         !!plan.observationId &&
         this.resources.current(owner.id, resource.target.ref, plan.observationId);
-      owner.activity.describe(record.callId, resource?.target, plan.delivery, plan, keepLabel);
+      owner.activity.describe(
+        record.callId,
+        resource && bound(resource.target, plan.browserAddress),
+        plan.delivery,
+        plan,
+        keepLabel,
+      );
     }
     if (owner.calls.size >= 32) return finish(refuse('limit-exceeded'));
     if (!owner.turn) return finish(refuse('turn-inactive'));
@@ -1150,10 +1160,7 @@ export class AutomationBroker {
         callId,
         source: 'host',
         operation: structuredClone(fact),
-        target: {
-          ...structuredClone(resource.target),
-          ...(kind === 'browser-tab' && browserAddress ? { address: browserAddress } : {}),
-        },
+        target: structuredClone(bound(resource.target, browserAddress)),
         canAllowForSession: true,
         requestedAt: this.now(),
       };
