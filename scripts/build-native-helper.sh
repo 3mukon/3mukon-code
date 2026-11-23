@@ -43,11 +43,15 @@ binary="$(swift_package build --arch arm64 --configuration release --show-bin-pa
 app="$scratch/$name.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 install -m 755 "$binary" "$app/Contents/MacOS/AutomationHelper"
-cp "$checkout/LICENSE" "$app/Contents/Resources/Peekaboo-LICENSE.txt"
+cp resources/icon.icns "$app/Contents/Resources/icon.icns"
+# The checkouts' files are read-only, which a copy would keep.
+install -m 644 "$checkout/LICENSE" "$app/Contents/Resources/Peekaboo-LICENSE.txt"
 for dependency in "$scratch"/.build/checkouts/*; do
-  if [ -f "$dependency/LICENSE" ]; then
-    cp "$dependency/LICENSE" "$app/Contents/Resources/$(basename "$dependency")-LICENSE.txt"
-  fi
+  for license in LICENSE LICENSE.txt; do
+    if [ -f "$dependency/$license" ]; then
+      install -m 644 "$dependency/$license" "$app/Contents/Resources/$(basename "$dependency")-LICENSE.txt"
+    fi
+  done
 done
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -57,6 +61,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <key>CFBundleName</key><string>$name</string>
 <key>CFBundleDisplayName</key><string>$name</string>
 <key>CFBundleExecutable</key><string>AutomationHelper</string>
+<key>CFBundleIconFile</key><string>icon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>

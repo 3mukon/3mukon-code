@@ -99,13 +99,18 @@ export class UserSetup implements UserSetupBridge {
         this.publish();
         return result.status === 'verified' ? verified : result;
       }
-      case 'open-permission':
+      case 'open-permission': {
+        // macOS asks in a prompt of its own, whose button opens the pane with the helper listed. The
+        // pane would cover it, so it opens here only where no prompt shows.
+        const asked = await this.ports.helper.request(action.permission);
+        if (asked.status === 'verified' && asked.value.prompted) return verified;
         try {
           await this.ports.openUrl(PERMISSION_PANES[action.permission]);
           return verified;
         } catch {
           return { status: 'refused', code: 'not-found', dispatched: false };
         }
+      }
       case 'connect-browser':
         if (this.ports.chrome) return this.ports.chrome.connect(action.profileId);
         return { status: 'refused', code: 'background-unavailable', dispatched: false };

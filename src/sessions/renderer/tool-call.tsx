@@ -144,9 +144,11 @@ export function Entry({
   const [open, setOpen] = useState(false);
   const bodyId = useId();
   const failed = status === 'failed' && !attention;
+  const sign = (
+    <Icon className={`size-3.5 shrink-0 ${attention ? 'text-wait' : iconLooks[status]}`} />
+  );
   const line = (
     <>
-      <Icon className={`size-3.5 shrink-0 ${attention ? 'text-wait' : iconLooks[status]}`} />
       <span className="sr-only">{t('sessions.tool.named', { kind })}</span>
       <span className={`min-w-0 truncate ${failed ? 'text-del' : bright ? 'text-ink' : ''}`}>
         {title}
@@ -156,7 +158,7 @@ export function Entry({
         <Tag key={tag}>{tag}</Tag>
       ))}
       {note !== undefined ? (
-        <span className="shrink-0 text-faint">{note}</span>
+        <span className="max-w-full shrink-0 truncate text-faint">{note}</span>
       ) : failed ? (
         <span className="shrink-0 text-del">{t('sessions.tool.status.failed')}</span>
       ) : (
@@ -165,7 +167,13 @@ export function Entry({
     </>
   );
   if (body === undefined) {
-    return <p className="my-0.5 flex min-w-0 items-center gap-2">{line}</p>;
+    // Its note goes under its words where the line has no room for both.
+    return (
+      <p className="my-0.5 flex min-w-0 items-baseline gap-2">
+        <span className="flex h-lh shrink-0 items-center self-start">{sign}</span>
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2">{line}</span>
+      </p>
+    );
   }
   return (
     <div className="my-0.5 min-w-0">
@@ -178,6 +186,7 @@ export function Entry({
         }}
         className="group flex w-full min-w-0 items-center gap-2 rounded-sm text-left hover:text-ink"
       >
+        {sign}
         {line}
         <ChevronRight
           className={`size-3 shrink-0 text-faint transition-transform motion-reduce:transition-none ${

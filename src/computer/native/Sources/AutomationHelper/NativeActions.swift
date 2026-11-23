@@ -106,8 +106,8 @@ final class NativeActions {
                 result = try changeWindow(change, live: live, operation: operation, dispatch: dispatch)
             } else if input.foreground {
                 guard let controlRevision else { throw NativeFailure.unsupported }
-                let surface = try await waitForControlSurface(controlRevision, operation: operation)
-                try await foreground(input, live: live, receipt: receipt, controlSurface: surface,
+                try await waitForControlSurface(controlRevision, operation: operation)
+                try await foreground(input, live: live, receipt: receipt, controlRevision: controlRevision,
                                      operation: operation, dispatch: dispatch)
                 result = .dispatched
             } else {
@@ -142,49 +142,63 @@ final class NativeActions {
         switch input.kind {
         case .click:
             dispatch()
-            return AXUIElementPerformAction(element.ref, kAXPressAction as CFString) == .success
-                ? .dispatched : .indeterminate("backend-lost")
+            return sent(NativeAX.perform(element.ref, kAXPressAction))
         case .type:
             guard let value = input.text, value.utf16.count <= 1000, !value.contains("\0") else { throw NativeFailure.unsupported }
             dispatch()
-            guard AXUIElementSetAttributeValue(element.ref, kAXValueAttribute as CFString, value as CFString) == .success
-            else { return .indeterminate("backend-lost") }
+            let result = NativeAX.set(element.ref, kAXValueAttribute, value as CFString)
+            guard result == .success else { return sent(result) }
             guard !IsSecureEventInputEnabled(), !NativeAX.secure(element.ref),
                   NativeAX.inWindow(element.ref, window: live.window.element, pid: live.window.application.pid)
             else { return .dispatched }
             return NativeAX.string(element.ref, kAXValueAttribute) == value ? .verified(NativeNull()) : .dispatched
         case .scroll:
             guard let direction = input.direction, ["up", "down"].contains(direction) else { throw NativeFailure.unsupported }
+            let down = direction == "down"
+            let action = down ? kAXIncrementAction : kAXDecrementAction
+            if NativeAX.actions(element.ref).contains(action) {
+                dispatch()
+                return sent(NativeAX.perform(element.ref, action))
+            }
+            guard let pager = NativeAX.pager(element.ref, down: down) else { throw NativeFailure.unsupported }
             dispatch()
-            let action = direction == "down" ? kAXIncrementAction : kAXDecrementAction
-            return AXUIElementPerformAction(element.ref, action as CFString) == .success
-                ? .dispatched : .indeterminate("backend-lost")
+            return sent(NativeAX.perform(pager, kAXPressAction))
         default:
             throw NativeFailure.unsupported
         }
     }
 
-    private func waitForControlSurface(_ revision: Int, operation: NativeOperation) async throws -> NativeControlSurface {
+    // What a request to a control came to. One that gave no answer in time may still be at work.
+    private func sent(_ result: AXError) -> NativeReply<NativeNull> {
+        switch result {
+        case .success: .dispatched
+        case .cannotComplete: .indeterminate("timeout")
+        default: .indeterminate("backend-lost")
+        }
+    }
+
+    private func waitForControlSurface(_ revision: Int, operation: NativeOperation) async throws {
         // WindowServer can order the native panel after AppKit has accepted its frame.
         let deadline = ContinuousClock.now.advanced(by: .milliseconds(250))
         while true {
             try operation.check()
-            if let surface = controlPanel.surface(revision: revision), catalog.isControlSurface(surface) { return surface }
+            if let surface = controlPanel.surface(revision: revision), catalog.isControlSurface(surface) { return }
             guard ContinuousClock.now < deadline else { throw NativeFailure.unsupported }
             try await Task.sleep(for: .milliseconds(16))
         }
     }
 
     private func foreground(_ input: NativeInput, live: NativeWindowCatalog.Live, receipt: NativeObservations.Receipt,
-                            controlSurface: NativeControlSurface, operation: NativeOperation,
+                            controlRevision: Int, operation: NativeOperation,
                             dispatch: () -> Void) async throws {
         guard CGPreflightPostEventAccess() else { throw NativeFailure.accessibility }
         let monitor = ForegroundInput(operation: operation) { event in
             let point = event.location
-            guard controlSurface.bounds.rect.contains(point), self.catalog.isControlSurface(controlSurface) else { return false }
+            guard let surface = self.controlPanel.surface(revision: controlRevision),
+                  surface.bounds.rect.contains(point), self.catalog.isControlSurface(surface) else { return false }
             let receiver = event.getIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent)
-            if receiver > 0 { return receiver == Int64(controlSurface.windowId) }
-            return self.catalog.topWindow(at: point) == controlSurface.windowId
+            if receiver > 0 { return receiver == Int64(surface.windowId) }
+            return self.catalog.topWindow(at: point) == surface.windowId
         }
         defer { monitor.stop() }
         try monitor.start()
@@ -289,8 +303,9 @@ final class NativeActions {
             dispatch()
             monitor.post(down)
         }, up: {
-            // Use the actual cursor location for cleanup after the person moves it.
-            up.location = CGEvent(source: nil)?.location ?? up.location
+            // The person who took over may have moved the pointer, and lets go where it is now. The
+            // pointer reports a posted move late, so the agent's own end is where it planned.
+            if monitor.lost { up.location = CGEvent(source: nil)?.location ?? up.location }
             monitor.post(up)
         }) {
             if input.kind == .drag {
@@ -302,6 +317,9 @@ final class NativeActions {
                     monitor.post(try mouse(.leftMouseDragged, at: next))
                     up.location = next
                 }
+                // The window takes in the last move before the pointer lets go.
+                try await Task.sleep(for: .milliseconds(25))
+                try monitor.check()
             } else {
                 try await Task.sleep(for: .milliseconds(20))
                 try monitor.check()
@@ -338,8 +356,8 @@ final class NativeActions {
         guard fresh.bounds == live.bounds, fresh.minimized == live.minimized else { throw NativeFailure.changed }
         try operation.check()
         dispatch()
-        guard AXUIElementSetAttributeValue(element, attribute as CFString, value) == .success
-        else { return .indeterminate("backend-lost") }
+        let result = NativeAX.set(element, attribute, value)
+        guard result == .success else { return sent(result) }
         return NativeAX.value(element, attribute).map { CFEqual(value, $0) } == true ? .verified(NativeNull()) : .dispatched
     }
 }

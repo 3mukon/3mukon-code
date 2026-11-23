@@ -79,7 +79,7 @@ function title(words: string): HTMLElement {
 
 // The sign at the start of the line a title stands in.
 function signOf(line: HTMLElement): Element | null {
-  return line.parentElement?.querySelector('svg') ?? null;
+  return line.closest('p')?.querySelector('svg') ?? null;
 }
 
 describe('AutomationCall', () => {
@@ -227,6 +227,37 @@ describe('AutomationCall', () => {
     title('Chose an app');
   });
 
+  it('tags a look at a window with its application where the window has a name of its own', () => {
+    const look = (summary: Partial<TargetSummary>) =>
+      render(
+        <AutomationCall
+          record={call({
+            toolName: 'computer_observe',
+            family: 'computer',
+            target: {
+              state: 'resolved',
+              summary: {
+                ref: { id: 'window-1', kind: 'window', generation: 1 },
+                owner: 's1',
+                name: 'Inbox',
+                applicationName: 'Mail',
+                ...summary,
+              },
+            },
+            sharing: null,
+          })}
+          loadFrames={noFrames}
+        />,
+      );
+    look({});
+    title('Looked at Inbox');
+    expect(screen.getByText('Mail')).toBeDefined();
+    cleanup();
+    look({ name: 'Mail' });
+    title('Looked at Mail');
+    expect(screen.queryByText('Mail')).toBeNull();
+  });
+
   it('names a computer action by its control, with the application in a tag, and a window’s change', () => {
     const inbox: TargetSummary = {
       ref: { id: 'window-1', kind: 'window', generation: 1 },
@@ -364,6 +395,9 @@ describe('AutomationCall', () => {
     for (const [fields, words, attention] of cases) {
       render(<AutomationCall record={call(fields)} loadFrames={noFrames} />);
       expect(screen.getByText(words).className).toContain('text-faint');
+      // Where the line has no room for both, the note goes under the words, in the line's width.
+      expect(screen.getByText(words).className).toContain('max-w-full');
+      expect(screen.getByText(words).parentElement?.className).toContain('flex-wrap');
       const sign = signOf(title('Opened example.com/pricing'))?.getAttribute('class') ?? '';
       expect(sign.includes('text-wait')).toBe(attention);
       expect(sign.includes('lucide-circle-alert')).toBe(attention);

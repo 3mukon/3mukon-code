@@ -34,6 +34,12 @@ function setup(installedChromeVersion: () => Promise<string | null> = () => Prom
       return Promise.resolve<Outcome<HelperStatus>>({ status: 'verified', value: current });
     }),
     restart: (): Promise<Outcome<HelperStatus>> => restart(),
+    request: vi.fn(() =>
+      Promise.resolve<Outcome<{ prompted: boolean }>>({
+        status: 'verified',
+        value: { prompted: false },
+      }),
+    ),
   } satisfies HelperSetup;
   const clearAppSignIns = vi.fn(() =>
     Promise.resolve<Outcome<null>>({ status: 'verified', value: null }),
@@ -75,7 +81,7 @@ describe('UserSetup', () => {
   });
 
   it('takes only the steps it can: clearing the sign-ins, restarting the helper, opening a permission’s pane', async () => {
-    const { host, restart, clearAppSignIns, openUrl } = setup();
+    const { host, helper, restart, clearAppSignIns, openUrl } = setup();
     expect(await host.act({ kind: 'clear-app-sign-ins' })).toEqual({
       status: 'verified',
       value: null,
@@ -93,9 +99,31 @@ describe('UserSetup', () => {
     expect(openUrl).toHaveBeenCalledWith(
       'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
     );
+    expect(helper.request).toHaveBeenCalledExactlyOnceWith('screen-recording');
+    expect(helper.request.mock.invocationCallOrder[0]).toBeLessThan(
+      openUrl.mock.invocationCallOrder[0] ?? 0,
+    );
+    // macOS's own prompt leads to the pane, which would cover it.
+    helper.request.mockResolvedValueOnce({ status: 'verified', value: { prompted: true } });
+    expect(
+      (await host.act({ kind: 'open-permission', permission: 'screen-recording' })).status,
+    ).toBe('verified');
+    expect(openUrl).toHaveBeenCalledOnce();
     openUrl.mockRejectedValueOnce(new Error('no handler'));
     expect((await host.act({ kind: 'open-permission', permission: 'accessibility' })).status).toBe(
       'refused',
+    );
+    // A helper that cannot start leaves the user the pane.
+    helper.request.mockResolvedValueOnce({
+      status: 'refused',
+      code: 'setup-required',
+      dispatched: false,
+    });
+    expect((await host.act({ kind: 'open-permission', permission: 'accessibility' })).status).toBe(
+      'verified',
+    );
+    expect(openUrl).toHaveBeenLastCalledWith(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
     );
     expect(await host.act({ kind: 'connect-browser', browser: 'chrome', profileId: 'p' })).toEqual({
       status: 'refused',
@@ -147,7 +175,12 @@ describe('UserSetup', () => {
         subscribe: () => () => undefined,
       },
       clearAppSignIns: () => Promise.resolve({ status: 'verified', value: null }),
-      helper: { status: () => status({}), check: pending, restart: pending },
+      helper: {
+        status: () => status({}),
+        check: pending,
+        restart: pending,
+        request: () => Promise.resolve({ status: 'verified', value: { prompted: false } }),
+      },
       openUrl: () => Promise.resolve(),
     });
     expect((await host.snapshot()).chrome).toMatchObject({

@@ -35,6 +35,29 @@ enum NativeAX {
         return element
     }
 
+    // A control answers once its own work is done, which can take longer than reading from it.
+    private static func patient(_ element: AXUIElement, _ run: () -> AXError) -> AXError {
+        AXUIElementSetMessagingTimeout(element, 2)
+        defer { _ = bounded(element) }
+        return run()
+    }
+
+    static func perform(_ element: AXUIElement, _ action: String) -> AXError {
+        patient(element) { AXUIElementPerformAction(element, action as CFString) }
+    }
+
+    static func set(_ element: AXUIElement, _ attribute: String, _ value: CFTypeRef) -> AXError {
+        patient(element) { AXUIElementSetAttributeValue(element, attribute as CFString, value) }
+    }
+
+    // The part of a scroll bar that scrolls it by a page, where the bar itself does not scroll.
+    static func pager(_ bar: AXUIElement, down: Bool) -> AXUIElement? {
+        let wanted = down ? kAXIncrementPageSubrole : kAXDecrementPageSubrole
+        return children(bar, kAXChildrenAttribute, limit: 8).first { part in
+            string(bounded(part), kAXSubroleAttribute) == wanted && actions(part).contains(kAXPressAction)
+        }
+    }
+
     static func bounds(_ element: AXUIElement) -> NativeBounds? {
         guard let position = axValue(element, kAXPositionAttribute),
               let size = axValue(element, kAXSizeAttribute) else { return nil }
@@ -181,6 +204,14 @@ final class NativeWindowCatalog {
         return CFEqual(focus, live.window.element) && AXWindowIDResolver.windowID(of: focus) == live.window.number
     }
 
+    func onScreen(_ id: UUID) -> WindowOnScreen? {
+        windows[id].flatMap { WindowOnScreen($0.number, of: $0.application.pid) }
+    }
+
+    func isFullScreen(_ id: UUID) -> Bool {
+        windows[id].map { NativeAX.value($0.element, "AXFullScreen") as? Bool == true } ?? false
+    }
+
     func focusedElement(_ live: Live) -> AXUIElement? {
         guard foreground(live) else { return nil }
         let system = NativeAX.bounded(AXUIElementCreateSystemWide())
@@ -194,7 +225,7 @@ final class NativeWindowCatalog {
         guard let window = SystemIdentityResolver.windowIdentity(surface.windowId)
         else { return false }
         return window.ownerProcessIdentifier == getpid() &&
-            Int(window.layer) == Int(CGWindowLevelForKey(.statusWindow)) && window.bounds == surface.bounds.rect
+            Int(window.layer) == Int(CGWindowLevelForKey(.normalWindow)) && window.bounds == surface.bounds.rect
     }
 
     // Ask AppKit for the mouse receiver. Window rectangles alone include transparent and
@@ -217,20 +248,23 @@ final class NativeWindowCatalog {
     private func state(_ element: AXUIElement, number: CGWindowID, application: NativeApplication)
         throws -> (bounds: NativeBounds, minimized: Bool)
     {
+        let minimized = NativeAX.value(element, kAXMinimizedAttribute) as? Bool == true
+        let subrole = NativeAX.string(element, kAXSubroleAttribute)
+        // AppKit calls a standard window a dialog while it is minimized.
         guard NativeAX.pid(element) == application.pid,
               AXWindowIDResolver.windowID(of: element) == number,
               NativeAX.string(element, kAXRoleAttribute) == kAXWindowRole,
-              NativeAX.string(element, kAXSubroleAttribute) == kAXStandardWindowSubrole,
+              subrole == kAXStandardWindowSubrole || minimized && subrole == kAXDialogSubrole,
               NativeAX.value(element, kAXModalAttribute) as? Bool != true,
               SystemIdentityResolver.processStartIdentity(application.pid).map(String.init) == application.processStart
         else { throw NativeFailure.stale }
         guard let bounds = NativeAX.bounds(element) else { throw NativeFailure.changed }
-        let minimized = NativeAX.value(element, kAXMinimizedAttribute) as? Bool == true
         if let cg = SystemIdentityResolver.windowIdentity(number) {
             guard cg.ownerProcessIdentifier == application.pid, cg.layer == 0 else { throw NativeFailure.stale }
             // Accessibility and the compositor may report different frames during a move or resize.
-            // Keep the identity, and require agreement before using any coordinates.
-            guard cg.bounds == bounds.rect else { throw NativeFailure.changed }
+            // Keep the identity, and require agreement before using any coordinates. A minimized
+            // window, whose place in the Dock the compositor reports, takes no coordinates.
+            guard minimized || cg.bounds == bounds.rect else { throw NativeFailure.changed }
         } else if !minimized {
             throw NativeFailure.changed
         }

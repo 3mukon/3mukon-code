@@ -1,5 +1,5 @@
 import type { Readable, Writable } from 'node:stream';
-import type { ControlCommand } from '../shared/computer';
+import type { ControlEvent } from '../shared/computer';
 import {
   helperControlCommand,
   helperEvent,
@@ -57,7 +57,7 @@ export class HelperWire {
     readonly child: HelperChild,
     readonly generation: string,
     private readonly lost: (error: Error) => void,
-    private readonly controlCommand: (revision: number, command: ControlCommand) => void,
+    private readonly controlCommand: (revision: number, command: ControlEvent) => void,
   ) {
     child.output.on('data', (chunk: Buffer) => {
       this.receive(chunk);
@@ -138,8 +138,9 @@ export class HelperWire {
     while (offset < part.length) {
       const line = part.indexOf(10, offset);
       const end = line === -1 ? part.length : line;
-      // Larger image replies are available only on the explicit observation route.
-      const limit = this.pending?.kind === 'observe' ? NATIVE_FRAME_BYTES : 32 * 1024;
+      // Only what captures a window has replies that hold an image.
+      const image = this.pending?.kind === 'observe' || this.pending?.kind === 'preview';
+      const limit = image ? NATIVE_FRAME_BYTES : 32 * 1024;
       if (this.bytes.length + end - offset > limit) {
         this.fail(new ProtocolMismatch());
         return;
@@ -167,8 +168,10 @@ export class HelperWire {
       control.data.generation.toLowerCase() === this.generation &&
       control.data.id <= this.controlRevision
     ) {
-      if (this.controlVisible && control.data.id === this.controlRevision)
-        this.controlCommand(control.data.id, control.data.event);
+      // A button belongs to the picture that showed it, and the shortcut to whatever is in control.
+      const { id, event } = control.data;
+      if (this.controlVisible && (event === 'shortcut' || id === this.controlRevision))
+        this.controlCommand(id, event);
       return !this.failed;
     }
     if (!pending) {

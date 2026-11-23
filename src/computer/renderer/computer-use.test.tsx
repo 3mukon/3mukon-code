@@ -34,6 +34,11 @@ describe('ComputerUseSetting', () => {
     const given = steps();
     render(<ComputerUseSetting setup={setup({})} steps={given} />);
     const group = screen.getByRole('region', { name: 'Computer use' });
+    expect(
+      screen.getByText(
+        'What macOS lets agents see and do in other apps. The app appears in System Settings as Computer Use Helper.',
+      ),
+    ).toBeDefined();
     expect(group.querySelector('.border-dashed')).not.toBeNull();
     expect(group.querySelector('.divide-y')).toBeNull();
     expect(row('Accessibility').getByText('Allowed').classList.contains('text-run')).toBe(true);
@@ -98,7 +103,7 @@ describe('ComputerSetupNotice', () => {
     );
     expect(
       screen.getByText(
-        'macOS hasn’t allowed the app to see other apps’ windows. Allow it in System Settings, then ask again.',
+        'macOS hasn’t allowed the app to see other apps’ windows. Allow Computer Use Helper in System Settings, then ask again.',
       ).className,
     ).toContain('text-muted');
     fireEvent.click(screen.getByRole('button', { name: 'Open System Settings' }));

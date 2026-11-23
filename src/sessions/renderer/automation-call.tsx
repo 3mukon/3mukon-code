@@ -217,7 +217,8 @@ function titleOf(
 function applicationTag(record: UseCall, summary: TargetSummary | null): string | null {
   if (record.family !== 'computer' || summary === null) return null;
   if (record.toolName === 'computer_act') return summary.applicationName ?? summary.name;
-  if (record.toolName === 'computer_observe') return summary.applicationName ?? null;
+  if (record.toolName === 'computer_observe' && summary.applicationName !== summary.name)
+    return summary.applicationName ?? null;
   return null;
 }
 

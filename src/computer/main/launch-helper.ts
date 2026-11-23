@@ -3,9 +3,11 @@ import { lstat, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import type { ControlCommand } from '../shared/computer';
-import { HELPER_NAME, NativeHelper } from './helper';
+import type { ControlEvent } from '../shared/computer';
+import { HELPER_NAME } from '../shared/helper';
+import { NativeHelper } from './helper';
 import type { HelperChild } from './helper-wire';
+import { installHelper } from './install-helper';
 
 const exec = promisify(execFile);
 const BUNDLE_ID = 'io.github.3mukon.3mukon-code.computer-use';
@@ -18,7 +20,8 @@ export function nativeHelper(options: {
   packaged: boolean;
   osVersion: string;
   onGenerationEnded?: (id: string) => void;
-  onControl?: (revision: number, command: ControlCommand) => void;
+  onControl?: (revision: number, command: ControlEvent) => void;
+  onStopShortcut?: (registers: boolean) => void;
 }): NativeHelper {
   return new NativeHelper(
     async () => {
@@ -28,7 +31,7 @@ export function nativeHelper(options: {
         ? join(dirname(options.resourcesPath), 'Helpers')
         : join(options.appPath, 'out', 'native');
       const bundle = join(artifacts, HELPER_NAME + '.app');
-      const binary = join(bundle, 'Contents', 'MacOS', 'AutomationHelper');
+      const executable = join('Contents', 'MacOS', 'AutomationHelper');
       const manifest = options.packaged
         ? join(options.appPath, 'out', 'native-helper-identity.json')
         : join(artifacts, 'native-helper-identity.json');
@@ -36,25 +39,28 @@ export function nativeHelper(options: {
       if (!file.isFile() || file.size > 256) throw new Error('No native helper identity.');
       const read: unknown = JSON.parse(await readFile(manifest, 'utf8'));
       const { certificate } = identity.parse(read);
-      if (!(await lstat(bundle)).isDirectory() || !(await lstat(binary)).isFile())
+      if (!(await lstat(bundle)).isDirectory() || !(await lstat(join(bundle, executable))).isFile())
         throw new Error('The native helper bundle is missing.');
       const requirement =
         'identifier "' + BUNDLE_ID + '" and certificate leaf = H"' + certificate + '"';
-      await exec(
-        '/usr/bin/codesign',
-        ['--verify', '--strict', '--deep', '-R', '=' + requirement, bundle],
-        {
-          timeout: 2_500,
-          maxBuffer: 4096,
-        },
-      );
       const root = await privateFolder(join(options.data, 'computer-use'));
       const locks = await privateFolder(join(root, 'coordination'));
       const temporary = await privateFolder(join(root, 'temporary'));
-      return launch(binary, locks, temporary);
+      const installed = await installHelper(bundle, root, async (checked) => {
+        await exec(
+          '/usr/bin/codesign',
+          ['--verify', '--strict', '--deep', '-R', '=' + requirement, checked],
+          {
+            timeout: 2_500,
+            maxBuffer: 4096,
+          },
+        );
+      });
+      return launch(join(installed, executable), locks, temporary);
     },
     options.onGenerationEnded,
     options.onControl,
+    options.onStopShortcut,
   );
 }
 

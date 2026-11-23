@@ -9,7 +9,8 @@ struct NativeApplication: Codable, Equatable, Sendable {
 }
 
 struct RunningApplications: Encodable {
-    private static let limit = 16
+    // Every entry of the longest list fits a reply, whose bound the app keeps too.
+    private static let limit = 64
     private static let appBundle = "io.github.3mukon.3mukon-code"
 
     struct Entry: Encodable {

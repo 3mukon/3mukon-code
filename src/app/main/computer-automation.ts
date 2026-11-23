@@ -125,14 +125,11 @@ export function computerAutomation(
         'Select a running application from computer_targets. Returns a session-owned application target. Discover again if it has exited or restarted.',
         z.strictObject({ id: z.uuid() }),
         () => metadata,
-        async ({ id }, { owner, signal }) => {
-          const outcome = await computer.select(owner, id, signal);
-          return {
-            outcome:
-              outcome.status === 'verified'
-                ? { status: 'verified', value: { ...outcome.value } }
-                : outcome,
-          };
+        async ({ id }, context) => {
+          const outcome = await computer.select(context.owner, id, context.signal);
+          if (outcome.status !== 'verified') return { outcome };
+          context.names(outcome.value);
+          return { outcome: { status: 'verified', value: { ...outcome.value } } };
         },
       ),
       tool(
@@ -154,7 +151,7 @@ export function computerAutomation(
       ),
       tool(
         'computer_act',
-        'Use a fresh window observation. Click, type and scroll on supported Accessibility controls in the background. Point-click, point-scroll, drag and press require foreground control. Ask the user to focus the target window if needed. Point coordinates are screenshot pixels. Window changes must be explicit. An unverified dispatch does not establish the effect.',
+        'Use a fresh window observation. Click, type and scroll on supported Accessibility controls in the background. Point-click, point-scroll, drag and press require foreground control. Ask the user to focus the target window if needed. At workspace-write, click, point-click, drag and press are refused as file-scope-unverifiable, since the application decides which files they change; only the user can give the session full access. Point coordinates are screenshot pixels. Window changes must be explicit. An unverified dispatch does not establish the effect.',
         z.strictObject({ target: window, observationId: z.uuid(), action: nativeAction }),
         ({ target, observationId, action }, owner) => ({
           ...act(target, observationId, action),
@@ -195,10 +192,14 @@ export function computerAutomation(
         'End this session’s operations on one application. The application and its windows stay open.',
         z.strictObject({ application }),
         () => metadata,
-        (args, { owner, signal }) =>
-          Promise.resolve({
-            outcome: signal.aborted ? cancelled : computer.release(owner, args.application),
-          }),
+        (args, context) => {
+          context.names(args.application);
+          return Promise.resolve({
+            outcome: context.signal.aborted
+              ? cancelled
+              : computer.release(context.owner, args.application),
+          });
+        },
       ),
     ],
   };

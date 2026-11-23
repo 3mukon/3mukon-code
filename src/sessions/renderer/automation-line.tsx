@@ -21,7 +21,8 @@ const phaseDots: Record<AutomationLiveState['phase'], Status> = {
 
 // While a session uses a tab or an application, a line above its composer's divider names it in small
 // faint type, a page by its host in the ink, with how the page is shared and whether the work runs in
-// the background or the foreground, or the first and how many more; Show presents what it uses, and
+// the background or the foreground, or the first and how many more, an application counting once with
+// all of its windows; Show presents what it uses, and
 // Stop, while there is work to stop, stops that work and the session's turn, leaving the tabs open
 // and the sign-ins in place. What could not be shown or stopped, the line says.
 export function AutomationLine({
@@ -40,7 +41,10 @@ export function AutomationLine({
   const [problem, setProblem] = useState<'show' | 'stop' | null>(null);
   const [stopping, setStopping] = useState(false);
   if (state === undefined) return null;
-  const [first, ...more] = state.resources;
+  const ids = new Set(state.resources.map(({ ref }) => ref.id));
+  const [first, ...more] = state.resources.filter(
+    ({ application }) => application === undefined || !ids.has(application.id),
+  );
   if (first === undefined) return null;
   const name = targetName(first) ?? t('sessions.automation.line.blank');
   const facts =

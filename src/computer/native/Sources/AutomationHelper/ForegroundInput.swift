@@ -12,7 +12,7 @@ final class ForegroundInput {
     private let isControlPointer: (CGEvent) -> Bool
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
-    private var lost = false
+    private(set) var lost = false
     private var secureReported = false
 
     init(operation: NativeOperation, isControlPointer: @escaping (CGEvent) -> Bool) {

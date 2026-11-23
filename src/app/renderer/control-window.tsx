@@ -8,6 +8,7 @@ import type {
   ControlWindowSnapshot,
 } from '../../computer/shared/computer';
 import { initI18n, switchLanguage } from '../../i18n/renderer/i18n';
+import { CONTROL_SIZE, looks, marked, REVISION_BITS } from '../shared/control-window';
 import './app.css';
 
 declare global {
@@ -41,7 +42,9 @@ function ControlWindow({ bridge }: { bridge: ControlWindowBridge }) {
     if (document.documentElement.lang !== control.language) switchLanguage([control.language]);
     const painted = requestAnimationFrame(() => {
       const buttons: ControlWindowButton[] = [];
-      for (const button of document.querySelectorAll('button')) {
+      for (const button of document.querySelectorAll<HTMLButtonElement>(
+        '[data-look="rest"] button',
+      )) {
         const label = button.textContent.trim();
         const { x, y, width, height } = button.getBoundingClientRect();
         buttons.push({
@@ -60,17 +63,51 @@ function ControlWindow({ bridge }: { bridge: ControlWindowBridge }) {
 
   return (
     control && (
-      <div className="flex h-full min-w-0 items-center justify-center">
-        <ForegroundControlBar
-          state={control.state}
-          session={control.session}
-          application={control.application}
-          shortcut={control.stopShortcut}
-          onStop={unhandled}
-          onHandBack={unhandled}
-        />
-      </div>
+      <>
+        <RevisionMark revision={revision} />
+        {looks.map((look) => (
+          <div
+            key={look}
+            data-look={look}
+            style={CONTROL_SIZE}
+            className={`flex items-center justify-center [&_*]:animate-none ${LOOKS[look]}`}
+          >
+            <ForegroundControlBar
+              state={control.state}
+              session={control.session}
+              application={control.application}
+              shortcut={control.stopShortcut}
+              onStop={unhandled}
+              onHandBack={unhandled}
+            />
+          </div>
+        ))}
+      </>
     )
+  );
+}
+
+const LOOKS: Record<(typeof looks)[number], string> = {
+  rest: '',
+  hover: '[&_button:enabled]:bg-hover',
+  pressed: '[&_button:enabled]:bg-line',
+};
+
+// Tells main which revision a picture shows; main takes it out of the picture.
+function RevisionMark({ revision }: { revision: number }) {
+  return (
+    <div aria-hidden="true" className="pointer-events-none fixed top-0 left-0 flex">
+      {Array.from({ length: REVISION_BITS + 1 }, (_, cell) => (
+        <span
+          key={cell}
+          style={{
+            width: 1,
+            height: 1,
+            backgroundColor: marked(revision, cell) ? '#000' : 'transparent',
+          }}
+        />
+      ))}
+    </div>
   );
 }
 

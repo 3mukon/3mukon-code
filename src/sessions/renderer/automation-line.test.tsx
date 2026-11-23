@@ -98,6 +98,33 @@ describe('AutomationLine', () => {
     cleanup();
     render(<AutomationLine state={state({ resources: [tab, mail] })} onShow={yes} onStop={yes} />);
     words('Using example.com · and 1 more');
+    cleanup();
+    // An application counts once, with the windows of it that the session knows.
+    const inbox: TargetSummary = {
+      ref: { id: 'window-1', kind: 'window', generation: 1 },
+      owner: 's1',
+      name: 'Inbox',
+      applicationName: 'Mail',
+      application: mail.ref,
+    };
+    const onShow = vi.fn(yes);
+    render(
+      <AutomationLine
+        state={state({
+          resources: [mail, inbox, { ...inbox, ref: { ...inbox.ref, id: 'window-2' } }],
+          operations: [operation({ target: mail.ref, kind: 'application-background' })],
+        })}
+        onShow={onShow}
+        onStop={yes}
+      />,
+    );
+    words('Using Mail · in the background');
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+    expect(onShow).toHaveBeenCalledWith([
+      mail,
+      inbox,
+      { ...inbox, ref: { ...inbox.ref, id: 'window-2' } },
+    ]);
   });
 
   it('says when it waits for the user, pauses or stops, and offers Stop only while there is work', () => {

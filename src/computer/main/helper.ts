@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { Outcome, PermissionState } from '../../sessions/shared/automation';
-import type { ControlCommand } from '../shared/computer';
-import type { HelperSetup, HelperStatus } from '../shared/helper';
+import type { ControlEvent } from '../shared/computer';
+import {
+  HELPER_NAME,
+  type HelperPermission,
+  type HelperSetup,
+  type HelperStatus,
+} from '../shared/helper';
 import { HelperDeadline, HelperWire, ProtocolMismatch, type HelperChild } from './helper-wire';
 import type {
   HelperCommand,
@@ -10,10 +15,10 @@ import type {
   NativeEvent,
 } from './native-protocol';
 
-export const HELPER_NAME = 'Computer Use Helper';
 const REQUEST_MS = 2_000;
 const OPERATION_MS = 8_000;
 const MAX_PENDING = 32;
+const noop = () => undefined;
 const okay = <T>(value: T): Outcome<T> => ({ status: 'verified', value });
 const refused = <T>(code: Extract<Outcome, { status: 'refused' }>['code']): Outcome<T> => ({
   status: 'refused',
@@ -27,12 +32,19 @@ const unavailable = <T>(): Outcome<T> => ({
   dispatched: false,
   detail: { kind: 'availability', reason: { code: 'backend-unavailable', backend: 'native' } },
 });
-const permission = (granted: boolean): PermissionState => (granted ? 'granted' : 'not-granted');
+// macOS gives a running process some permissions only once it starts again, so `fresh` is what a
+// process that has just started has.
+const permission = (granted: boolean, fresh: boolean | undefined): PermissionState =>
+  granted ? 'granted' : fresh ? 'restart-required' : 'not-granted';
 
 type InactiveConnection = Exclude<HelperStatus['connection'], 'ready'>;
 type Query = Exclude<HelperCommand['kind'], 'hello'>;
+type Permissions = HelperReply<'permissions'>['permissions'];
 type ApplicationInventory = HelperReply<'applications'>['inventory'] & { generation: string };
-type NativeCommand = Exclude<HelperCommand, { kind: 'hello' | 'permissions' | 'applications' }>;
+type NativeCommand = Exclude<
+  HelperCommand,
+  { kind: 'hello' | 'permissions' | 'request-permission' | 'applications' }
+>;
 type Operation<C> = C extends NativeCommand ? Omit<C, 'deadline'> : never;
 type NativeQuery = Operation<NativeCommand>;
 type NativeValue<K extends NativeQuery['kind']> = Extract<
@@ -73,14 +85,17 @@ export class NativeHelper implements HelperSetup {
   private inputMonitoringRequired = false;
   private restarting: Promise<Outcome<HelperStatus>> | undefined;
   private drain: Promise<void> | undefined;
+  private probe: HelperChild | undefined;
   private epoch = 0;
   private closed = false;
 
   constructor(
     private readonly launch: () => Promise<HelperChild>,
     private readonly generationEnded: (id: string) => void = () => undefined,
-    private readonly controlCommand: (revision: number, command: ControlCommand) => void = () =>
+    private readonly controlCommand: (revision: number, command: ControlEvent) => void = () =>
       undefined,
+    // Whether macOS registers the stop shortcut, as each helper says when it starts.
+    private readonly stopShortcut: (registers: boolean) => void = () => undefined,
   ) {}
 
   status(): HelperStatus {
@@ -131,22 +146,34 @@ export class NativeHelper implements HelperSetup {
         return cancelled();
       case 'indeterminate':
         return { ...result, exclusionHeld: false };
-      case 'refused':
-        if (result.permission === 'input-monitoring') this.inputMonitoringRequired = true;
+      case 'refused': {
+        const missing = result.permission;
+        if (missing === 'input-monitoring') this.inputMonitoringRequired = true;
+        // A preview that cannot be taken is asked for again each second.
+        const restart =
+          missing && command.kind !== 'preview' && (await this.restartAllows(missing));
         return {
           status: 'refused',
           code: result.code,
           dispatched: false,
-          ...(result.permission
+          ...(missing
             ? {
                 detail: {
                   kind: 'setup',
-                  requirement: { kind: 'permission', permission: result.permission },
+                  requirement: restart
+                    ? { kind: 'restart-helper' }
+                    : { kind: 'permission', permission: missing },
                 },
               }
             : {}),
         };
+      }
     }
+  }
+
+  async request(missing: HelperPermission): Promise<Outcome<{ prompted: boolean }>> {
+    const reply = await this.query({ kind: 'request-permission', permission: missing });
+    return reply.status === 'verified' ? okay({ prompted: reply.value.prompted }) : reply;
   }
 
   restart(): Promise<Outcome<HelperStatus>> {
@@ -166,30 +193,75 @@ export class NativeHelper implements HelperSetup {
 
   private refreshPermissions(): Promise<Outcome<HelperStatus>> {
     if (this.closed) return Promise.resolve(unavailable());
-    this.checking ??= this.query({ kind: 'permissions' })
-      .then((outcome) =>
-        this.forCurrentGeneration(outcome, ({ permissions }) => {
-          this.current = {
-            ...this.current,
-            checkedAt: Date.now(),
-            permissions: {
-              helperName: HELPER_NAME,
-              accessibility: permission(permissions.accessibility),
-              screenRecording: permission(permissions.screenRecording),
-              inputMonitoring: {
-                required: false,
-                state: permission(permissions.inputMonitoring),
-              },
-              restartRequired: false,
-            },
-          };
-          return this.status();
-        }),
-      )
-      .finally(() => {
-        this.checking = undefined;
-      });
+    this.checking ??= this.readPermissions().finally(() => {
+      this.checking = undefined;
+    });
     return this.checking;
+  }
+
+  private async readPermissions(): Promise<Outcome<HelperStatus>> {
+    const running = this.wire;
+    const outcome = await this.query({ kind: 'permissions' });
+    if (outcome.status !== 'verified') return outcome;
+    const has = outcome.value.permissions;
+    const lacks =
+      !has.accessibility ||
+      !has.screenRecording ||
+      (this.inputMonitoringRequired && !has.inputMonitoring);
+    const fresh = running && lacks ? await this.freshPermissions() : undefined;
+    return this.forCurrentGeneration(outcome, () => {
+      const accessibility = permission(has.accessibility, fresh?.accessibility);
+      const screenRecording = permission(has.screenRecording, fresh?.screenRecording);
+      const state = permission(has.inputMonitoring, fresh?.inputMonitoring);
+      const needed = [
+        accessibility,
+        screenRecording,
+        ...(this.inputMonitoringRequired ? [state] : []),
+      ];
+      this.current = {
+        ...this.current,
+        checkedAt: Date.now(),
+        permissions: {
+          helperName: HELPER_NAME,
+          accessibility,
+          screenRecording,
+          inputMonitoring: { required: false, state },
+          restartRequired: needed.includes('restart-required'),
+        },
+      };
+      return this.status();
+    });
+  }
+
+  // What macOS gives the helper as it starts. A permission the user allowed while the helper runs
+  // may reach only a process that starts after that.
+  private async freshPermissions(): Promise<Permissions | undefined> {
+    const epoch = this.epoch;
+    let child: HelperChild | undefined;
+    try {
+      child = this.probe = await this.launch();
+      if (!this.isCurrent(epoch)) return undefined;
+      const wire = new HelperWire(child, randomUUID(), noop, noop);
+      await wire.request({ kind: 'hello' }, REQUEST_MS);
+      return (await wire.request({ kind: 'permissions' }, REQUEST_MS)).permissions;
+    } catch {
+      return undefined;
+    } finally {
+      this.probe = undefined;
+      await child?.stop();
+    }
+  }
+
+  private async restartAllows(missing: HelperPermission): Promise<boolean> {
+    const checked = await this.check();
+    if (checked.status !== 'verified') return false;
+    const { accessibility, screenRecording, inputMonitoring } = checked.value.permissions;
+    const states = {
+      accessibility,
+      'screen-recording': screenRecording,
+      'input-monitoring': inputMonitoring.state,
+    };
+    return states[missing] === 'restart-required';
   }
 
   private forCurrentGeneration<R extends { generation: string }, T>(
@@ -251,7 +323,8 @@ export class NativeHelper implements HelperSetup {
           },
         );
         this.wire = wire = newWire;
-        await wire.request({ kind: 'hello' }, REQUEST_MS);
+        const hello = await wire.request({ kind: 'hello' }, REQUEST_MS);
+        this.stopShortcut(hello.stopShortcut);
       }
       if (this.wire !== wire || !this.isCurrent(epoch)) return unavailable();
       if (binding?.signal.aborted) return cancelled();
@@ -310,6 +383,7 @@ export class NativeHelper implements HelperSetup {
     const wire = this.wire;
     if (wire) this.retire(wire, 'idle');
     else this.current = inactive('idle');
+    await this.probe?.stop();
     await this.checking;
     await this.requests;
     await this.drain;

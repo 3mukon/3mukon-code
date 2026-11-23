@@ -7,9 +7,9 @@ import type { ControlState } from '../shared/computer';
 
 export type { ControlState } from '../shared/computer';
 
-// The floating foreground control (ADR-0027), which the app's own window holds above every
-// application and Space while an agent works in the foreground, never taking the focus: the session
-// and the application in the ink, with Stop and the shortcut that stops it from anywhere, where it is
+// The floating foreground control (ADR-0027), which the helper's panel shows just above the window an
+// agent works in while that is in the foreground (ADR-0034), never taking the focus: the session and
+// the application in the ink, with Stop and the shortcut that stops it from anywhere, where it is
 // registered; once the user's input pauses the work, the control says the user has control, with
 // Hand Back and Stop; while Secure Input pauses it, the control says why, with Stop; and when an
 // application comes to the front by itself, it says so, with Stop.
@@ -25,7 +25,7 @@ export function ForegroundControlBar({
   // The session's name and the application's, as the window's words give them.
   session: string;
   application: string;
-  // Whether ⌃⌥⌘. stops foreground control, as it does once main has registered it.
+  // Whether ⌃⌥⌘. stops foreground control, as it does where macOS registers it.
   shortcut: boolean;
   onStop: () => Promise<boolean>;
   onHandBack: () => Promise<boolean>;

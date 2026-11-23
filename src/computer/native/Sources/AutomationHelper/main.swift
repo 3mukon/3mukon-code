@@ -1,17 +1,24 @@
 import AppKit
 import ApplicationServices
 import CoreFoundation
+import CoreServices
 import Darwin
 import Foundation
 import PeekabooAutomationKit
 
-private let wireVersion = 6
+private let wireVersion = 7
 private let requestLimit = 16 * 1024
 private let controlRequestLimit = 544 * 1024
 private let imageReplyLimit = 1024 * 1024 + 32 * 1024
 
 private struct Request: Decodable, Sendable {
-    enum Kind: String, Decodable, Sendable { case hello, permissions, applications, application, windows, observe, preview, reveal, action, cancel, control }
+    enum Kind: String, Decodable, Sendable {
+        case hello, permissions, applications, application, windows, observe, preview, reveal, action, cancel, control
+        case requestPermission = "request-permission"
+    }
+    enum Permission: String, Decodable, Sendable {
+        case accessibility, screenRecording = "screen-recording", inputMonitoring = "input-monitoring"
+    }
     let kind: Kind
     let version: Int
     let generation: UUID
@@ -26,12 +33,37 @@ private struct Request: Decodable, Sendable {
     let action: NativeInput?
     let frame: NativeControlFrame?
     let controlRevision: Int?
+    let permission: Permission?
 }
 
 private struct Permissions: Encodable {
     let accessibility = AXIsProcessTrusted()
     let screenRecording = CGPreflightScreenCaptureAccess()
     let inputMonitoring = CGPreflightListenEventAccess()
+
+    // Has macOS ask the user, which lists the helper in System Settings, and says whether macOS's
+    // prompt is in front: its button opens the pane, and whatever comes in front covers it. Only an
+    // app that Launch Services knows is listed.
+    static func request(_ permission: Request.Permission) async -> Bool {
+        _ = LSRegisterURL(Bundle.main.bundleURL as CFURL, false)
+        switch permission {
+        case .accessibility: _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+        case .screenRecording: _ = CGRequestScreenCaptureAccess()
+        case .inputMonitoring: _ = CGRequestListenEventAccess()
+        }
+        let deadline = ContinuousClock.now.advanced(by: .milliseconds(1200))
+        while ContinuousClock.now < deadline {
+            if promptIsInFront() { return true }
+            try? await Task.sleep(for: .milliseconds(60))
+        }
+        return false
+    }
+
+    private static func promptIsInFront() -> Bool {
+        let rows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        let front = rows?.first { ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0 }
+        return front?[kCGWindowOwnerName as String] as? String == "universalAccessAuthWarn"
+    }
 }
 
 private struct Reply<T: Encodable>: Encodable {
@@ -40,7 +72,9 @@ private struct Reply<T: Encodable>: Encodable {
     let generation: UUID
     let id: Int
     var pid: pid_t? = nil
+    var stopShortcut: Bool? = nil
     var permissions: Permissions? = nil
+    var prompted: Bool? = nil
     var inventory: RunningApplications? = nil
     var result: T? = nil
     var event: String? = nil
@@ -114,7 +148,7 @@ private final class Connection {
         lanes = DesktopOperationLaneCoordinator(appOwnedCoordinationRootURL: root)
         catalog = NativeWindowCatalog()
         observations = NativeObservations(catalog: catalog)
-        controlPanel = ForegroundPanel()
+        controlPanel = ForegroundPanel(catalog: catalog)
         actions = NativeActions(catalog: catalog, observations: observations, lanes: lanes, controlPanel: controlPanel)
         encoder.outputFormatting = .withoutEscapingSlashes
     }
@@ -166,8 +200,12 @@ private final class Connection {
         switch request.kind {
         case .hello:
             metadata.pid = getpid()
+            metadata.stopShortcut = StopShortcut.available()
         case .permissions:
             metadata.permissions = Permissions()
+        case .requestPermission:
+            guard let permission = request.permission else { throw WireError.frame }
+            metadata.prompted = await Permissions.request(permission)
         case .applications:
             metadata.inventory = RunningApplications.read()
         case .application:
@@ -287,12 +325,15 @@ private func run(_ args: [String]) async throws {
     await connection.close()
 }
 
+// The permissions are the helper's own before anything asks macOS for them.
+guard let arguments = OwnPermissions.take(CommandLine.arguments) else { exit(EXIT_FAILURE) }
+
 // AppKit dispatches the non-activating panel's buttons on the same main run loop as the event tap.
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)
 Task { @MainActor in
     do {
-        try await run(CommandLine.arguments)
+        try await run(arguments)
         exit(EXIT_SUCCESS)
     } catch {
         exit(EXIT_FAILURE)

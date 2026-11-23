@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import {
   BrowserWindow,
   ipcMain,
+  nativeImage,
   screen,
   type IpcMainInvokeEvent,
   type NativeImage,
@@ -9,13 +10,21 @@ import {
 } from 'electron';
 import { z } from 'zod';
 import type { NativeControlFrame } from '../../computer/main/native-protocol';
-import type { ControlCommand, ControlWindowSnapshot } from '../../computer/shared/computer';
+import type {
+  ControlEvent,
+  ControlWindowButton,
+  ControlWindowSnapshot,
+} from '../../computer/shared/computer';
 import type { Language } from '../../i18n/shared/language';
 import type { Bounds, ForegroundControl, TargetRef } from '../../sessions/shared/automation';
-import { controlChannels } from '../shared/control-window';
+import {
+  CONTROL_SIZE,
+  controlChannels,
+  looks,
+  marked,
+  REVISION_BITS,
+} from '../shared/control-window';
 
-const WIDTH = 560;
-const HEIGHT = 48;
 const READY_MS = 2_500;
 const revision = z.int().positive();
 const buttons = z
@@ -36,7 +45,8 @@ const buttons = z
   .max(2);
 
 interface Ports {
-  bounds(control: ForegroundControl): Bounds | undefined;
+  // The window the control is about: the helper's own handle of it, and where it last was.
+  window(control: ForegroundControl): { id: string; bounds: Bounds } | undefined;
   name(owner: string): string;
   language(): Language;
   stop(owner: string): Promise<boolean>;
@@ -44,8 +54,9 @@ interface Ports {
   draw(revision: number, frame: NativeControlFrame | null): boolean;
 }
 
-// A dedicated hidden page draws the control. The helper displays its frame in a non-activating
-// native panel and reports clicks with the revision that supplied their control bounds.
+// A dedicated hidden page draws the control. The helper displays its picture in a non-activating
+// native panel, which it keeps above the window the control is about, and reports clicks with the
+// revision that supplied their places.
 export class ForegroundControlWindow {
   private panel?: BrowserWindow;
   private current?: ForegroundControl;
@@ -55,6 +66,7 @@ export class ForegroundControlWindow {
   // The density the hidden page draws at, the display's, so that the helper's panel shows the
   // control as sharply as the windows around it.
   private scale = 1;
+  private windowId = '';
   private capturing = 0;
   private disposed = false;
 
@@ -72,28 +84,23 @@ export class ForegroundControlWindow {
       const control = this.snapshot.control;
       if (drawn !== this.snapshot.revision || !control || drawn <= this.capturing) return;
       const entries = buttons.parse(layout);
-      const { width, height } = control.bounds;
       if (
         entries.some(
-          ({ bounds: { x, y, width: w, height: h } }) =>
-            x < 0 || y < 0 || x + w > width || y + h > height,
+          ({ bounds: { x, y, width, height } }) =>
+            x < 0 || y < 0 || x + width > CONTROL_SIZE.width || y + height > CONTROL_SIZE.height,
         )
       )
         return;
       this.capturing = drawn;
       try {
-        const capture = await renderFrame(panel.webContents);
+        // The helper shows its last picture until it has another, so this goes on while the revision
+        // is the current one.
+        let capture: NativeImage | undefined;
+        while (!capture && drawn === this.snapshot.revision && this.panel === panel)
+          capture = await renderFrame(panel.webContents, drawn, this.scale);
         if (drawn !== this.snapshot.revision || this.panel !== panel || !capture) return;
-        const png = capture.toPNG();
-        if (png.byteLength > 384 * 1024) return;
-        if (
-          !this.ports.draw(drawn, {
-            image: png.toString('base64'),
-            bounds: control.bounds,
-            buttons: entries,
-          })
-        )
-          return;
+        const frame = frameOf(capture, entries, this.scale);
+        if (!frame || !this.ports.draw(drawn, { ...frame, window: this.windowId })) return;
         this.displayed = drawn;
         this.paint?.resolve(true);
       } finally {
@@ -106,9 +113,12 @@ export class ForegroundControlWindow {
     return this.panel?.webContents === contents;
   }
 
-  async command(drawn: number, action: ControlCommand): Promise<boolean> {
+  async command(drawn: number, action: ControlEvent): Promise<boolean> {
     const control = this.current;
-    if (!control || drawn !== this.snapshot.revision || drawn !== this.displayed) return false;
+    if (!control) return false;
+    // A press that comes while the control changes its state still means the one in control.
+    if (action === 'shortcut') return this.ports.stop(control.sessionId);
+    if (drawn !== this.snapshot.revision || drawn !== this.displayed) return false;
     if (action === 'stop') return this.ports.stop(control.sessionId);
     return (
       control.state === 'paused' &&
@@ -125,22 +135,24 @@ export class ForegroundControlWindow {
       this.publish(null);
       return;
     }
-    const target = this.ports.bounds(control);
-    if (!target) {
+    const window = this.ports.window(control);
+    if (!window) {
       this.publish(null);
       return;
     }
-    const currentPlacement = sameOperation ? this.snapshot.control : null;
-    const display = screen.getDisplayMatching(target);
-    const bounds = currentPlacement?.bounds ?? controlBounds(display.workArea);
-    const scale = currentPlacement ? this.scale : densityOf(display.scaleFactor);
+    const shown = sameOperation && this.snapshot.control !== null;
+    const scale = shown
+      ? this.scale
+      : densityOf(screen.getDisplayMatching(window.bounds).scaleFactor);
     const opened = this.panel === undefined;
-    const panel = this.panel ?? this.open(bounds, scale);
-    if (!currentPlacement) {
+    const panel = this.panel ?? this.open(scale);
+    if (!shown) {
       if (!opened && scale !== this.scale) panel.webContents.setZoomFactor(scale);
-      panel.setContentSize(Math.round(bounds.width * scale), Math.round(bounds.height * scale));
+      const { width, height } = pageSize(scale);
+      panel.setContentSize(width, height);
     }
     this.scale = scale;
+    this.windowId = window.id;
     this.publish({
       state:
         control.state === 'paused'
@@ -152,8 +164,6 @@ export class ForegroundControlWindow {
       application: control.application.name,
       stopShortcut: control.stopShortcut,
       language: this.ports.language(),
-      displayId: currentPlacement?.displayId ?? display.id,
-      bounds,
     });
   }
 
@@ -229,10 +239,9 @@ export class ForegroundControlWindow {
 
   // The hidden page lays the control out at its size in points, and paints it at the display's
   // density: its window is that many times larger and zoomed as much.
-  private open(bounds: Bounds, scale: number): BrowserWindow {
+  private open(scale: number): BrowserWindow {
     const panel = new BrowserWindow({
-      width: Math.round(bounds.width * scale),
-      height: Math.round(bounds.height * scale),
+      ...pageSize(scale),
       useContentSize: true,
       show: false,
       frame: false,
@@ -275,21 +284,78 @@ export class ForegroundControlWindow {
   }
 }
 
-function renderFrame(contents: WebContents): Promise<NativeImage | undefined> {
+// The page in pixels, with the control drawn once for each of its looks.
+function pageSize(scale: number): { width: number; height: number } {
+  return {
+    width: Math.round(CONTROL_SIZE.width * scale),
+    height: Math.round(CONTROL_SIZE.height * scale) * looks.length,
+  };
+}
+
+// The control's picture, and those of its buttons, cut on whole pixels so that each lies exactly over
+// its place in the control.
+function frameOf(
+  page: NativeImage,
+  buttons: readonly ControlWindowButton[],
+  scale: number,
+): Omit<NativeControlFrame, 'window'> | undefined {
+  const { width, height } = pageSize(scale);
+  const row = height / looks.length;
+  const cut = (look: number, part: Bounds) =>
+    page.crop({ ...part, y: look * row + part.y }).toPNG();
+  const image = cut(0, { x: 0, y: 0, width, height: row });
+  if (image.byteLength > 384 * 1024) return undefined;
+  return {
+    image: image.toString('base64'),
+    size: CONTROL_SIZE,
+    buttons: buttons.map((button) => {
+      const x = Math.floor(button.bounds.x * scale);
+      const y = Math.floor(button.bounds.y * scale);
+      const right = Math.min(width, Math.ceil((button.bounds.x + button.bounds.width) * scale));
+      const bottom = Math.min(row, Math.ceil((button.bounds.y + button.bounds.height) * scale));
+      const part = { x, y, width: right - x, height: bottom - y };
+      return {
+        ...button,
+        bounds: {
+          x: x / scale,
+          y: y / scale,
+          width: part.width / scale,
+          height: part.height / scale,
+        },
+        ...(button.enabled && {
+          hover: cut(looks.indexOf('hover'), part).toString('base64'),
+          pressed: cut(looks.indexOf('pressed'), part).toString('base64'),
+        }),
+      };
+    }),
+  };
+}
+
+// The page's picture at a revision, or none where it has not painted that in a second. A paint can
+// still show the page as it was before.
+function renderFrame(
+  contents: WebContents,
+  revision: number,
+  scale: number,
+): Promise<NativeImage | undefined> {
   return new Promise((resolve) => {
+    let again: ReturnType<typeof setTimeout> | undefined;
     const finish = (frame?: NativeImage) => {
       clearTimeout(timer);
+      clearTimeout(again);
       contents.removeListener('paint', paint);
       resolve(frame);
     };
     const paint = (_event: unknown, _bounds: Bounds, image: NativeImage) => {
-      const bitmap = image.toBitmap();
-      for (let offset = 3; offset < bitmap.length; offset += 4) {
-        if (bitmap[offset] !== 0) {
-          finish(image);
-          return;
-        }
+      const frame = pictureOf(image, revision, scale);
+      if (frame) {
+        finish(frame);
+        return;
       }
+      clearTimeout(again);
+      again = setTimeout(() => {
+        contents.invalidate();
+      }, 16);
     };
     const timer = setTimeout(finish, 1_000);
     timer.unref();
@@ -298,18 +364,22 @@ function renderFrame(contents: WebContents): Promise<NativeImage | undefined> {
   });
 }
 
+// A paint without its mark, or nothing where the mark is not the revision's.
+function pictureOf(image: NativeImage, revision: number, scale: number): NativeImage | undefined {
+  const { width, height } = image.getSize();
+  const bitmap = image.toBitmap();
+  if (bitmap.length !== width * height * 4) return undefined;
+  const row = Math.floor(scale / 2) * width;
+  for (let cell = 0; cell <= REVISION_BITS; cell++) {
+    const alpha = bitmap[(row + Math.floor((cell + 0.5) * scale)) * 4 + 3] ?? 0;
+    if (alpha > 127 !== marked(revision, cell)) return undefined;
+  }
+  const cells = Math.ceil((REVISION_BITS + 1) * scale) * 4;
+  for (let y = 0; y < Math.ceil(scale); y++) bitmap.fill(0, y * width * 4, y * width * 4 + cells);
+  return nativeImage.createFromBitmap(bitmap, { width, height });
+}
+
 // A display's density, as the helper takes it: whole or fractional, from one to three times.
 function densityOf(scaleFactor: number | undefined): number {
   return Math.min(3, Math.max(1, scaleFactor ?? 1));
-}
-
-function controlBounds(area: Bounds): Bounds {
-  const width = Math.min(WIDTH, area.width);
-  const height = Math.min(HEIGHT, area.height);
-  return {
-    x: area.x + Math.floor((area.width - width) / 2),
-    y: area.y + Math.min(14, area.height - height),
-    width,
-    height,
-  };
 }

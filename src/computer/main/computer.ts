@@ -354,9 +354,10 @@ export class NativeComputer {
       return observed.elements.find((control) => control.id === element)?.label;
   }
 
-  targetBounds(owner: string, ref: TargetRef): Bounds | undefined {
+  // The helper's own handle of a window, and where it last was.
+  nativeWindow(owner: string, ref: TargetRef): { id: string; bounds: Bounds } | undefined {
     const window = ref.kind === 'window' ? this.window(owner, asWindow(ref)) : undefined;
-    return window && { ...window.bounds };
+    return window && { id: window.nativeId, bounds: { ...window.bounds } };
   }
 
   async action(

@@ -233,7 +233,7 @@
           "stale-observation": "读取后页面或窗口已变化",
           "target-paused": "你接管期间已暂停",
           "sandbox-denied": "当前沙盒级别不允许",
-          "file-scope-unverifiable": "超出会话的文件夹",
+          "file-scope-unverifiable": "可能触及会话文件夹以外的文件",
           "approval-required": "需要你的回应",
           "denied": "已拒绝",
           "setup-required": "需要设置",
@@ -359,7 +359,7 @@
         "chromeAnyProfile": "{{agent}} 想在它于 Chrome 中打开的标签页里，使用你的 Chrome 登录信息。",
         "app": "{{agent}} 想使用应用的浏览器与所有会话共用的登录信息。",
         "background": "{{agent}} 想查看{{app}}的窗口并按下其控件，但不把它带到最前面。",
-        "foreground": "{{agent}} 想把{{app}}带到最前面，并在其中使用键盘和指针。移动鼠标或打字会让它暂停。",
+        "foreground": "{{agent}} 想在{{app}}处于最前面时，在其中使用键盘和指针。移动鼠标或打字会让它暂停。",
         "dialog": "{{agent}} 想在{{app}}打开的对话框中做出选择。"
       },
       "scope": "“允许一次”持续到 {{agent}} 用完或本轮结束；“在此会话中允许”持续到会话结束或你将其结束。",
@@ -659,7 +659,7 @@
   "computer": {
     "setting": {
       "label": "计算机使用",
-      "detail": "macOS 允许代理在其他应用中查看和执行的操作。"
+      "detail": "macOS 允许代理在其他应用中查看和执行的操作。本应用在“系统设置”中显示为“{{helper}}”。"
     },
     "permission": {
       "accessibility": {
@@ -688,7 +688,7 @@
     "notice": {
       "needs": "计算机使用需要“{{permission}}”权限",
       "detail": "{{missing}}{{then}}",
-      "allowThen": "请在“系统设置”中允许，然后再请代理试一次。",
+      "allowThen": "请在“系统设置”中允许“{{helper}}”，然后再请代理试一次。",
       "restartTitle": "计算机使用需要重启应用的辅助程序",
       "restartBody": "你允许的权限会在它重启后生效。"
     },

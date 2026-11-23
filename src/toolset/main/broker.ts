@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { ApprovalAnswer } from '../../sessions/shared/events';
 import type {
   ActivityIncident,
@@ -434,13 +435,6 @@ export class AutomationBroker {
   configureStopShortcut(available: boolean): void {
     this.stopShortcut = available;
   }
-  foregroundSession(): string | null {
-    return this.foreground ?? this.control?.sessionId ?? null;
-  }
-  stopForeground(): void {
-    const id = this.foregroundSession();
-    if (id && this.hasOwner(id)) this.stop(id);
-  }
   subscribeForegroundControl(
     listener: (control: ForegroundControl | undefined) => void,
   ): () => void {
@@ -451,6 +445,7 @@ export class AutomationBroker {
     };
   }
   private setControl(control: ForegroundControl | undefined): void {
+    if (isDeepStrictEqual(this.control, control)) return;
     this.control = control;
     for (const listener of this.controlListeners) {
       try {
@@ -946,7 +941,7 @@ export class AutomationBroker {
       work.dispatched = false;
       release();
       if (foreground && this.foreground === owner.id) this.foreground = null;
-      this.settleControl(owner, work, foreground);
+      this.settleControl(owner, work);
       return { outcome: cancelled() };
     }
     let running: Promise<ExecutionResult>;
@@ -976,12 +971,17 @@ export class AutomationBroker {
             work.operation?.fact.kind === 'application-background' &&
             !aborted() &&
             this.foreground === null &&
-            (!this.control || this.control.state === 'came-forward')
+            this.control?.state !== 'paused' &&
+            this.control?.state !== 'stopping'
           ) {
             this.showControl(owner, work, nativeApplication, 'came-forward');
             this.state(owner);
           }
           return saved;
+        },
+        names: (ref) => {
+          const found = this.resources.resolve(owner.id, ref);
+          if (found) owner.activity.describe(work.callId, found.target, plan.delivery, plan, false);
         },
         ...(plan.target ? { target: { ...plan.target } } : {}),
         paths: checkedFiles.paths,
@@ -1001,7 +1001,7 @@ export class AutomationBroker {
         work.settled = true;
         release();
         if (foreground && this.foreground === owner.id) this.foreground = null;
-        this.settleControl(owner, work, foreground);
+        this.settleControl(owner, work);
         owner.activity.settledExclusion(work.callId);
         this.forgetWork(owner, work);
         this.state(owner);
@@ -1245,15 +1245,16 @@ export class AutomationBroker {
       stopShortcut: this.stopShortcut,
     });
   }
-  private settleControl(owner: Owner, work: Work, foreground: boolean): void {
+  // The control stays between an operation's actions, so that the user sees who may act, and the
+  // stop shortcut reaches them, until the operation has ended.
+  private settleControl(owner: Owner, work: Work): void {
     const control = this.control;
-    if (!control || control.operationId !== work.operation?.fact.id || control.state === 'paused')
-      return;
+    if (control?.operationId !== work.operation?.fact.id || control?.state !== 'stopping') return;
     const running = [...owner.calls].some(
       (call) =>
         call !== work && call.operation === work.operation && call.dispatched && !call.settled,
     );
-    if (foreground || (control.state === 'stopping' && !running)) this.setControl(undefined);
+    if (!running) this.setControl(undefined);
   }
   async closeOwner(id: string, remove = false): Promise<void> {
     const owner = this.owner(id);

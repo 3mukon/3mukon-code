@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { app, BrowserWindow, globalShortcut, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, nativeTheme, shell } from 'electron';
 import { Accounts, usageStorage } from '../../accounts/main/accounts';
 import { windowAccountsUi } from '../../accounts/main/native';
 import type { AccountSource } from '../../accounts/main/source';
@@ -61,7 +61,6 @@ const CATCH_UP_AFTER_MS = 10_000;
 // How long after the app opens it reads the providers' sign-ins and usage limits, once the window's
 // own requests, such as the models' lists, are under way (ADR-0017).
 const ACCOUNTS_AFTER_MS = 5_000;
-const STOP_FOREGROUND_SHORTCUT = 'Control+Alt+Command+.';
 
 void app
   .whenReady()
@@ -130,6 +129,9 @@ void app
       onControl: (revision, command) => {
         void controlWindow?.command(revision, command);
       },
+      onStopShortcut: (registers) => {
+        toolset?.broker.configureStopShortcut(registers);
+      },
     });
     const native = computerAutomation(
       helper,
@@ -175,23 +177,12 @@ void app
       toolset?.sessions,
     );
     const automation = automationUi(toolset?.broker, sessions);
-    let shortcutRegistered = false;
     let stopWatchingControl: (() => void) | undefined;
     let stopControlSettings: (() => void) | undefined;
     if (toolset) {
       const broker = toolset.broker;
-      try {
-        shortcutRegistered = globalShortcut.register(STOP_FOREGROUND_SHORTCUT, () => {
-          const owner = broker.foregroundSession();
-          if (owner && sessions.has(owner)) void automation.stop(owner);
-          else broker.stopForeground();
-        });
-      } catch {
-        // The window and the session's Stop remain available.
-      }
-      broker.configureStopShortcut(shortcutRegistered);
       const control = new ForegroundControlWindow(new URL('control-window.html', pageUrl()).href, {
-        bounds: ({ sessionId, target }) => native.computer.targetBounds(sessionId, target),
+        window: ({ sessionId, target }) => native.computer.nativeWindow(sessionId, target),
         name: (owner) => sessions.title(owner) ?? t('panels.sessionPage'),
         language: () =>
           resolveLanguage(preferredLanguages(settings.get().language, systemLanguages)),
@@ -260,7 +251,6 @@ void app
       page: pageUrl(),
     });
     closeBeforeQuitting(adapters, async () => {
-      if (shortcutRegistered) globalShortcut.unregister(STOP_FOREGROUND_SHORTCUT);
       stopWatchingControl?.();
       stopControlSettings?.();
       controlWindow?.dispose();

@@ -125,7 +125,7 @@ describe('HostApprovalBlock', () => {
       mail,
       'application-foreground' as const,
       'Use the keyboard and pointer in Mail?',
-      'Codex wants to bring Mail to the front and use the keyboard and pointer in it. Moving the mouse or typing pauses it.',
+      'Codex wants to use the keyboard and pointer in Mail while it’s in front. Moving the mouse or typing pauses it.',
     ],
     [
       {

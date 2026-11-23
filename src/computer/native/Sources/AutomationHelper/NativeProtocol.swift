@@ -69,9 +69,16 @@ struct NativeControlFrame: Decodable, Sendable {
         let label: String
         let bounds: NativeBounds
         let enabled: Bool
+        let hover: Data?
+        let pressed: Data?
+    }
+    struct Size: Decodable, Sendable {
+        let width: Double
+        let height: Double
     }
     let image: Data
-    let bounds: NativeBounds
+    let window: UUID
+    let size: Size
     let buttons: [Button]
 }
 

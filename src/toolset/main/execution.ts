@@ -52,6 +52,8 @@ export interface ExecutionContext {
   operationId: string | null;
   // Retained with this call; receipt time and owner/operation/target come from the broker.
   report(incident: IncidentReport): Outcome<null>;
+  // Names the target of a call whose arguments could not, for the session's activity.
+  names(target: TargetRef): void;
   target?: TargetRef;
   // Rechecked after approval/queueing; use these, not unchecked input paths.
   paths: readonly string[];

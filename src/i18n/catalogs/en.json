@@ -236,7 +236,7 @@
           "stale-observation": "The page or window had changed since it was read",
           "target-paused": "Paused while you have it",
           "sandbox-denied": "Not allowed at this sandbox level",
-          "file-scope-unverifiable": "Outside the session’s folders",
+          "file-scope-unverifiable": "Could reach files outside the session’s folders",
           "approval-required": "Needs your answer",
           "denied": "Denied",
           "setup-required": "Needs setup",
@@ -363,7 +363,7 @@
         "chromeAnyProfile": "{{agent}} wants to use your Chrome sign-ins, in a tab it opens in Chrome.",
         "app": "{{agent}} wants to use the sign-ins the app’s browser shares with every session.",
         "background": "{{agent}} wants to see {{app}}’s windows and press its controls, without bringing it to the front.",
-        "foreground": "{{agent}} wants to bring {{app}} to the front and use the keyboard and pointer in it. Moving the mouse or typing pauses it.",
+        "foreground": "{{agent}} wants to use the keyboard and pointer in {{app}} while it’s in front. Moving the mouse or typing pauses it.",
         "dialog": "{{agent}} wants to make a choice in the dialog {{app}} opened."
       },
       "scope": "Allow Once lasts until {{agent}} is done with it or the turn ends; Allow for This Session lasts until the session ends or you end it.",
@@ -665,7 +665,7 @@
   "computer": {
     "setting": {
       "label": "Computer use",
-      "detail": "What macOS lets agents see and do in other apps."
+      "detail": "What macOS lets agents see and do in other apps. The app appears in System Settings as {{helper}}."
     },
     "permission": {
       "accessibility": {
@@ -694,7 +694,7 @@
     "notice": {
       "needs": "Computer use needs {{permission}}",
       "detail": "{{missing}} {{then}}",
-      "allowThen": "Allow it in System Settings, then ask again.",
+      "allowThen": "Allow {{helper}} in System Settings, then ask again.",
       "restartTitle": "Computer use needs the app’s helper to restart",
       "restartBody": "A permission you allowed takes effect once it restarts."
     },

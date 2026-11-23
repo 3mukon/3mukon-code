@@ -1,8 +1,7 @@
 import { z } from 'zod';
-import type { Bounds } from '../../sessions/shared/automation';
 import type { ControlWindowButton } from '../shared/computer';
 
-export const NATIVE_WIRE_VERSION = 6;
+export const NATIVE_WIRE_VERSION = 7;
 export const NATIVE_REQUEST_BYTES = 16 * 1024;
 export const NATIVE_CONTROL_BYTES = 544 * 1024;
 export const NATIVE_IMAGE_BASE64 = 1024 * 1024;
@@ -28,6 +27,8 @@ export const nativeApplication = z.strictObject({
 });
 const application = nativeApplication.extend({ name: label });
 export type NativeApplication = z.infer<typeof nativeApplication>;
+const permission = z.enum(['accessibility', 'screen-recording', 'input-monitoring']);
+export type NativePermission = z.infer<typeof permission>;
 
 const bounds = z.strictObject({
   x: z.number().min(-100_000).max(100_000),
@@ -124,15 +125,19 @@ export function foregroundAction(action: NativeAction): boolean {
   return ['point-click', 'point-scroll', 'drag', 'press'].includes(action.kind);
 }
 
+// The foreground control's picture, which the helper keeps above the window it is about, and what
+// each button that takes a click looks like under the pointer and pressed.
 export interface NativeControlFrame {
   image: string;
-  bounds: Bounds;
-  buttons: readonly ControlWindowButton[];
+  window: string;
+  size: { width: number; height: number };
+  buttons: readonly (ControlWindowButton & { hover?: string; pressed?: string })[];
 }
 
 // These packets are assembled in main from trusted broker facts and private OS identities.
 export type HelperCommand =
   | { kind: 'hello' | 'permissions' | 'applications' }
+  | { kind: 'request-permission'; permission: NativePermission }
   | { kind: 'application'; application: NativeApplication }
   | { kind: 'windows'; application: NativeApplication; operation: string; deadline: number }
   | {
@@ -174,7 +179,7 @@ const failed = z.strictObject({
     'busy',
     'needs-user-action',
   ]),
-  permission: z.enum(['accessibility', 'screen-recording', 'input-monitoring']).optional(),
+  permission: permission.optional(),
 });
 const cancelled = z.strictObject({ status: z.literal('cancelled-before-dispatch') });
 function reply<T extends z.ZodType>(value: T) {
@@ -196,7 +201,12 @@ const actionReply = z.discriminatedUnion('status', [
 ]);
 
 export const helperResponse = z.discriminatedUnion('kind', [
-  z.strictObject({ ...header, kind: z.literal('hello'), pid: positive }),
+  z.strictObject({
+    ...header,
+    kind: z.literal('hello'),
+    pid: positive,
+    stopShortcut: z.boolean(),
+  }),
   z.strictObject({
     ...header,
     kind: z.literal('permissions'),
@@ -206,11 +216,12 @@ export const helperResponse = z.discriminatedUnion('kind', [
       inputMonitoring: z.boolean(),
     }),
   }),
+  z.strictObject({ ...header, kind: z.literal('request-permission'), prompted: z.boolean() }),
   z.strictObject({
     ...header,
     kind: z.literal('applications'),
     inventory: z.strictObject({
-      applications: z.array(application).max(16),
+      applications: z.array(application).max(64),
       truncated: z.boolean(),
     }),
   }),
@@ -244,7 +255,7 @@ export const helperEvent = z.strictObject({
 export const helperControlCommand = z.strictObject({
   ...header,
   kind: z.literal('control-command'),
-  event: z.enum(['stop', 'hand-back']),
+  event: z.enum(['stop', 'hand-back', 'shortcut']),
 });
 export type NativeEvent = z.infer<typeof helperEvent>['event'];
 export type HelperResponse = z.infer<typeof helperResponse>;

@@ -4,6 +4,7 @@ import { Button } from '../../ui/renderer/button';
 import { CircleAlert } from '../../ui/renderer/icons';
 import { SettingGroup, SettingItem, SettingProblem } from '../../ui/renderer/setting-group';
 import type { PermissionState, SetupSnapshot } from '../../sessions/shared/automation';
+import { HELPER_NAME } from '../shared/helper';
 
 export type Permission = 'accessibility' | 'screen-recording' | 'input-monitoring';
 export type ComputerSetup = SetupSnapshot['computer'];
@@ -24,7 +25,8 @@ const permissionStateTones = {
 
 // The settings' Computer use: the macOS permissions agents need to see and operate other
 // applications, Accessibility and Screen Recording, and Input Monitoring only where telling the
-// user's input from the agent's needs it. A permission that is allowed says so after its name; one
+// user's input from the agent's needs it, and the name under which System Settings lists the app's
+// helper, which holds them. A permission that is allowed says so after its name; one
 // that is not offers Open System Settings, and one that takes effect only once the app's helper
 // restarts offers Restart Helper. Those actions start from the user's click.
 export function ComputerUseSetting({
@@ -56,7 +58,10 @@ export function ComputerUseSetting({
       : []),
   ];
   return (
-    <SettingGroup label={t('computer.setting.label')} detail={t('computer.setting.detail')}>
+    <SettingGroup
+      label={t('computer.setting.label')}
+      detail={t('computer.setting.detail', { helper: HELPER_NAME })}
+    >
       {permissions.map(([permission, state]) => {
         const said = stateWords(state);
         return (
@@ -130,7 +135,7 @@ export function ComputerSetupNotice({
         {need.kind === 'permission'
           ? t('computer.notice.detail', {
               missing: t(`computer.permission.${need.permission}.missing`),
-              then: t('computer.notice.allowThen'),
+              then: t('computer.notice.allowThen', { helper: HELPER_NAME }),
             })
           : t('computer.notice.restartBody')}
       </p>

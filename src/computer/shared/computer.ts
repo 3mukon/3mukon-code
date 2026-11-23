@@ -17,6 +17,8 @@ export interface ComputerBridge {
 
 export type ControlState = 'acting' | 'user' | 'secure-input' | 'came-forward' | 'stopping';
 export type ControlCommand = 'stop' | 'hand-back';
+// What the helper reports of the control: a click on one of its buttons, or the stop shortcut.
+export type ControlEvent = ControlCommand | 'shortcut';
 
 export interface ControlWindowButton {
   command: ControlCommand;
@@ -33,8 +35,6 @@ export interface ControlWindowSnapshot {
     application: string;
     stopShortcut: boolean;
     language: Language;
-    displayId: number;
-    bounds: Bounds;
   } | null;
 }
 

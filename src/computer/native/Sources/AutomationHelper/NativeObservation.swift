@@ -176,13 +176,22 @@ final class NativeObservations {
             if (role == kAXTextFieldRole || role == kAXTextAreaRole) && NativeAX.settable(element, kAXValueAttribute) {
                 actions.append("type")
             }
-            if role == kAXScrollBarRole && available.contains(kAXIncrementAction) && available.contains(kAXDecrementAction) {
+            if role == kAXScrollBarRole && (available.contains(kAXIncrementAction) && available.contains(kAXDecrementAction)
+                || NativeAX.pager(element, down: true) != nil && NativeAX.pager(element, down: false) != nil) {
                 actions.append("scroll")
             }
         }
         let label = nativeLabel(NativeAX.string(element, kAXTitleAttribute)) ??
-            nativeLabel(NativeAX.string(element, kAXDescriptionAttribute))
+            nativeLabel(NativeAX.string(element, kAXDescriptionAttribute)) ?? ownWords(element, role: role)
         return NativeControl(id: id, role: role, label: label, bounds: NativeAX.bounds(element), actions: actions)
+    }
+
+    // What an element without a label says of itself: a text its words, and a part of a window or of a
+    // scroll bar what it is, such as a close button.
+    private func ownWords(_ element: AXUIElement, role: String) -> String? {
+        if role == kAXStaticTextRole { return nativeLabel(NativeAX.string(element, kAXValueAttribute)) }
+        guard NativeAX.string(element, kAXSubroleAttribute) != nil else { return nil }
+        return nativeLabel(NativeAX.string(element, kAXRoleDescriptionAttribute))
     }
 
     private func previewable(_ live: NativeWindowCatalog.Live) -> Bool {
@@ -224,16 +233,21 @@ final class NativeObservations {
         guard !IsSecureEventInputEnabled(), raster.width == config.width, raster.height == config.height else {
             throw NativeFailure.changed
         }
-        let data = NSMutableData()
-        guard let encoder = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else {
-            throw NativeFailure.unsupported
-        }
-        CGImageDestinationAddImage(encoder, raster, [kCGImageDestinationLossyCompressionQuality: 0.72] as CFDictionary)
-        guard CGImageDestinationFinalize(encoder), data.length > 0, data.length <= 768 * 1024 else {
-            throw NativeFailure.unsupported
-        }
+        guard let data = encoded(raster) else { throw NativeFailure.unsupported }
         return NativeImage(mediaType: "image/jpeg", data: data.base64EncodedString(), width: raster.width,
                            height: raster.height, capturedAt: capturedAt)
+    }
+
+    // The raster within the reply's bound: a window full of detail in a lower quality.
+    private func encoded(_ raster: CGImage) -> Data? {
+        for quality in [0.72, 0.5, 0.3, 0.15] {
+            let data = NSMutableData()
+            guard let encoder = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+            CGImageDestinationAddImage(encoder, raster, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+            guard CGImageDestinationFinalize(encoder), data.length > 0 else { return nil }
+            if data.length <= 768 * 1024 { return data as Data }
+        }
+        return nil
     }
 }
 

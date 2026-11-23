@@ -111,7 +111,7 @@ function fixture(twoApplications = false, surface?: ControlSurface) {
     requests.push(call);
     switch (call.kind) {
       case 'hello':
-        emit(call, { pid: 98 });
+        emit(call, { pid: 98, stopShortcut: true });
         break;
       case 'permissions':
         emit(call, {
@@ -209,14 +209,17 @@ function fixture(twoApplications = false, surface?: ControlSurface) {
       value(observation, (await call('observe', { target })).outcome).observationId;
     return { id, call, discover, select, windows, observe };
   }
-  const allow = async (owner: string) => {
+  const allow = async (
+    owner: string,
+    decision: 'allow-once' | 'allow-for-session' = 'allow-once',
+  ) => {
     await vi.waitFor(() => {
       expect(broker.snapshot(owner).value.pendingApprovals).toHaveLength(1);
     });
     const approval = broker.snapshot(owner).value.pendingApprovals[0];
     if (!approval) throw Error('Expected a pending approval.');
     expect(approval.target.ref.kind).toBe('application');
-    expect(broker.answer(owner, approval.id, { decision: 'allow-once' }).status).toBe('verified');
+    expect(broker.answer(owner, approval.id, { decision }).status).toBe('verified');
   };
   return {
     owner,
@@ -293,7 +296,10 @@ it('discovers metadata without a resource and uses one per-app grant for selecte
     expect((await a.call('select', { pid: 101 })).outcome).toMatchObject({
       code: 'invalid-request',
     });
-    const application = value(target, (await a.call('select', { id: discovered?.id })).outcome);
+    const selected = await a.call('select', { id: discovered?.id });
+    const application = value(target, selected.outcome);
+    const named = { state: 'resolved', summary: { ref: application, name: 'Fixture' } };
+    expect(f.broker.record(a.id, selected.automation.callId)).toMatchObject({ target: named });
     const listing = a.windows(application);
     await f.allow(a.id);
     const window = await listing;
@@ -348,7 +354,9 @@ it('discovers metadata without a resource and uses one per-app grant for selecte
       target: { state: 'unresolved' },
     });
     expect(f.count('action')).toBe(0);
-    expect((await a.call('release', { application })).outcome.status).toBe('verified');
+    const released = await a.call('release', { application });
+    expect(released.outcome.status).toBe('verified');
+    expect(f.broker.record(a.id, released.automation.callId)).toMatchObject({ target: named });
     expect(f.broker.snapshot(a.id).value).toMatchObject({ operations: [], grants: [] });
     expect(f.broker.resource(a.id, application.id)?.ref).toEqual(application);
   } finally {
@@ -553,12 +561,100 @@ it('retains foreground exclusion until backend settlement and never replays stop
     });
     expect(f.count('cancel')).toBe(1);
     expect((await a.call('act', args, 'held')).outcome.status).toBe('indeterminate');
-    f.broker.stopForeground();
+    f.broker.stop(a.id);
     expect(f.count('action')).toBe(1);
     f.settle();
     expect((await second).outcome.status).toBe('verified');
     expect(f.count('action')).toBe(2);
     expect(f.broker.snapshot(a.id).value.foregroundOwner).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+it('shows the control between the actions of a foreground operation, and no longer than that lasts', async () => {
+  const f = fixture();
+  try {
+    f.broker.configureStopShortcut(true);
+    const a = await f.owner('a', { mode: 'yolo', sandbox: 'full-access' });
+    const application = await a.select();
+    const window = await a.windows(application);
+    const listener = vi.fn();
+    const unsubscribe = f.broker.subscribeForegroundControl(listener);
+    const press = async () => {
+      const observationId = await a.observe(window);
+      const action = { kind: 'press', key: 'right' };
+      return (await a.call('act', { target: window, observationId, action })).outcome.status;
+    };
+    const control = () => f.broker.snapshot(a.id).value.foregroundControl;
+    expect(await press()).toBe('verified');
+    expect(f.broker.snapshot(a.id).value).toMatchObject({
+      foregroundControl: { state: 'acting', target: window, stopShortcut: true },
+      foregroundOwner: null,
+    });
+    const operation = control()?.operationId;
+    listener.mockClear();
+    expect(await press()).toBe('verified');
+    expect(listener).not.toHaveBeenCalled();
+    expect((await a.call('release', { application })).outcome.status).toBe('verified');
+    expect(listener).toHaveBeenCalledExactlyOnceWith(undefined);
+
+    expect(await press()).toBe('verified');
+    expect(control()?.operationId).not.toBe(operation);
+    f.broker.stop(a.id);
+    expect(control()).toBeUndefined();
+    expect(f.count('action')).toBe(3);
+    unsubscribe();
+  } finally {
+    await f.close();
+  }
+});
+
+it('ends a foreground grant with the action under way and the one that waits, and asks again after', async () => {
+  const f = fixture();
+  try {
+    const a = await f.owner('a', { mode: 'auto', sandbox: 'full-access' });
+    const application = await a.select();
+    const reading = a.windows(application);
+    await f.allow(a.id, 'allow-for-session');
+    const window = await reading;
+    const args = {
+      target: window,
+      observationId: await a.observe(window),
+      action: { kind: 'press', key: 'right', holdMs: 800 },
+    };
+    f.hold();
+    const held = a.call('act', args);
+    await f.allow(a.id, 'allow-for-session');
+    await vi.waitFor(() => {
+      expect(f.count('action')).toBe(1);
+    });
+    const waiting = a.call('act', args);
+    await vi.waitFor(() => {
+      expect(f.broker.snapshot(a.id).value.recentCalls.at(-1)?.phase).toBe('waiting');
+    });
+    const grants = f.broker.snapshot(a.id).value.grants;
+    expect(grants.map(({ operationKind, scope }) => [operationKind, scope])).toEqual([
+      ['application-background', 'session'],
+      ['application-foreground', 'session'],
+    ]);
+    expect(f.broker.endGrant(a.id, grants[1]?.id ?? '').status).toBe('verified');
+    expect((await held).outcome).toMatchObject({ reason: 'cancelled-after-dispatch' });
+    expect((await waiting).outcome).toMatchObject({ status: 'cancelled-before-dispatch' });
+    expect(f.broker.snapshot(a.id).value.foregroundControl).toMatchObject({ state: 'stopping' });
+    f.settle();
+    await vi.waitFor(() => {
+      expect(f.broker.snapshot(a.id).value.foregroundControl).toBeUndefined();
+    });
+    expect(f.count('action')).toBe(1);
+
+    const again = a.call('act', { ...args, observationId: await a.observe(window) });
+    await vi.waitFor(() => {
+      expect(f.broker.snapshot(a.id).value.pendingApprovals).toHaveLength(1);
+    });
+    const approval = f.broker.snapshot(a.id).value.pendingApprovals[0];
+    expect(f.broker.answer(a.id, approval?.id ?? '', { decision: 'deny' }).status).toBe('verified');
+    expect((await again).outcome).toMatchObject({ status: 'refused', code: 'denied' });
   } finally {
     await f.close();
   }
@@ -600,7 +696,7 @@ it('waits for the current native control frame and distinguishes a Secure Input 
       f.broker.record(a.id, stopped.automation.callId)?.incidents.map(({ kind }) => kind),
     ).toEqual(['secure-input']);
     expect(f.broker.handBack(a.id, target)).toMatchObject({ code: 'target-paused' });
-    f.broker.stopForeground();
+    f.broker.stop(a.id);
     f.settle();
     expect(f.broker.snapshot(a.id).value.foregroundControl).toBeUndefined();
   } finally {
