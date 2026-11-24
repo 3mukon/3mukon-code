@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { answerQuestion, dataFolder, launch, pickFolder, withApp } from './app';
+import { answerQuestion, dataFolder, launch, pickFolder, secondCopy, withApp } from './app';
 
 test('the app opens its window on the built page, without Node.js and sandboxed', async () => {
   await withApp(async (electronApp) => {
@@ -331,4 +331,27 @@ test('the UI is in Simplified Chinese when the app runs in that language', async
     await expect(window.getByRole('heading', { name: '工作区' })).toBeVisible();
     await expect(window.locator('html')).toHaveAttribute('lang', 'zh-Hans');
   }, '--lang=zh-CN');
+});
+
+test('a second copy on the same data folder quits before opening a window, and the first comes forward', async () => {
+  const data = dataFolder();
+  const app = await launch(data.path);
+  const minimized = () =>
+    app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows().map((window) => window.isMinimized()),
+    );
+  try {
+    const window = await app.firstWindow();
+    await expect(window.getByRole('heading', { name: 'Sessions' })).toBeVisible();
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.minimize();
+    });
+    await expect.poll(minimized).toEqual([true]);
+    expect(await secondCopy(app, data.path)).toBe(0);
+    // The first copy's one window is back, and no other opened.
+    await expect.poll(minimized).toEqual([false]);
+  } finally {
+    await app.close();
+    data.remove();
+  }
 });

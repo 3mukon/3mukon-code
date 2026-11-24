@@ -64,9 +64,17 @@ const CATCH_UP_AFTER_MS = 10_000;
 // own requests, such as the models' lists, are under way (ADR-0017).
 const ACCOUNTS_AFTER_MS = 5_000;
 
+// One copy of the app runs on a data folder at a time: two would share its records and settings and
+// contend for Chrome's one connection, which only one of them can hold. A second copy quits before it
+// starts anything, and the first comes forward. Electron's lock goes by the data folder, so copies on
+// other folders, such as the smoke tests' throwaway ones, run side by side.
+const onlyCopy = app.requestSingleInstanceLock();
+if (!onlyCopy) app.quit();
+
 void app
   .whenReady()
   .then(async () => {
+    if (!onlyCopy) return;
     const data = app.getPath('userData');
     const version = app.getVersion();
     // The language and the appearance follow the settings, which the settings panel changes. Of the
@@ -308,6 +316,21 @@ void app
     app.on('activate', () => {
       if (!BrowserWindow.getAllWindows().some((window) => !controlWindow?.owns(window.webContents)))
         openWindow();
+    });
+    // A second copy started on this data folder has quit; this one comes forward with its window,
+    // as the user meant to open the app.
+    app.on('second-instance', () => {
+      const shown = BrowserWindow.getAllWindows().find(
+        (window) => !controlWindow?.owns(window.webContents),
+      );
+      if (shown === undefined) {
+        openWindow();
+        return;
+      }
+      if (shown.isMinimized()) shown.restore();
+      shown.show();
+      app.focus({ steal: true });
+      shown.focus();
     });
   })
   .catch((error: unknown) => {

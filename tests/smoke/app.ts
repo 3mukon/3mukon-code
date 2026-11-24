@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -147,6 +147,29 @@ async function shielded(launching: Promise<ElectronApplication>): Promise<Electr
     });
   });
   return app;
+}
+
+// Starts the built app again on the data folder a running copy holds, as a second copy of it would
+// start, and gives its exit code. Such a copy quits before it opens a window, so it needs no shield.
+export function secondCopy(running: ElectronApplication, data: string): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const copy = spawn(running.process().spawnfile, ['.', `--user-data-dir=${data}`], {
+      env: isolatedEnvironment(data),
+      stdio: 'ignore',
+    });
+    const timer = setTimeout(() => {
+      copy.kill();
+      reject(new Error('The second copy did not quit.'));
+    }, 30_000);
+    copy.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    copy.once('exit', (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+  });
 }
 
 // Runs the built app on a throwaway data folder of its own, and closes it afterwards.
