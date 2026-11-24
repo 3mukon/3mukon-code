@@ -119,6 +119,7 @@ describe('SessionPage', () => {
     const { bridge, emit } = fakeBridge({ ...initialSessionState(), mode: 'auto' });
     const accounts = {
       signedOut: (provider: string) => provider === 'codex',
+      signedIn: (provider: string) => provider === 'claude-code',
       signIn: (provider: string) => <p>Sign in to {provider}</p>,
       notice: (provider: string) =>
         provider === 'claude-code' ? <span>Nearly used up</span> : null,
@@ -447,6 +448,90 @@ describe('SessionPage', () => {
       ['sol', 'Sol'],
       ['', 'Luna'],
     ]);
+  });
+
+  it('starts a page with a provider the user is signed in to rather than Claude Code, and keeps it once the user types', async () => {
+    const { bridge } = fakeBridge();
+    const views = (signedIn: string[], signedOut: string[] = []) => ({
+      signedOut: (provider: string) => signedOut.includes(provider),
+      signedIn: (provider: string) => signedIn.includes(provider),
+      signIn: () => null,
+      notice: () => null,
+    });
+    const shown = (accounts: ReturnType<typeof views>) => (
+      <SessionPage
+        bridge={bridge}
+        folder="/Users/me/web"
+        sessionId={null}
+        onStarted={vi.fn()}
+        accounts={accounts}
+      />
+    );
+    // Before the app knows any sign-in, Claude Code; once it learns one, a page the user has not
+    // touched takes it.
+    const { rerender } = render(shown(views([])));
+    await settle();
+    expect(chooser('Provider').value).toBe('claude-code');
+    rerender(shown(views(['codex'], ['claude-code'])));
+    await settle();
+    expect(chooser('Provider').value).toBe('codex');
+    // Signed in to both, the provider menu's order: Claude Code first.
+    rerender(shown(views(['claude-code', 'codex'])));
+    await settle();
+    expect(chooser('Provider').value).toBe('claude-code');
+    // Once the user types, a sign-in learnt later changes nothing.
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hi' } });
+    rerender(shown(views(['codex'], ['claude-code'])));
+    await settle();
+    expect(chooser('Provider').value).toBe('claude-code');
+  });
+
+  it('gives way from a remembered provider known to be signed out to a signed-in one, with its own defaults, and keeps one whose sign-in is unknown', async () => {
+    const { bridge } = fakeBridge();
+    bridge.models.mockResolvedValue(MODELS);
+    bridge.choices.mockResolvedValue({
+      folders: {
+        '/Users/me/web': {
+          provider: 'codex',
+          gateway: null,
+          model: 'luna',
+          effort: 'high',
+          sandbox: 'read-only',
+        },
+      },
+      dayRoot: '/Users/me/3mukon-code',
+    });
+    const accounts = (codex: 'signed-out' | 'unknown') => ({
+      signedOut: (provider: string) => provider === 'codex' && codex === 'signed-out',
+      signedIn: (provider: string) => provider === 'claude-code',
+      signIn: () => null,
+      notice: () => null,
+    });
+    const { rerender } = render(
+      <SessionPage
+        bridge={bridge}
+        folder="/Users/me/web"
+        sessionId={null}
+        onStarted={vi.fn()}
+        accounts={accounts('signed-out')}
+      />,
+    );
+    await settle();
+    expect(chooser('Provider').value).toBe('claude-code');
+    expect(chooser('Model').value).toBe('');
+    expect(chooser('Sandbox').value).toBe('read-only');
+    rerender(
+      <SessionPage
+        bridge={bridge}
+        folder="/Users/me/web"
+        sessionId={null}
+        onStarted={vi.fn()}
+        accounts={accounts('unknown')}
+      />,
+    );
+    await settle();
+    expect(chooser('Provider').value).toBe('codex');
+    expect(chooser('Model').value).toBe('luna');
   });
 
   it('starts with the settings the folder’s sessions last used, but in auto, and remembers its own', async () => {

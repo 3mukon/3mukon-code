@@ -186,6 +186,7 @@ export function App({ bridge }: { bridge: Bridge }) {
   // What session pages show of the providers' accounts.
   const accountViews: AccountViews = {
     signedOut: (provider) => accounts.of(provider)?.signIn.state === 'signed-out',
+    signedIn: (provider) => accounts.of(provider)?.signIn.state === 'signed-in',
     signIn: (provider) => <SignInPrompt provider={provider} onSignIn={signIn} />,
     notice: (provider) => {
       const account = accounts.of(provider);

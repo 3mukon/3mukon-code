@@ -19,7 +19,7 @@ import {
   type RenderToolExtra,
 } from './timeline';
 import { TimelineActionsContext, timelineActions } from './timeline-actions';
-import { rememberChoice, useOffers, useRemembered } from './use-offers';
+import { rememberChoice, useOffers, useProviders, useRemembered } from './use-offers';
 import { useSession } from './use-session';
 
 // What a page starts its session with, or resumes it with when it is not running. A null gateway is
@@ -44,6 +44,9 @@ const firstChoice: Choice = {
   sandbox: 'workspace-write',
 };
 
+// The providers in the provider menu's order, until the app's own list comes.
+const listedProviders: readonly ProviderId[] = ['claude-code', 'codex', 'grok-build'];
+
 const modes: PermissionMode[] = ['auto', 'yolo'];
 const sandboxes: SandboxLevel[] = ['read-only', 'workspace-write', 'full-access'];
 
@@ -56,6 +59,8 @@ const FIRST_ITEMS = 24;
 export interface AccountViews {
   // Whether the provider is known not to be signed in, which its choice says.
   signedOut(provider: ProviderId): boolean;
+  // Whether the provider is known to be signed in, which a new page prefers.
+  signedIn(provider: ProviderId): boolean;
   // Says that the provider is not signed in and offers its sign-in, at the top of the activity.
   signIn(provider: ProviderId): ReactNode;
   // The provider's notice of its usage limits, beside the context in use, or null.
@@ -97,7 +102,8 @@ interface SessionPageProps {
 // page's starting effort for it; until the provider's models come, the page says it is loading them,
 // and a session started before they come keeps the provider's own defaults. Until the user changes
 // one, the settings are those the folder's sessions last used, but for the permission mode, and a model
-// or effort no longer offered gives way to the default; a session's settings, as it starts, switches
+// or effort no longer offered gives way to the default, and the provider prefers one the user is signed
+// in to; a session's settings, as it starts, switches
 // and resumes, are remembered for its folder. A session that is not running, from an earlier run or
 // whose provider stopped, shows its history and starts nothing: its settings, but for the provider,
 // are those it last had, its permission mode included, until the user changes them, and the next
@@ -125,6 +131,9 @@ export function SessionPage({
   // The user's choice on this page, before the session starts or while it is not running, once they
   // have made one.
   const [chosen, setChosen] = useState<Choice | null>(null);
+  // The provider a new page started with, kept once the user types, so that a sign-in learnt later
+  // no longer changes it.
+  const [kept, setKept] = useState<ProviderId | null>(null);
   const remembered = useRemembered(bridge, folder);
   const [draft, setDraft] = useState('');
   const attachments = useAttachments();
@@ -149,8 +158,25 @@ export function SessionPage({
   // Whether the settings are the page's to choose, as they are until the session starts and while it
   // is not running; otherwise they are the running session's, and each change switches it.
   const choosing = sessionId === null || closed;
+  // What a new page starts with: the provider the folder's sessions last used, unless the
+  // app knows it is signed out while another is signed in; with none, the first signed-in provider in
+  // the provider menu's order; else Claude Code. Until the user picks a provider or types, a sign-in
+  // the app learns later changes it.
+  const offeredProviders = useProviders(bridge);
+  const signedIn = (offeredProviders ?? listedProviders).filter(
+    (id) => accounts?.signedIn(id) === true,
+  );
+  const automatic =
+    remembered !== undefined &&
+    !(accounts?.signedOut(remembered.provider) === true && signedIn.length > 0)
+      ? remembered.provider
+      : (signedIn[0] ?? firstChoice.provider);
+  const startsWith = kept ?? automatic;
   const provider =
-    summary?.provider ?? chosen?.provider ?? remembered?.provider ?? firstChoice.provider;
+    summary?.provider ??
+    chosen?.provider ??
+    starting?.settings.provider ??
+    (sessionId === null ? startsWith : (remembered?.provider ?? firstChoice.provider));
   // The session's own settings: those it runs with, or those it last had.
   const own: Choice = {
     provider,
@@ -160,12 +186,17 @@ export function SessionPage({
     mode: state?.mode ?? 'auto',
     sandbox: state?.sandbox ?? 'workspace-write',
   };
+  // A provider other than the remembered one starts with its own defaults, in the folder's sandbox.
   const unchanged =
     sessionId !== null
       ? own
-      : remembered === undefined
-        ? firstChoice
-        : { ...remembered, mode: 'auto' as const };
+      : remembered?.provider === startsWith
+        ? { ...remembered, mode: 'auto' as const }
+        : {
+            ...firstChoice,
+            provider: startsWith,
+            sandbox: remembered?.sandbox ?? firstChoice.sandbox,
+          };
   // Until a session the page has started gives its state, the settings it started with.
   const settings = choosing
     ? (chosen ?? unchanged)
@@ -553,6 +584,7 @@ export function SessionPage({
               value={draft}
               rows={1}
               onChange={(event) => {
+                if (sessionId === null && kept === null) setKept(automatic);
                 setDraft(event.target.value);
               }}
               onPaste={attachments.onPaste}

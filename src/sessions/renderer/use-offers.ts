@@ -210,6 +210,16 @@ export function useRemembered(
   return remembered;
 }
 
+// The providers the app offers, in the provider menu's order, or nothing until they come.
+export function useProviders(bridge: SessionsBridge): ProviderId[] | undefined {
+  const offers = offersOf(bridge);
+  const lists = useSyncExternalStore(offers.subscribe, offers.current);
+  useEffect(() => {
+    offers.loadProviders();
+  }, [offers]);
+  return lists.providers;
+}
+
 // Remembers the settings a session in the folder started with or switched to.
 export function rememberChoice(
   bridge: SessionsBridge,
