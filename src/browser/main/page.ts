@@ -1,6 +1,6 @@
 import type { BrowserWindow } from 'electron';
 import type { MessageImage } from '../../sessions/shared/events';
-import type { Outcome, RefusalDetail } from '../../sessions/shared/automation';
+import type { JsonValue, Outcome, RefusalDetail } from '../../sessions/shared/automation';
 import type { BrowserNavigation, BrowserTabState } from '../shared/browser';
 import type { BrowserViewBounds } from '../shared/view';
 
@@ -20,6 +20,14 @@ export type PageAction =
   | { kind: 'click'; element: number }
   | { kind: 'type'; element: number; text: string }
   | { kind: 'scroll'; deltaY: number };
+
+// What an agent's script came to in the page: its value as JSON, cut beyond the limit as text, no
+// value, or the error it threw.
+export type ScriptResult =
+  | { kind: 'value'; value: JsonValue }
+  | { kind: 'value'; truncated: true; json: string }
+  | { kind: 'undefined' }
+  | { kind: 'error'; message: string };
 
 export interface PageCapture {
   image: MessageImage;
@@ -41,6 +49,8 @@ export interface BrowserPage {
   observe(marker: string, signal?: AbortSignal): Promise<PageObservation>;
   capture(signal?: AbortSignal): Promise<PageCapture | null>;
   action(marker: string, action: PageAction, signal?: AbortSignal): Promise<Outcome<null>>;
+  // Runs an agent's script in the top-level document, in the page's own context.
+  runScript(script: string, timeoutMs: number, signal: AbortSignal): Promise<Outcome<ScriptResult>>;
   openExternal?(): Promise<Outcome<null>>;
   mount?(window: BrowserWindow, focused: () => void, fileDragged: () => void): MountedBrowserPage;
   close(): Promise<void>;

@@ -169,6 +169,7 @@
         "browser_snapshot": "Read the page",
         "browser_screenshot": "Took a screenshot of the page",
         "browser_act": "Acted on the page",
+        "browser_evaluate": "Ran a script",
         "browser_close": "Closed a tab",
         "computer_targets": "Listed the running apps",
         "computer_windows": "Looked for an app’s windows",
@@ -237,6 +238,8 @@
         "browser_screenshot": "Took a screenshot of the page",
         "browser_act": "Acted on the page",
         "browser_close": "Closed {{target}}",
+        "browser_evaluate": "Ran a script on {{target}}",
+        "browser_evaluateBlank": "Ran a script",
         "other": "{{tool}}: {{target}}",
         "otherAlone": "{{tool}}",
         "browser_navigateBlank": "Opened a page",
@@ -307,6 +310,11 @@
       "frames": {
         "evicted": "Its screenshots are no longer kept",
         "failed": "Its screenshots couldn’t be read"
+      },
+      "script": {
+        "undefined": "No value",
+        "truncated": "Cut at 32 KiB.",
+        "threw": "Threw an error"
       },
       "appName": "{{name}}",
       "someApp": "an app",
@@ -403,9 +411,9 @@
         "dialog": "Use the dialog {{app}} opened?"
       },
       "detail": {
-        "chrome": "{{agent}} wants to use the {{profile}} profile’s sign-ins, in a tab it opens in Chrome.",
-        "chromeAnyProfile": "{{agent}} wants to use your Chrome sign-ins, in a tab it opens in Chrome.",
-        "app": "{{agent}} wants to use the sign-ins the app’s browser shares with every session.",
+        "chrome": "{{agent}} wants to use the {{profile}} profile’s sign-ins in a tab it opens in Chrome. It may run scripts there, which can read what the page can.",
+        "chromeAnyProfile": "{{agent}} wants to use your Chrome sign-ins in a tab it opens in Chrome. It may run scripts there, which can read what the page can.",
+        "app": "{{agent}} wants to use the sign-ins the app’s browser shares with every session. It may run scripts in the page, which can read what the page can.",
         "background": "{{agent}} wants to see {{app}}’s windows and press its controls, without bringing it to the front.",
         "foreground": "{{agent}} wants to use the keyboard and pointer in {{app}} while it’s in front. Moving the mouse or typing pauses it.",
         "dialog": "{{agent}} wants to make a choice in the dialog {{app}} opened."

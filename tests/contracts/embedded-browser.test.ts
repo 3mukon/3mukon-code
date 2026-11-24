@@ -15,6 +15,7 @@ function fixture(dialogOnNavigation?: DialogKind, chrome?: Parameters<typeof emb
   const auth = new Map<string, string>();
   const cleared: string[] = [];
   const loads: string[] = [];
+  const scripts: string[] = [];
   const closed = vi.fn();
   const click = vi.fn((): Promise<Outcome<null>> =>
     Promise.resolve({ status: 'dispatched', evidence: 'not-verified' }),
@@ -61,6 +62,13 @@ function fixture(dialogOnNavigation?: DialogKind, chrome?: Parameters<typeof emb
             : Promise.resolve({ status: 'verified', value: null });
         },
         capture: () => Promise.resolve(null),
+        runScript(script) {
+          scripts.push(script);
+          return Promise.resolve({
+            status: 'verified',
+            value: { kind: 'value', value: auth.get(partition) ?? 'guest' },
+          });
+        },
         close() {
           closed();
           return Promise.resolve();
@@ -126,6 +134,7 @@ function fixture(dialogOnNavigation?: DialogKind, chrome?: Parameters<typeof emb
     browser,
     sessions,
     loads,
+    scripts,
     cleared,
     closed,
     click,
@@ -366,6 +375,48 @@ it('allows read-only navigation but rejects mutations, other schemes and global 
       status: 'verified',
     });
     expect(await f.observe(a, tab)).toMatchObject({ text: 'guest' });
+  } finally {
+    await f.end();
+  }
+});
+
+it('runs a script in a tab it owns within the tab’s operation, refuses it at read-only and makes the last observation stale', async () => {
+  const f = fixture();
+  try {
+    const a = await f.bind('a');
+    // A tab with no sharing never asks.
+    const isolated = await f.open(a, 'none');
+    await f.call(a, 'navigate', { target: isolated, url: targetUrl });
+    const { observationId } = await f.observe(a, isolated);
+    const ran = await f.call(a, 'evaluate', { target: isolated, script: 'document.title' });
+    expect(ran.outcome).toEqual({ status: 'verified', value: { kind: 'value', value: 'guest' } });
+    expect(f.broker.record('a', ran.automation.callId)).toMatchObject({
+      toolName: 'browser_evaluate',
+      browserAction: { kind: 'script', script: 'document.title' },
+    });
+    const click = { target: isolated, observationId, action: { kind: 'click', element: 2 } };
+    expect((await f.call(a, 'act', click)).outcome).toMatchObject({ code: 'stale-observation' });
+    expect(f.click).not.toHaveBeenCalled();
+    // A tab with shared sign-ins asks once for its operation, and a script inside it asks nothing more.
+    const shared = await f.open(a, 'app');
+    const loading = f.call(a, 'navigate', { target: shared, url: targetUrl });
+    await f.allow('a');
+    await loading;
+    expect((await f.call(a, 'evaluate', { target: shared, script: '1 + 1' })).outcome.status).toBe(
+      'verified',
+    );
+    expect(f.broker.snapshot('a').value.pendingApprovals).toEqual([]);
+    // Read-only refuses scripts, and a script beyond 32 KiB is not a valid request.
+    f.broker.setPolicy('a', { mode: 'auto', sandbox: 'read-only' });
+    expect(
+      (await f.call(a, 'evaluate', { target: isolated, script: 'location.href' })).outcome,
+    ).toMatchObject({ code: 'sandbox-denied' });
+    f.broker.setPolicy('a', { mode: 'auto', sandbox: 'workspace-write' });
+    const long = 'x'.repeat(32 * 1024 + 1);
+    expect((await f.call(a, 'evaluate', { target: isolated, script: long })).outcome).toMatchObject(
+      { code: 'invalid-request' },
+    );
+    expect(f.scripts).toEqual(['document.title', '1 + 1']);
   } finally {
     await f.end();
   }

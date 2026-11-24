@@ -73,7 +73,7 @@ describe('HostApprovalBlock', () => {
       name: 'Work on mail.example.com in Chrome, signed in as you?',
     });
     within(block).getByText(
-      'Codex wants to use the Personal profile’s sign-ins, in a tab it opens in Chrome.',
+      'Codex wants to use the Personal profile’s sign-ins in a tab it opens in Chrome. It may run scripts there, which can read what the page can.',
     );
     within(block).getByText(
       'Allow Once lasts until Codex is done with it or the turn ends; Allow for This Session lasts until the session ends or you end it.',
@@ -113,7 +113,7 @@ describe('HostApprovalBlock', () => {
       { ...chromeTab, sharing: 'app' as const, browser: 'embedded' as const, profile: undefined },
       'browser-tab' as const,
       'Work on mail.example.com in the app’s browser, signed in?',
-      'Codex wants to use the sign-ins the app’s browser shares with every session.',
+      'Codex wants to use the sign-ins the app’s browser shares with every session. It may run scripts in the page, which can read what the page can.',
     ],
     [
       mail,

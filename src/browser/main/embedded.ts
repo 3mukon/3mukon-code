@@ -14,6 +14,7 @@ import {
   type PageAction,
   type PageObservation,
   type PageState,
+  type ScriptResult,
   displayAddress,
   refused,
   webAddress,
@@ -337,6 +338,24 @@ export class EmbeddedBrowser implements BrowserTabs {
       if (observed?.id !== observationId) return Promise.resolve(refused('stale-observation'));
       delete tab.observed;
       return page.action(observed.marker, action, signal);
+    });
+  }
+
+  // Runs an agent's script in its tab's page; a script may change the page, so the agent's last
+  // observation no longer serves an action.
+  runScript(
+    owner: string,
+    ref: BrowserTabRef,
+    script: string,
+    timeoutMs: number,
+    signal: AbortSignal,
+    dialog: (incident: BrowserIncident) => void,
+  ): Promise<Outcome<ScriptResult>> {
+    const tab = this.find(owner, ref);
+    if (!tab) return Promise.resolve(refused('stale-target'));
+    return this.agentRun(tab, signal, dialog, (page) => {
+      delete tab.observed;
+      return page.runScript(script, timeoutMs, signal);
     });
   }
 

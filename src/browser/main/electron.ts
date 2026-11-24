@@ -19,8 +19,10 @@ import {
   type PageEvents,
   type PageObservation,
   refused,
+  type ScriptResult,
   webAddress,
 } from './page';
+import { runPageScript } from './page-script';
 
 const WORLD = 1001;
 const MAX_IMAGE_EDGE = 1600;
@@ -378,6 +380,30 @@ class ElectronPage implements BrowserPage {
   async action(marker: string, action: PageAction): Promise<Outcome<null>> {
     this.dialogs = 0;
     return actionOutcome.parse(await this.evaluate({ kind: 'action', marker, action }));
+  }
+
+  // Runs the script through the page's own debugger session, in the top-level document's own
+  // context; what it changed counts as a new document, which makes earlier observations stale.
+  async runScript(
+    script: string,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<Outcome<ScriptResult>> {
+    if (!this.loaded()) return refused('not-found');
+    this.dialogs = 0;
+    const debug = this.contents.debugger;
+    const outcome = await runPageScript(
+      {
+        evaluate: (params) => debug.sendCommand('Runtime.evaluate', params),
+        terminate: () => debug.sendCommand('Runtime.terminateExecution'),
+        gone: () => this.closing || this.contents.isDestroyed(),
+      },
+      script,
+      timeoutMs,
+      signal,
+    );
+    if (outcome.status !== 'cancelled-before-dispatch') this.publish('document');
+    return outcome;
   }
 
   mount(window: BrowserWindow, focused: () => void, fileDragged: () => void): ElectronBrowserPanel {

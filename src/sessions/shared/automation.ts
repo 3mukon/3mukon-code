@@ -262,7 +262,11 @@ export interface AutomationCallReceipt {
   schemaVersion: 1;
   callId: string;
 }
-export type BrowserActionSummary = { kind: 'click' | 'type'; label?: string } | { kind: 'scroll' };
+export type BrowserActionSummary =
+  | { kind: 'click' | 'type'; label?: string }
+  | { kind: 'scroll' }
+  // A script the agent ran in the page, whole, which the activity shows.
+  | { kind: 'script'; script: string };
 export type ComputerActionSummary =
   | { kind: 'click' | 'type' | 'scroll'; label?: string }
   | { kind: 'point-click' | 'point-scroll' | 'drag' | 'press' }

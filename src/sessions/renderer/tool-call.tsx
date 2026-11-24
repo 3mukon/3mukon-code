@@ -285,7 +285,7 @@ function Changed({ change, named }: { change: FileChange; named: boolean }) {
 }
 
 // What a call ran and what it printed, in a well: the command after a prompt, and the output below.
-function Output({ command, output }: { command: string | undefined; output: string }) {
+export function Output({ command, output }: { command: string | undefined; output: string }) {
   return (
     <pre className="max-h-72 overflow-auto rounded-md border border-dashed border-line paper-well px-2.5 py-1.5 text-[11.5px]/[1.6] whitespace-pre-wrap wrap-anywhere [tab-size:4]">
       {command !== undefined && (

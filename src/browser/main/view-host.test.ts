@@ -53,6 +53,7 @@ function fixture() {
     close: vi.fn(),
     observe: vi.fn(),
     action: vi.fn(),
+    runScript: vi.fn(),
   } satisfies BrowserPage;
   let showing = true;
   const isShown = (owner: string, presentation: string) =>
@@ -98,6 +99,7 @@ it('refreshes an external preview under a live operation and keeps only the last
     close: vi.fn(),
     observe: vi.fn(),
     action: vi.fn(),
+    runScript: vi.fn(),
   } satisfies BrowserPage;
   let signal: AbortSignal | undefined;
   const host = new BrowserViewHost(

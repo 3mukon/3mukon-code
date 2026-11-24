@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { FrameSummary, TargetSummary } from '../shared/automation';
@@ -124,6 +124,61 @@ describe('AutomationCall', () => {
     title('Read the page');
     expect(screen.queryByText('No sharing')).toBeNull();
     expect(screen.queryByText('Background')).toBeNull();
+  });
+
+  it('names a script by the page it ran on, and shows the script and what it came to when opened', () => {
+    const ran = (outcome: UseCall['outcome']) =>
+      call({
+        toolName: 'browser_evaluate',
+        browserAction: { kind: 'script', script: 'document.title' },
+        outcome,
+      });
+    render(
+      <AutomationCall
+        record={ran({ status: 'verified', value: { kind: 'value', value: { title: 'Pricing' } } })}
+        loadFrames={noFrames}
+      />,
+    );
+    title('Ran a script on example.com/pricing');
+    expect(screen.queryByText('document.title')).toBeNull();
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText('document.title').tagName).toBe('PRE');
+    expect(screen.getByText(/"title": "Pricing"/).tagName).toBe('PRE');
+    cleanup();
+    render(
+      <AutomationCall
+        record={ran({
+          status: 'verified',
+          value: { kind: 'error', message: 'TypeError: x is not a function' },
+        })}
+        loadFrames={noFrames}
+      />,
+    );
+    title('Ran a script on example.com/pricing');
+    expect(screen.getByText('Threw an error')).toBeDefined();
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText('TypeError: x is not a function')).toBeDefined();
+    cleanup();
+    render(
+      <AutomationCall
+        record={ran({
+          status: 'verified',
+          value: { kind: 'value', truncated: true, json: '"aaa' },
+        })}
+        loadFrames={noFrames}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText(/"aaa\s+Cut at 32 KiB\./)).toBeDefined();
+    cleanup();
+    render(
+      <AutomationCall
+        record={ran({ status: 'verified', value: { kind: 'undefined' } })}
+        loadFrames={noFrames}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText('No value')).toBeDefined();
   });
 
   it('names a blank tab, a tool it does not know, and an unresolved target', () => {

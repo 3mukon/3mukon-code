@@ -13,7 +13,9 @@ import {
   type PageCapture,
   type PageEvents,
   type PageObservation,
+  type ScriptResult,
 } from './page';
+import { runPageScript } from './page-script';
 
 const frame = z.object({ id: z.string().min(1).max(128), url: z.string() });
 const frameTree = z.object({ frameTree: z.object({ frame }) });
@@ -46,7 +48,8 @@ export type ChromeCommand =
   | 'Page.navigate'
   | 'Page.bringToFront'
   | 'Page.handleJavaScriptDialog'
-  | 'Runtime.evaluate';
+  | 'Runtime.evaluate'
+  | 'Runtime.terminateExecution';
 
 export interface ChromePageDriver {
   attach(): Promise<unknown>;
@@ -161,6 +164,31 @@ export class ChromePage implements BrowserPage {
     } catch {
       return lost();
     }
+  }
+
+  // Runs the script through the extension's debugger session for the task tab, in the top-level
+  // document's own context, and reads the document again, which makes earlier observations stale.
+  async runScript(
+    script: string,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<Outcome<ScriptResult>> {
+    // The tab may close while the script runs, which reading the flag through a function shows.
+    const gone = () => this.closed;
+    if (gone()) return refused('connection-lost');
+    await this.refresh;
+    const outcome = await runPageScript(
+      {
+        evaluate: (params) => this.driver.command('Runtime.evaluate', params),
+        terminate: () => this.driver.command('Runtime.terminateExecution'),
+        gone,
+      },
+      script,
+      timeoutMs,
+      signal,
+    );
+    if (outcome.status !== 'cancelled-before-dispatch' && !gone()) void this.updateDocument();
+    return outcome;
   }
 
   async openExternal(): Promise<Outcome<null>> {

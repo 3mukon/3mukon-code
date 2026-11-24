@@ -2,7 +2,7 @@ import { Fragment, useEffect, useEffectEvent, useState, type ReactNode } from 'r
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { CircleAlert, Globe, Lock, Monitor, Pointer } from '../../ui/renderer/icons';
-import type { ActivityIncident, TargetSummary } from '../shared/automation';
+import type { ActivityIncident, JsonValue, Outcome, TargetSummary } from '../shared/automation';
 import type { MessageImage } from '../shared/events';
 import {
   callState,
@@ -13,7 +13,7 @@ import {
   type UseCall,
 } from './automation-labels';
 import { Images } from './images';
-import { Entry } from './tool-call';
+import { Entry, Output } from './tool-call';
 
 // Where a title's object goes in its words: a character no catalog uses.
 const OBJECT = '';
@@ -22,7 +22,8 @@ const OBJECT = '';
 // provider's own entry for the call (ADR-0027): what it did, its words in the ink and what it did it
 // to, a page's address or a control's label, in small type apart; on the call that opens a page, how
 // the page is shared and whether a panel showed it or it ran in the background, in dashed tags; and
-// what came of it. A call refused or stopped part-way shows a sign in the wait colour. Under it,
+// what came of it, a script opening to show itself and its result. A call refused or stopped part-way
+// shows a sign in the wait colour. Under it,
 // each on a line of its own, what happened on the way, such as a dialog the page opened being
 // dismissed or an application coming to the front, then the screenshots it took, small, in a frame
 // that enlarges as other images do; they are read only once the call shows, and again as it takes
@@ -78,6 +79,9 @@ export function AutomationCall({
     };
   }, [record.callId, wanted]);
   const action = record.family === 'browser' ? record.browserAction : record.computerAction;
+  const script = action?.kind === 'script' ? action.script : undefined;
+  const threw =
+    script !== undefined && record.outcome?.status === 'verified' && isError(record.outcome.value);
   const happened = new Map<string, Happening>();
   for (const incident of record.incidents) {
     const words = happening(incident, record, summary, shared, t);
@@ -101,7 +105,14 @@ export function AutomationCall({
         title={<Phrase {...titleOf(record, summary, t)} />}
         bright={status === 'running'}
         tags={tags}
-        {...(note === null ? {} : { note: noteWords(note, t) })}
+        {...(note !== null
+          ? { note: noteWords(note, t) }
+          : threw
+            ? { note: t('sessions.automation.script.threw') }
+            : {})}
+        {...(script === undefined
+          ? {}
+          : { body: <ScriptBody script={script} outcome={record.outcome} /> })}
       />
       {[...happened.values()].map(({ key, ...entry }) => (
         <Entry
@@ -126,6 +137,35 @@ export function AutomationCall({
       )}
       {notice}
     </div>
+  );
+}
+
+// A script the agent ran, whole, and what it came to as the agent got it: its value as JSON, no
+// value, or the error it threw.
+function ScriptBody({ script, outcome }: { script: string; outcome: Outcome | null }) {
+  const { t } = useTranslation();
+  const result = outcome?.status === 'verified' ? scriptWords(outcome.value, t) : null;
+  return (
+    <>
+      <Output command={undefined} output={script} />
+      {result !== null && <Output command={undefined} output={result} />}
+    </>
+  );
+}
+
+function scriptWords(value: JsonValue, t: TFunction): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  if (value.kind === 'undefined') return t('sessions.automation.script.undefined');
+  if (value.kind === 'error') return typeof value.message === 'string' ? value.message : null;
+  if (value.kind !== 'value') return null;
+  if (typeof value.json === 'string')
+    return value.json + '\n' + t('sessions.automation.script.truncated');
+  return JSON.stringify(value.value ?? null, null, 2);
+}
+
+function isError(value: JsonValue): boolean {
+  return (
+    typeof value === 'object' && value !== null && !Array.isArray(value) && value.kind === 'error'
   );
 }
 
@@ -172,9 +212,17 @@ function titleOf(
       return site === null
         ? { text: t('sessions.automation.tool.browser_closeBlank') }
         : { text: t('sessions.automation.tool.browser_close', { target: OBJECT }), object: site };
+    case 'browser_evaluate':
+      return site === null
+        ? { text: t('sessions.automation.tool.browser_evaluateBlank') }
+        : {
+            text: t('sessions.automation.tool.browser_evaluate', { target: OBJECT }),
+            object: site,
+          };
     case 'browser_act': {
       const action = record.family === 'browser' ? record.browserAction : undefined;
-      if (action === undefined) return { text: t('sessions.automation.tool.browser_act') };
+      if (action === undefined || action.kind === 'script')
+        return { text: t('sessions.automation.tool.browser_act') };
       if (action.kind !== 'scroll' && action.label !== undefined)
         return {
           text: t(`sessions.automation.action.${action.kind}Control`, { target: OBJECT }),

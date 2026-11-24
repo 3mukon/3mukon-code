@@ -6,6 +6,7 @@ import {
   type BrowserResources,
 } from '../../browser/main/embedded';
 import { displayAddress, webAddress, type EmbeddedEngine } from '../../browser/main/page';
+import { SCRIPT_LIMITS } from '../../browser/main/page-script';
 import type { BrowserTabRef } from '../../browser/shared/browser';
 import type { AutomationBroker } from '../../toolset/main/broker';
 import type { AutomationTool, ExecutionContext, ExecutionPlan } from '../../toolset/main/execution';
@@ -22,6 +23,12 @@ const url = z
     message: 'Use an HTTP or HTTPS URL without embedded credentials.',
   });
 const element = z.int().min(1).max(64);
+const script = z
+  .string()
+  .min(1)
+  .refine((value) => Buffer.byteLength(value) <= SCRIPT_LIMITS.sourceBytes, {
+    message: 'Keep the script within 32 KiB.',
+  });
 const action = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('click'), element }),
   z.strictObject({ kind: z.literal('type'), element, text: z.string().max(4096) }),
@@ -233,6 +240,36 @@ export function browserTools(
           incidents(context),
         ),
       }),
+    ),
+    define(
+      'browser_evaluate',
+      "Run a script in an owned tab's top-level document, in the page's own context, as the browser's developer console runs what is typed into it: its last expression is its value, it may await at its top level, and a promise it ends with is awaited. Returns the value as JSON, cut at 32 KiB, or the error it threw. It runs for 10 seconds unless timeoutMs asks for up to 30, then it is stopped. A script makes element references stale: take a fresh browser_snapshot before the next browser_act. In a tab with shared sign-ins it reads what the page can, so use it only for the task. Refused at read-only.",
+      z.strictObject({
+        target,
+        script,
+        timeoutMs: z.int().min(100).max(SCRIPT_LIMITS.maxMs).optional(),
+      }),
+      ({ target, script }, owner) => ({
+        ...tabPlan(target, 'mutate', inPanel(owner, target)),
+        mayActivate: browser.isExternal(owner, target),
+        browserAction: { kind: 'script', script },
+      }),
+      async ({ target, script, timeoutMs }, context) => {
+        const outcome = await browser.runScript(
+          context.owner,
+          target,
+          script,
+          timeoutMs ?? SCRIPT_LIMITS.defaultMs,
+          context.signal,
+          incidents(context),
+        );
+        return {
+          outcome:
+            outcome.status === 'verified'
+              ? { status: 'verified', value: { ...outcome.value } }
+              : outcome,
+        };
+      },
     ),
     define(
       'browser_close',

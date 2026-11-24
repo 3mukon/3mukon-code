@@ -542,6 +542,22 @@ it('asks before the first use of a task tab in the connected profile, opens it o
       status: 'verified',
       value: { text: 'Signed in as a synthetic fixture', address: 'https://fixture.test/path' },
     });
+    // A script runs in the task tab's own context through the extension's debugger session.
+    expect(
+      (await call(a, 'evaluate', { target: tab, script: 'document.title' })).outcome,
+    ).toMatchObject({ status: 'verified', value: { kind: 'value' } });
+    expect(actions).toContainEqual({
+      kind: 'command',
+      tab: 19,
+      method: 'Runtime.evaluate',
+      params: {
+        expression: 'document.title',
+        replMode: true,
+        awaitPromise: true,
+        returnByValue: true,
+        userGesture: false,
+      },
+    });
 
     const preview = browser.pageForView('a', tab);
     const signal = broker.browserObservationSignal('a', tab);

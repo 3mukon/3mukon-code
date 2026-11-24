@@ -167,6 +167,7 @@
         "browser_snapshot": "读取了页面",
         "browser_screenshot": "截取了页面的画面",
         "browser_act": "操作了页面",
+        "browser_evaluate": "运行了脚本",
         "browser_close": "关闭了一个标签页",
         "computer_targets": "列出了正在运行的应用",
         "computer_windows": "查找了应用的窗口",
@@ -235,6 +236,8 @@
         "browser_screenshot": "截取了页面的画面",
         "browser_act": "操作了页面",
         "browser_close": "关闭了 {{target}}",
+        "browser_evaluate": "在 {{target}} 上运行了脚本",
+        "browser_evaluateBlank": "运行了脚本",
         "other": "{{tool}}：{{target}}",
         "otherAlone": "{{tool}}",
         "browser_navigateBlank": "打开了一个页面",
@@ -305,6 +308,11 @@
       "frames": {
         "evicted": "截图已不再保留",
         "failed": "无法读取截图"
+      },
+      "script": {
+        "undefined": "没有值",
+        "truncated": "已在 32 KiB 处截断。",
+        "threw": "抛出了错误"
       },
       "appName": "“{{name}}”",
       "someApp": "某个应用",
@@ -400,9 +408,9 @@
         "dialog": "使用{{app}}打开的对话框？"
       },
       "detail": {
-        "chrome": "{{agent}} 想在它于 Chrome 中打开的标签页里，使用你“{{profile}}”个人资料的登录信息。",
-        "chromeAnyProfile": "{{agent}} 想在它于 Chrome 中打开的标签页里，使用你的 Chrome 登录信息。",
-        "app": "{{agent}} 想使用应用的浏览器与所有会话共用的登录信息。",
+        "chrome": "{{agent}} 想在它于 Chrome 中打开的标签页里，使用你“{{profile}}”个人资料的登录信息。它可能在其中运行脚本，脚本能读取页面能读取的内容。",
+        "chromeAnyProfile": "{{agent}} 想在它于 Chrome 中打开的标签页里，使用你的 Chrome 登录信息。它可能在其中运行脚本，脚本能读取页面能读取的内容。",
+        "app": "{{agent}} 想使用应用的浏览器与所有会话共用的登录信息。它可能在页面中运行脚本，脚本能读取页面能读取的内容。",
         "background": "{{agent}} 想查看{{app}}的窗口并按下其控件，但不把它带到最前面。",
         "foreground": "{{agent}} 想在{{app}}处于最前面时，在其中使用键盘和指针。移动鼠标或打字会让它暂停。",
         "dialog": "{{agent}} 想在{{app}}打开的对话框中做出选择。"

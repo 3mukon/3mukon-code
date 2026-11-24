@@ -977,7 +977,7 @@ describe('App', () => {
       name: 'Work on mail.example.com in Chrome, signed in as you?',
     });
     within(block).getByText(
-      'Codex CLI wants to use the Personal profile’s sign-ins, in a tab it opens in Chrome.',
+      'Codex CLI wants to use the Personal profile’s sign-ins in a tab it opens in Chrome. It may run scripts there, which can read what the page can.',
     );
     fireEvent.click(within(block).getByRole('button', { name: 'Allow Once' }));
     await waitFor(() => {

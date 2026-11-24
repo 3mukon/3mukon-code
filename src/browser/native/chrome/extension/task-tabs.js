@@ -8,6 +8,7 @@ const commands = new Set([
   'Page.bringToFront',
   'Page.handleJavaScriptDialog',
   'Runtime.evaluate',
+  'Runtime.terminateExecution',
 ]);
 
 const pageEvents = new Set([
