@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 import type { SessionList, SessionsBridge } from '../shared/sessions';
 
 const NONE: SessionList = { sessions: [], archived: 0, shown: [] };
@@ -6,14 +6,16 @@ const NONE: SessionList = { sessions: [], archived: 0, shown: [] };
 // What the lists show of the sessions as the main process reports it, kept current: the sessions that
 // are not archived, the most recently active first, how many are archived, and the others whose pages
 // the window has shown. Until the first answer arrives there are none.
-export function useSessions(bridge: SessionsBridge): SessionList {
+export function useSessions(bridge: SessionsBridge, onRemoved: (id: string) => void): SessionList {
   const [list, setList] = useState(NONE);
+  const removed = useEffectEvent(onRemoved);
   useEffect(() => {
     let active = true;
     // A change that arrives before the first answer is newer than it.
     let changed = false;
     const stop = bridge.onChange((next) => {
       changed = true;
+      if (next.removedId !== undefined) removed(next.removedId);
       setList(next);
     });
     bridge.list().then(

@@ -258,14 +258,16 @@ describe('createBridge', () => {
     bridge.sessions.onEvent(events);
     bridge.files.onChange(files);
     send('workspaces:changed', { workspaces: [], selectedId: null });
-    send('sessions:changed', { sessions: [], archived: 2, shown: [] });
+    send('sessions:changed', { sessions: [], archived: 2, shown: [], removedId: 's2' });
     send('sessions:event', { id: 's1', seq: 1, event: { type: 'turn-started' } });
     send('files:changed', '/Users/me/web/a.ts');
     send('settings:changed', { language: 'en', appearance: 'system' });
     stop();
     send('workspaces:changed', { workspaces: [], selectedId: null });
     expect(workspaces.mock.calls).toEqual([[{ workspaces: [], selectedId: null }]]);
-    expect(sessions.mock.calls).toEqual([[{ sessions: [], archived: 2, shown: [] }]]);
+    expect(sessions.mock.calls).toEqual([
+      [{ sessions: [], archived: 2, shown: [], removedId: 's2' }],
+    ]);
     expect(events.mock.calls).toEqual([['s1', 1, { type: 'turn-started' }]]);
     expect(files.mock.calls).toEqual([['/Users/me/web/a.ts']]);
     expect(settings.mock.calls).toEqual([[{ language: 'en', appearance: 'system' }]]);

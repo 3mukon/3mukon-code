@@ -4,7 +4,12 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FakeBrowserTabs } from '../../browser/shared/browser-fake';
 import { initI18n } from '../../i18n/renderer/i18n';
 import { initialSessionState } from '../../sessions/shared/session-state';
-import type { SessionList, SessionSummary } from '../../sessions/shared/sessions';
+import type {
+  SessionAction,
+  SessionList,
+  SessionListChange,
+  SessionSummary,
+} from '../../sessions/shared/sessions';
 import type { AppSettings } from '../../settings/shared/settings';
 import type { WorkspaceList } from '../../workspaces/shared/workspaces';
 import type {
@@ -1158,46 +1163,55 @@ describe('App', () => {
     );
   });
 
-  it('offers a session’s menu, and closes the panels of a session removed from the lists', async () => {
-    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
-      {
-        id: 's1',
-        provider: 'codex',
-        sessionId: 'thread-1',
-        cwd: '/Users/me/web',
-        title: 'Fix the build',
-        status: 'idle',
-        activeAt: 1,
-      },
-    ]);
-    const asked: string[] = [];
-    let done: 'archive' | 'remove' | null = 'archive';
-    bridge.sessions.showMenu = (id) => {
-      asked.push(id);
-      return Promise.resolve(done);
+  it('closes the removed session’s panels and its child’s while cleanup is still pending', async () => {
+    const parent: SessionSummary = {
+      id: 's1',
+      provider: 'codex',
+      sessionId: 'thread-1',
+      cwd: '/Users/me/web',
+      title: 'Fix the build',
+      status: 'idle',
+      activeAt: 1,
     };
+    const child: SessionSummary = {
+      ...parent,
+      id: 's2',
+      sessionId: 'thread-2',
+      title: 'Write the tests',
+      parent: parent.id,
+    };
+    const bridge = fakeBridge({ workspaces: [], selectedId: null }, [parent, child]);
+    let report: (change: SessionListChange) => void = () => undefined;
+    bridge.sessions.onChange = (listener) => {
+      report = listener;
+      return () => undefined;
+    };
+    let finish!: (action: SessionAction) => void;
+    const cleanup = new Promise<SessionAction>((resolve) => {
+      finish = resolve;
+    });
+    const menu = vi.fn<Bridge['sessions']['showMenu']>(() => cleanup);
+    bridge.sessions.showMenu = menu;
     await renderApp(bridge);
-    const row = () =>
-      within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
-        name: /Fix the build/,
-      });
-    fireEvent.click(row());
-    const shown = () =>
-      within(screen.getByRole('main')).queryAllByRole('region', { name: 'Fix the build' });
-    expect(shown()).toHaveLength(1);
-    // Archived, a session keeps its panel; removed, it loses it.
-    await act(async () => {
-      fireEvent.contextMenu(row());
-      await Promise.resolve();
+    const list = within(screen.getByRole('region', { name: 'Sessions' }));
+    const row = list.getByRole('button', { name: /Fix the build/ });
+    fireEvent.click(row);
+    fireEvent.click(list.getByRole('button', { name: /Write the tests/ }));
+    const closeButtons = () =>
+      within(screen.getByRole('main')).queryAllByRole('button', { name: 'Close panel' });
+    fireEvent.contextMenu(row);
+    expect(menu).toHaveBeenCalledWith(parent.id);
+    expect(closeButtons()).toHaveLength(2);
+    act(() => {
+      report({ sessions: [child], archived: 0, shown: [], removedId: parent.id });
+      report({ sessions: [], archived: 0, shown: [], removedId: child.id });
     });
-    expect(shown()).toHaveLength(1);
-    done = 'remove';
+    expect(list.queryByRole('button', { name: /Fix the build/ })).toBeNull();
+    expect(closeButtons()).toHaveLength(0);
     await act(async () => {
-      fireEvent.contextMenu(row());
-      await Promise.resolve();
+      finish('remove');
+      await cleanup;
     });
-    expect(asked).toEqual(['s1', 's1']);
-    expect(shown()).toHaveLength(0);
   });
 
   it('shows the request that has waited longest with ⇧⌘A, with the focus on it, and the next waiting session’s at the next press', async () => {

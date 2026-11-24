@@ -47,6 +47,11 @@ export interface SessionList {
   shown: SessionSummary[];
 }
 
+export interface SessionListChange extends SessionList {
+  // The confirmed removal reported by this update, while the session closes in main.
+  removedId?: string;
+}
+
 // What a search finds among the sessions of one list, the Sessions list's or the archived list's:
 // those whose title and conversation hold every word of the query, whatever its case, each with the
 // passage of its conversation where the first word it holds appears, and how many sessions of the list
@@ -125,7 +130,7 @@ export interface SessionsBridge {
   list(): Promise<SessionList>;
   // Calls the listener with the whole list whenever a session joins or leaves it or what it shows of
   // one changes, and returns a function that stops it.
-  onChange(listener: (list: SessionList) => void): () => void;
+  onChange(listener: (list: SessionListChange) => void): () => void;
   // The archived sessions, the most recently active first.
   archived(): Promise<SessionSummary[]>;
   // Resumes a session that is not running, with the settings the page shows, and sends it the message,

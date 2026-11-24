@@ -10,6 +10,7 @@ import type {
   ImageAction,
   SessionAction,
   SessionList,
+  SessionListChange,
   SessionSearch,
   SessionSnapshot,
   SessionSummary,
@@ -200,7 +201,7 @@ export function createBridge(
       list: () => invoke(channels.sessions.list) as Promise<SessionList>,
       onChange: (listener) =>
         subscribe(channels.sessions.changed, (value) => {
-          listener(value as SessionList);
+          listener(value as SessionListChange);
         }),
       archived: () => invoke(channels.sessions.archived) as Promise<SessionSummary[]>,
       resume: (id, request) => invoke(channels.sessions.resume, id, request) as Promise<void>,

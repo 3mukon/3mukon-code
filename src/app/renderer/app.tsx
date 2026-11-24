@@ -116,17 +116,22 @@ export function App({ bridge }: { bridge: Bridge }) {
   const sidebar = useRef<HTMLElement>(null);
   const sidebarId = useId();
   const workspaces = useWorkspaces(bridge.workspaces);
-  const sessions = useSessions(bridge.sessions);
   // The archived session last opened from the archived list, as the list showed it, until the main
   // process gives it among the sessions the window has shown.
   const [opening, setOpening] = useState<SessionSummary | null>(null);
+  const panels = usePanels();
+  const sessions = useSessions(bridge.sessions, (id) => {
+    for (const panel of panelsOf(panels.latest().layout)) {
+      if (panel.content.kind === 'session' && panel.content.id === id) panels.close(panel.id);
+    }
+    setOpening((session) => (session?.id === id ? null : session));
+  });
   const settings = useSettings(bridge.settings);
   const accounts = useAccounts(bridge.accounts);
   const [terminalViews] = useState(
     () => new TerminalViews(bridge.terminal, (code) => i18n.t('terminal.exited', { code })),
   );
   useEffect(() => terminalViews.connect(), [terminalViews]);
-  const panels = usePanels();
   const area = useRef<PanelAreaHandle>(null);
   // The file editors, whose rendered Markdown opens the files it links to in panels.
   const fileEditors = useFileEditors(bridge.files, {
@@ -200,25 +205,15 @@ export function App({ bridge }: { bridge: Bridge }) {
     },
   };
 
-  // The panels of a session removed from the lists close.
-  const afterAction = (session: SessionSummary) => (done: SessionAction | null) => {
-    if (done !== 'remove') return;
-    for (const panel of panelsOf(panels.layout)) {
-      if (panel.content.kind === 'session' && panel.content.id === session.id) {
-        panels.close(panel.id);
-      }
-    }
-  };
-
   // A session's menu, from either list.
   const showSessionMenu = (session: SessionSummary) => {
-    bridge.sessions.showMenu(session.id).then(afterAction(session), reportMenu);
+    bridge.sessions.showMenu(session.id).catch(reportMenu);
   };
 
   // What an archived session's row does without its menu: unarchive it, or remove it once the user
   // confirms.
   const actOnArchived = (session: SessionSummary, action: SessionAction) => {
-    bridge.sessions.act(session.id, action).then(afterAction(session), reportMenu);
+    bridge.sessions.act(session.id, action).catch(reportMenu);
   };
 
   // Reads a session's history ahead of showing it, from either list.

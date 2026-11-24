@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelOption, ProviderId, QuestionAnswer, SessionEvent } from '../shared/events';
-import type { SessionAction, SessionList, SessionSettings } from '../shared/sessions';
+import type {
+  SessionAction,
+  SessionList,
+  SessionListChange,
+  SessionSettings,
+} from '../shared/sessions';
 import { SessionHost, type SessionsMenuUi } from './host';
 import type { Provider, ProviderSession, ResumeOptions, SessionEventListener } from './provider';
 import { SessionRecords, type SessionRecord } from './records';
@@ -1438,13 +1443,18 @@ describe('SessionHost archive and removal', () => {
     const { records, saved } = memoryRecords([kept()]);
     const host = new SessionHost([claude.provider], records);
     const id = await host.start('claude-code', { cwd: folder('web') });
-    const changes: SessionList[] = [];
+    const changes: SessionListChange[] = [];
     host.onChange((list) => changes.push(list));
-    await host.remove(id);
+    const removing = host.remove(id);
+    expect(changes[0]?.removedId).toBe(id);
+    await removing;
     await host.remove('kept');
     expect(claude.closed).toEqual(['claude-code-1']);
     expect(host.list()).toEqual({ sessions: [], archived: 0, shown: [] });
-    expect(changes.map((list) => list.sessions.length)).toEqual([1, 0]);
+    expect(changes).toMatchObject([
+      { sessions: [{ id: 'kept' }], removedId: id },
+      { sessions: [], removedId: 'kept' },
+    ]);
     expect(saved.at(-1)).toEqual([]);
     expect(host.snapshot(id)).toBeNull();
     claude.listeners[0]?.({ type: 'title', title: 'Late' });

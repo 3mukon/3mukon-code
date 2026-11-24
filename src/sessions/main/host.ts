@@ -23,6 +23,7 @@ import type {
   SessionAction,
   SessionEventsListener,
   SessionList,
+  SessionListChange,
   SessionSearch,
   SessionSettings,
   SessionSnapshot,
@@ -163,7 +164,7 @@ export class SessionHost {
   private readonly sessions = new Map<string, Hosted>();
   // The sessions being resumed, by the app's id.
   private readonly resuming = new Map<string, Promise<void>>();
-  private readonly listeners = new Set<(list: SessionList) => void>();
+  private readonly listeners = new Set<(list: SessionListChange) => void>();
   private readonly eventListeners = new Set<SessionEventsListener>();
   // The models each provider and gateway offer in each folder: the last list found, with when, and the
   // listing under way.
@@ -546,7 +547,7 @@ export class SessionHost {
     this.records.remove(id);
     this.forgetText(id);
     this.inboxes.forget(id);
-    this.notify();
+    this.notify(id);
     await Promise.all([
       this.close(hosted).then(() => hosted.automation?.close(true)),
       // A parent's children go with it (ADR-0036).
@@ -591,7 +592,7 @@ export class SessionHost {
     }
   }
 
-  onChange(listener: (list: SessionList) => void): () => void {
+  onChange(listener: (list: SessionListChange) => void): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -1269,8 +1270,9 @@ export class SessionHost {
     if (before?.archived !== true || summary.archived !== true || hosted.shown) this.notify();
   }
 
-  private notify(): void {
-    const list = this.list();
+  private notify(removedId?: string): void {
+    const list: SessionListChange = this.list();
+    if (removedId !== undefined) list.removedId = removedId;
     for (const listener of this.listeners) listener(list);
   }
 
