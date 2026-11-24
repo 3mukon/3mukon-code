@@ -222,6 +222,7 @@
       },
       "delivery": {
         "background": "Background",
+        "panel": "In a panel",
         "foreground": "Foreground"
       },
       "kind": {

@@ -117,6 +117,7 @@ void app
         return toolset.broker;
       },
       chrome,
+      (owner, tab) => presentations.showsBrowserTab(owner, tab.id),
     );
     let controlWindow: ForegroundControlWindow | undefined;
     const helper = nativeHelper({

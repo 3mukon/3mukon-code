@@ -21,8 +21,8 @@ const OBJECT = '';
 // A call of the app's browser or computer tools as its session's activity shows it, in place of the
 // provider's own entry for the call (ADR-0027): what it did, its words in the ink and what it did it
 // to, a page's address or a control's label, in small type apart; on the call that opens a page, how
-// the page is shared and whether the work runs in the background or the foreground, in dashed tags;
-// and what came of it. A call refused or stopped part-way shows a sign in the wait colour. Under it,
+// the page is shared and whether a panel showed it or it ran in the background, in dashed tags; and
+// what came of it. A call refused or stopped part-way shows a sign in the wait colour. Under it,
 // each on a line of its own, what happened on the way, such as a dialog the page opened being
 // dismissed or an application coming to the front, then the screenshots it took, small, in a frame
 // that enlarges as other images do; they are read only once the call shows, and again as it takes
@@ -50,8 +50,10 @@ export function AutomationCall({
   );
   const opening = record.toolName === 'browser_open' || record.toolName === 'browser_navigate';
   const application = applicationTag(record, summary);
+  // Where a page was as the call was made: in a panel, or else working in the background.
+  const where = record.family === 'browser' && record.inPanel === true ? 'panel' : record.delivery;
   const tags = opening
-    ? [...(shared === null ? [] : [shared]), t(`sessions.automation.delivery.${record.delivery}`)]
+    ? [...(shared === null ? [] : [shared]), t(`sessions.automation.delivery.${where}`)]
     : application === null
       ? []
       : [application];

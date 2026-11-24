@@ -113,6 +113,11 @@ describe('AutomationCall', () => {
     );
     expect(screen.getByText('Chrome · Personal')).toBeDefined();
     cleanup();
+    // A page a panel showed as the call was made says so in place of the background.
+    render(<AutomationCall record={call({ inPanel: true })} loadFrames={noFrames} />);
+    expect(screen.getByText('In a panel')).toBeDefined();
+    expect(screen.queryByText('Background')).toBeNull();
+    cleanup();
     render(
       <AutomationCall record={call({ toolName: 'browser_snapshot' })} loadFrames={noFrames} />,
     );

@@ -94,13 +94,19 @@ describe('the acknowledged panel host', () => {
     if (reply?.kind !== 'applied') throw Error('Fixture did not apply the presentation');
     const id = reply.state.presentationId;
     expect(f.host.showsBrowser('a', id, 'a-tab')).toBe(false);
+    expect(f.host.showsBrowserTab('a', 'a-tab')).toBe(false);
     f.host.receive(reply);
     await command;
     expect(f.host.showsBrowser('a', id, 'a-tab')).toBe(true);
     expect(f.host.showsBrowser('b', id, 'a-tab')).toBe(false);
     expect(f.host.showsBrowser('a', id, 'b-tab')).toBe(false);
+    // Any of the owner's presentations showing the tab counts, as a browser call records.
+    expect(f.host.showsBrowserTab('a', 'a-tab')).toBe(true);
+    expect(f.host.showsBrowserTab('b', 'a-tab')).toBe(false);
+    expect(f.host.showsBrowserTab('a', 'b-tab')).toBe(false);
     f.window.close(id);
     expect(f.host.showsBrowser('a', id, 'a-tab')).toBe(false);
+    expect(f.host.showsBrowserTab('a', 'a-tab')).toBe(false);
     f.host.disconnect();
   });
   it('answers a repeated Show once, without a competing busy answer or reopening after another close', async () => {

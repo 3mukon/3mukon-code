@@ -291,7 +291,12 @@ interface CallRecordBase {
 export type AutomationCallRecord = CallRecordBase &
   (
     | ({ target: CallTarget; sharing: Sharing | null; delivery: Delivery } & (
-        | { family: 'browser'; browserAction?: BrowserActionSummary }
+        | {
+            family: 'browser';
+            browserAction?: BrowserActionSummary;
+            // That a panel showed the tab as the call was made; otherwise it worked in the background.
+            inPanel?: true;
+          }
         | { family: 'computer'; computerAction?: ComputerActionSummary }
       ))
     | { family: 'panel'; presentations: readonly PresentationSummary[] }

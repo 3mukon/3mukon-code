@@ -33,13 +33,18 @@ const metadata: ExecutionPlan = {
   delivery: 'background',
   mayActivate: false,
 };
-function tabPlan(ref: BrowserTabRef, effect: 'observe' | 'navigate' | 'mutate'): ExecutionPlan {
+function tabPlan(
+  ref: BrowserTabRef,
+  effect: 'observe' | 'navigate' | 'mutate',
+  inPanel: boolean,
+): ExecutionPlan {
   return {
     target: ref,
     operation: 'browser-tab',
     effect,
     delivery: 'background',
     mayActivate: false,
+    ...(inPanel ? { inPanel: true } : {}),
   };
 }
 function define<S extends z.ZodObject>(
@@ -72,10 +77,14 @@ function incidents(context: ExecutionContext) {
   };
 }
 
+// Whether a panel of the session shows its tab, which a call records as it is made.
+type InPanel = (owner: string, tab: BrowserTabRef) => boolean;
+
 export function embeddedBrowser(
   engine: EmbeddedEngine,
   getBroker: () => AutomationBroker,
   chrome?: ChromeBrowser,
+  inPanel: InPanel = () => false,
 ) {
   const resources: BrowserResources = {
     register: (owner, spec) => getBroker().register(owner, spec),
@@ -91,7 +100,7 @@ export function embeddedBrowser(
     handBack: (owner, tab) => getBroker().handBack(owner, tab),
   };
   const browser = new EmbeddedBrowser(engine, resources);
-  return { browser, tools: browserTools(browser, chrome) };
+  return { browser, tools: browserTools(browser, chrome, inPanel) };
 }
 
 type ChromeBrowser = Pick<ChromeProfileConnection, 'liveTab' | 'requirement'>;
@@ -100,7 +109,11 @@ const chromeSetup = {
   requirement: { kind: 'browser', browser: 'chrome', step: 'connect' },
 } as const;
 
-export function browserTools(browser: EmbeddedBrowser, chrome?: ChromeBrowser): AutomationTool[] {
+export function browserTools(
+  browser: EmbeddedBrowser,
+  chrome?: ChromeBrowser,
+  inPanel: InPanel = () => false,
+): AutomationTool[] {
   return [
     define(
       'browser_open',
@@ -139,7 +152,7 @@ export function browserTools(browser: EmbeddedBrowser, chrome?: ChromeBrowser): 
       'Open an HTTP or HTTPS address without showing a panel. The final document can differ after redirection. Use browser_snapshot to check it.',
       z.strictObject({ target, url }),
       ({ target, url }, owner) => ({
-        ...tabPlan(target, 'navigate'),
+        ...tabPlan(target, 'navigate', inPanel(owner, target)),
         mayActivate: browser.isExternal(owner, target),
         browserAddress: displayAddress(url) ?? undefined,
       }),
@@ -157,7 +170,7 @@ export function browserTools(browser: EmbeddedBrowser, chrome?: ChromeBrowser): 
       'browser_snapshot',
       'Read a bounded semantic snapshot of the top-level document in an owned tab. Element references belong to this observation and expire when the page or view changes.',
       z.strictObject({ target }),
-      ({ target }) => tabPlan(target, 'observe'),
+      ({ target }, owner) => tabPlan(target, 'observe', inPanel(owner, target)),
       async ({ target }, context) => {
         const outcome = await browser.observe(
           context.owner,
@@ -177,7 +190,10 @@ export function browserTools(browser: EmbeddedBrowser, chrome?: ChromeBrowser): 
       'browser_screenshot',
       'Capture a bounded screenshot of an owned tab’s current viewport without bringing it forward.',
       z.strictObject({ target }),
-      ({ target }) => ({ ...tabPlan(target, 'observe'), requiresImages: true }),
+      ({ target }, owner) => ({
+        ...tabPlan(target, 'observe', inPanel(owner, target)),
+        requiresImages: true,
+      }),
       async ({ target }, context) => {
         const frame = await browser.capture(
           context.owner,
@@ -195,7 +211,7 @@ export function browserTools(browser: EmbeddedBrowser, chrome?: ChromeBrowser): 
       'Click a visible control, replace an editable text field’s contents, or scroll the top-level page. Use an element reference from the latest browser_snapshot. Take a fresh snapshot after each action. A dispatched result does not verify what the site did.',
       z.strictObject({ target, observationId: z.uuid(), action }),
       ({ target, observationId, action }, owner) => ({
-        ...tabPlan(target, 'mutate'),
+        ...tabPlan(target, 'mutate', inPanel(owner, target)),
         mayActivate: browser.isExternal(owner, target),
         observationId,
         requiresObservation: true,

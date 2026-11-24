@@ -23,6 +23,8 @@ export const MAX_ARGUMENT_BYTES = 16 * 1024 * 1024;
 export interface PlannedAction {
   browserAction?: BrowserActionSummary;
   computerAction?: ComputerActionSummary;
+  // For a browser call, that a panel showed its tab as the call was made.
+  inPanel?: true;
 }
 export interface ExecutionPlan extends PlannedAction {
   target?: TargetRef;

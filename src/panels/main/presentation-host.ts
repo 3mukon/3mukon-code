@@ -333,6 +333,14 @@ export class PresentationHost implements PanelExecutor {
     return this.showsContent(owner, presentation, { kind: 'browser', tabId });
   }
 
+  // Whether any of the owner's presentations shows the tab in a panel now, as a browser call
+  // records when it is made.
+  showsBrowserTab(owner: string, tabId: string): boolean {
+    return [...this.entries.keys()].some((presentation) =>
+      this.showsBrowser(owner, presentation, tabId),
+    );
+  }
+
   showsComputer(owner: string, presentation: string, targetId: string): boolean {
     return this.showsContent(owner, presentation, { kind: 'computer', targetId });
   }

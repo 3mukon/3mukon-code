@@ -152,6 +152,7 @@ export class Activity {
     record.delivery = delivery;
     if (record.family === 'browser' && action.browserAction)
       record.browserAction = boundedAction(action.browserAction, keepLabel);
+    if (record.family === 'browser' && action.inPanel) record.inPanel = true;
     if (record.family === 'computer' && action.computerAction)
       record.computerAction = boundedAction(action.computerAction, keepLabel);
     this.publish(record);

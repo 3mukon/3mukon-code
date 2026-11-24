@@ -219,6 +219,7 @@
       },
       "delivery": {
         "background": "后台",
+        "panel": "面板中",
         "foreground": "前台"
       },
       "kind": {

@@ -183,6 +183,37 @@ describe('retained activity and latest presentation delivery', () => {
     expect(JSON.stringify(activity.list()).length).toBeLessThan(10_000);
   });
 
+  it('keeps that a panel showed a browser call’s tab as the call was made, and nothing for another', () => {
+    const activity = new Activity(
+      'session',
+      () => undefined,
+      () => 1,
+    );
+    const tab = {
+      ref: { id: 'tab', kind: 'browser-tab', generation: 1 },
+      owner: 'session',
+      name: 'Fixture',
+      sharing: 'none',
+      browser: 'embedded',
+    } as const;
+    const shown = activity.start(1, 'turn', 'browser_navigate', 'browser');
+    activity.describe(shown.callId, tab, 'background', { inPanel: true }, false);
+    activity.settle(shown.callId, verified);
+    expect(activity.get(shown.callId)).toMatchObject({ delivery: 'background', inPanel: true });
+    const unseen = activity.start(1, 'turn', 'browser_navigate', 'browser');
+    activity.describe(unseen.callId, tab, 'background', {}, false);
+    expect(activity.get(unseen.callId)).not.toHaveProperty('inPanel');
+    const native = activity.start(1, 'turn', 'computer_observe', 'computer');
+    activity.describe(
+      native.callId,
+      { ...tab, ref: { ...tab.ref, kind: 'application' } },
+      'background',
+      { inPanel: true },
+      false,
+    );
+    expect(activity.get(native.callId)).not.toHaveProperty('inPanel');
+  });
+
   it('reports record eviction explicitly so a subscribed activity agrees with a fresh snapshot', () => {
     const events: AutomationEvent[] = [];
     const activity = new Activity(
