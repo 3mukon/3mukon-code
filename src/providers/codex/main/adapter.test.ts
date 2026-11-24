@@ -60,6 +60,8 @@ let threadName: string | null;
 // trusted project's own settings name in its folder.
 let configured: { model: string | null; effort: string | null };
 let project: { folder: string; model: string; effort: string } | undefined;
+// The level of reasoning summaries Codex's own configuration names, as config/read gives it.
+let configuredSummary: string | null;
 // A config/read refused.
 let failConfigRead: string | undefined;
 
@@ -124,7 +126,11 @@ function reply(method: string, params: Params): unknown {
     case 'config/read':
       if (failConfigRead !== undefined) throw new Error(failConfigRead);
       return {
-        config: { model: own.model, model_reasoning_effort: own.effort },
+        config: {
+          model: own.model,
+          model_reasoning_effort: own.effort,
+          model_reasoning_summary: configuredSummary,
+        },
         origins: {},
         layers: null,
       };
@@ -411,6 +417,7 @@ beforeEach(() => {
   threadName = null;
   configured = { model: null, effort: null };
   project = undefined;
+  configuredSummary = null;
   failConfigRead = undefined;
   gatewaysDir = mkdtempSync(join(tmpdir(), 'codex-gateways-'));
   writeFileSync(
@@ -849,13 +856,14 @@ describe('a Codex session', () => {
     );
   });
 
-  it('sends a chosen effort with the first turn, and ends the turn when Codex says so', async () => {
+  it('sends a chosen effort and the reasoning summaries with the first turn, and ends the turn when Codex says so', async () => {
     const { session, events } = await startSession({ effort: 'high' });
     await session.send('hi');
     expect(current().params('turn/start')).toEqual({
       threadId: 'th1',
       input: [{ type: 'text', text: 'hi', text_elements: [] }],
       effort: 'high',
+      summary: 'auto',
     });
     current().emit('turn/completed', completed('turn-1'));
     expect(events.at(-1)).toEqual({ type: 'turn-ended', outcome: 'completed' });
@@ -864,6 +872,40 @@ describe('a Codex session', () => {
       threadId: 'th1',
       input: [{ type: 'text', text: 'again', text_elements: [] }],
     });
+  });
+
+  it('asks for reasoning summaries at Codex’s automatic level with the first turn on each app-server without a gateway', async () => {
+    const { session } = await startSession();
+    const summaries = () => current().params('turn/start')?.summary;
+    const turn = async (text: string, id: string) => {
+      await session.send(text);
+      const asked = summaries();
+      current().emit('turn/completed', completed(id));
+      return asked;
+    };
+    expect(await turn('one', 'turn-1')).toBe('auto');
+    expect(await turn('two', 'turn-2')).toBeUndefined();
+    await session.setGateway('work');
+    expect(await turn('three', 'turn-3')).toBeUndefined();
+    await session.setGateway(null);
+    expect(await turn('four', 'turn-4')).toBe('auto');
+    expect(await turn('five', 'turn-5')).toBeUndefined();
+    // Resumed on its earlier gateway after the new one failed, the thread is on a new app-server too.
+    failResume = new Error('cannot reach the gateway');
+    await expect(session.setGateway('work')).rejects.toThrow('cannot reach the gateway');
+    expect(await turn('six', 'turn-6')).toBe('auto');
+  });
+
+  it('leaves reasoning summaries to a level Codex’s configuration names, and asks for none through a gateway', async () => {
+    configuredSummary = 'none';
+    const named = await startSession();
+    await named.session.send('one');
+    expect(current().params('turn/start')).not.toHaveProperty('summary');
+    await named.session.close();
+    configuredSummary = null;
+    const gateway = await startSession({ gateway: 'work' });
+    await gateway.session.send('one');
+    expect(current().params('turn/start')).not.toHaveProperty('summary');
   });
 
   it('carries a switched model, effort and mode with the next turn, defaults included', async () => {

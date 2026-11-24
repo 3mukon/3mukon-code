@@ -39,6 +39,7 @@ import {
   type GatewaySettings,
 } from './gateways';
 import type { InitializeParams } from './protocol/InitializeParams';
+import type { ReasoningSummary } from './protocol/ReasoningSummary';
 import type { RequestId } from './protocol/RequestId';
 import type { CommandExecutionRequestApprovalParams } from './protocol/v2/CommandExecutionRequestApprovalParams';
 import type { ConfigReadParams } from './protocol/v2/ConfigReadParams';
@@ -550,18 +551,38 @@ function gatewayDefaults({ model, effort }: GatewaySettings): Defaults {
   return { model, effort };
 }
 
+// What Codex's own configuration names: the defaults, and the level of the reasoning summaries.
+interface Configured extends Defaults {
+  summary: ReasoningSummary | undefined;
+}
+
 // What Codex's own configuration names, as config/read gives it, for the folder where one is given,
 // whose project settings then count, as for a thread there: a trusted project's, and none for a folder
 // that does not exist yet. Codex 0.171.0 refuses the legacy `profile` key, so these are what it runs.
 // Should Codex not answer, nothing counts as named, and the catalog's defaults stand.
-async function configuredDefaults(rpc: Rpc, cwd?: string): Promise<Defaults> {
+async function configuredDefaults(rpc: Rpc, cwd?: string): Promise<Configured> {
   const params: ConfigReadParams = cwd === undefined ? {} : { cwd };
   try {
     const { config } = await rpc.request<ConfigReadResponse>('config/read', params);
-    return { model: config.model ?? undefined, effort: config.model_reasoning_effort ?? undefined };
+    return {
+      model: config.model ?? undefined,
+      effort: config.model_reasoning_effort ?? undefined,
+      summary: config.model_reasoning_summary ?? undefined,
+    };
   } catch {
-    return NO_DEFAULTS;
+    return { ...NO_DEFAULTS, summary: undefined };
   }
+}
+
+// The reasoning summaries a session's turns ask for. Codex 0.171.0 sends a summary of the model's
+// reasoning only when a turn or its configuration (`model_reasoning_summary`) asks for one, so a
+// session asks for Codex's automatic level unless the configuration names a level, which then stands.
+// Through a gateway it asks for none, since the gateway's model may take none.
+function askedSummary(
+  gateway: string | null,
+  configured: Configured,
+): ReasoningSummary | undefined {
+  return gateway === null && configured.summary === undefined ? 'auto' : undefined;
 }
 
 // The gateway's own over Codex's configuration, as the thread takes them.
@@ -702,6 +723,10 @@ class CodexSession implements ProviderSession {
   private modelChanged = false;
   private effortChanged: boolean;
   private sandboxChanged = false;
+  // The reasoning summaries the session's turns ask for, if any. The first turn on each app-server
+  // carries them, and Codex keeps them for the thread's later turns there.
+  private summary: ReasoningSummary | undefined;
+  private summaryChanged = false;
   // A gateway asked for during a turn, which takes over when the turn ends.
   private pendingGateway: string | null | undefined;
   // The gateway switch under way, which a message waits for; it never rejects.
@@ -952,7 +977,7 @@ class CodexSession implements ProviderSession {
 
   // Makes an attached app-server the session's current one. Codex's own settings may hold the thread
   // to another sandbox than the one asked for, and the session takes the one in force, unless the user
-  // has switched the level since, which then goes with the next turn.
+  // has switched the level since, which then goes with the next turn, as the reasoning summaries do.
   private use({ rpc, generation, sandbox: requested, response }: Attached): void {
     this.rpc = rpc;
     this.generation = generation;
@@ -961,6 +986,7 @@ class CodexSession implements ProviderSession {
     const granted = sandboxLevel(response.sandbox) ?? requested;
     this.sandboxPolicies[granted] = response.sandbox;
     if (this.settings.sandbox === requested) this.settings.sandbox = granted;
+    this.summaryChanged = true;
   }
 
   private handlers(generation: number): RpcHandlers {
@@ -987,11 +1013,13 @@ class CodexSession implements ProviderSession {
     this.onEvent({ type: 'replay-finished' });
   }
 
-  // The models, and the defaults that Codex's configuration names for the session's folder, under the
-  // gateway's own.
+  // The models, the defaults that Codex's configuration names for the session's folder, under the
+  // gateway's own, and the reasoning summaries the session's turns ask for.
   private async refreshModels(gateway: Defaults): Promise<void> {
     this.models = await allModels(this.rpc);
-    this.defaults = overGateway(gateway, await configuredDefaults(this.rpc, this.settings.cwd));
+    const configured = await configuredDefaults(this.rpc, this.settings.cwd);
+    this.defaults = overGateway(gateway, configured);
+    this.summary = askedSummary(this.settings.gateway, configured);
     this.onEvent({ type: 'models', models: modelOptions(this.models, this.defaults) });
     this.reportAvailability();
   }
@@ -1018,6 +1046,7 @@ class CodexSession implements ProviderSession {
       ...(this.effortChanged && effort !== undefined ? { effort } : {}),
       ...(this.modeChanged ? approvals(this.settings.mode) : {}),
       ...(this.sandboxChanged ? { sandboxPolicy: this.sandboxPolicy(this.settings.sandbox) } : {}),
+      ...(this.summaryChanged && this.summary !== undefined ? { summary: this.summary } : {}),
     };
   }
 
@@ -1261,6 +1290,7 @@ class CodexSession implements ProviderSession {
       this.modelChanged = false;
       this.effortChanged = false;
       this.sandboxChanged = false;
+      this.summaryChanged = false;
     } catch (error) {
       for (const message of messages) message.delivery?.failed();
       this.turnRunning = false;
