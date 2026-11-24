@@ -117,8 +117,8 @@ for (const { provider, id, notice } of cases) {
         await main.getByRole('combobox', { name: 'Provider' }).selectOption(id);
         // The provider's models, which the window asks for as it opens, so that the session starts
         // after the window's own process of the provider: Codex sets its home up as the first
-        // app-server starts in it, and of app-servers that start at once in a home not yet set up,
-        // some fail (Codex 0.166.0).
+        // app-server starts in it, and of app-servers that started at once in a home not yet set up,
+        // Codex 0.166.0 failed some, though Codex 0.171.0 failed none in repeated tries.
         await expect
           .poll(() => main.getByRole('combobox', { name: 'Model' }).locator('option').count(), {
             timeout: 30_000,

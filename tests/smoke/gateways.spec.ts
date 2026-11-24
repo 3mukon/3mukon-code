@@ -115,10 +115,11 @@ test('a Codex session through a gateway gets its answers from the gateway’s se
       await window.getByRole('button', { name: 'New session' }).click();
       const main = window.getByRole('main');
       await main.getByRole('combobox', { name: 'Provider' }).selectOption('codex');
-      // Codex sets its home up as the first app-server starts in it, and of app-servers that start at
-      // once in a home not yet set up, some fail (Codex 0.166.0). The models of Codex's own
-      // configuration, which the window asks for as it opens, show that its app-server has, before
-      // the gateway's models and the session start one each together.
+      // Codex sets its home up as the first app-server starts in it, and of app-servers that started
+      // at once in a home not yet set up, Codex 0.166.0 failed some, though Codex 0.171.0 failed none
+      // in repeated tries. The models of Codex's own configuration, which the window asks for as it
+      // opens, show that its app-server has, before the gateway's models and the session start one
+      // each together.
       await expect
         .poll(() => main.getByRole('combobox', { name: 'Model' }).locator('option').count(), {
           timeout: 30_000,
@@ -131,7 +132,7 @@ test('a Codex session through a gateway gets its answers from the gateway’s se
       const answers = main.getByText('Hello from the gateway.');
       await expect(answers).toBeVisible({ timeout: 60_000 });
       await expect(main.getByText('Working', { exact: true })).toHaveCount(0, { timeout: 60_000 });
-      // Codex keeps a thread on the provider it started with (Codex 0.166.0), so the session stays on
+      // Codex keeps a thread on the provider it started with (Codex 0.171.0), so the session stays on
       // its gateway, says why, and its next message still goes there.
       const gateway = main.getByRole('combobox', { name: 'Gateway' });
       await gateway.selectOption('');

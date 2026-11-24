@@ -10,6 +10,7 @@ import type { SleepItem } from '../SleepItem';
 import type { WebSearchItem } from '../WebSearchItem';
 import type { JsonValue } from '../serde_json/JsonValue';
 import type { AgentMessageDelivery } from './AgentMessageDelivery';
+import type { AgentMessageModeration } from './AgentMessageModeration';
 import type { AsyncUserInputQuestion } from './AsyncUserInputQuestion';
 import type { CollabAgentState } from './CollabAgentState';
 import type { CollabAgentTool } from './CollabAgentTool';
@@ -48,6 +49,7 @@ export type ThreadItem = {
   | { type: 'hookPrompt'; id: string; fragments: Array<HookPromptFragment> }
   | {
       type: 'agentMessage';
+      moderation: AgentMessageModeration | null;
       id: string;
       text: string;
       phase: MessagePhase | null;
@@ -113,6 +115,10 @@ export type ThreadItem = {
       type: 'mcpToolCall';
       id: string;
       server: string;
+      /**
+       * Registration scope, not necessarily the server's execution environment.
+       */
+      environmentId: string | null;
       tool: string;
       status: McpToolCallStatus;
       arguments: JsonValue;

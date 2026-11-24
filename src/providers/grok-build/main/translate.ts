@@ -25,9 +25,10 @@ import { displayPath, fileChange } from './patch';
 // Tool output is kept to this many characters, so that long command output stays cheap to hold.
 const OUTPUT_LIMIT = 20_000;
 
-// Grok Build's session mode behind each of the app's two permission modes (ADR-0006): its auto mode, in
-// which a classifier reviews each action and asks when it will not allow it, and its always-approve mode.
-export const modeIds: Record<PermissionMode, string> = { auto: 'auto', yolo: 'bypassPermissions' };
+// The ids under which Grok Build names its modes behind the app's two permission modes (ADR-0006), as a
+// mode update may report them: its auto mode, in which a classifier reviews each action and asks when it
+// will not allow it, and its always-approve mode. The adapter sets a mode through the session's flags.
+const modeIds: Record<PermissionMode, string> = { auto: 'auto', yolo: 'bypassPermissions' };
 
 // The session's model and reasoning effort as Grok's configuration options hold them.
 export function currentChoices(options: readonly SessionConfigOption[]): {

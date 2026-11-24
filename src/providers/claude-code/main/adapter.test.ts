@@ -276,6 +276,7 @@ describe('the Claude Code provider', () => {
           timeout: 86_400_000,
         },
       });
+      expect(first.params.options.mcpServersDelivery).toBe('initialize');
       const ask = first.params.options.canUseTool as CanUseTool;
       await expect(
         ask(

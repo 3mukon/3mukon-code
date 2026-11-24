@@ -636,8 +636,12 @@ class FakeGrok {
         }
         return { configOptions: options() };
       })
+      // As Grok 1.0.92, which takes a permission mode only as the session's flags.
       .onRequest('session/set_mode', ({ params }) => {
         record('session/set_mode', params);
+        if (params.modeId !== 'default' && params.modeId !== 'plan') {
+          throw new RequestError(-32602, 'Invalid params', `unknown mode id: ${params.modeId}`);
+        }
         return {};
       })
       .onRequest('session/set_config_option', ({ params }) => {
@@ -871,7 +875,6 @@ describe('starting a session', () => {
       'initialize',
       'session/new',
       '_x.ai/models/list',
-      'session/set_mode',
       'session/set_config_option',
       'session/set_config_option',
     ]);
@@ -879,12 +882,12 @@ describe('starting a session', () => {
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       clientInfo: { name: '3mukon-code' },
     });
+    // The mode goes with the session, as Grok's auto mode.
     expect(fake().paramsOf('session/new')[0]).toEqual({
       cwd: '/work',
       mcpServers: [],
-      _meta: { askUserQuestion: true },
+      _meta: { askUserQuestion: true, autoMode: true },
     });
-    expect(fake().paramsOf('session/set_mode')[0]).toMatchObject({ modeId: 'auto' });
     expect(fake().paramsOf('session/set_config_option')).toEqual([
       { sessionId: 'grok-1', configId: 'model', value: 'grok-small' },
       { sessionId: 'grok-1', configId: 'reasoning_effort', value: 'low' },
@@ -918,7 +921,15 @@ describe('starting a session', () => {
     await provider.start({ cwd: '/work', sandbox: 'full-access' }, () => undefined);
     await provider.start({ cwd: '/work' }, () => undefined);
     expect(fakes.map((entry) => entry.args[2])).toEqual(['workspace', 'off', 'workspace']);
-    expect(fake(0).paramsOf('session/set_mode')[0]).toMatchObject({ modeId: 'bypassPermissions' });
+    expect(fake(0).paramsOf('session/new')[0]?._meta).toEqual({
+      askUserQuestion: true,
+      yoloMode: true,
+    });
+    expect(fake(1).paramsOf('session/new')[0]?._meta).toEqual({
+      askUserQuestion: true,
+      autoMode: true,
+    });
+    expect(fakes.flatMap((entry) => entry.methods())).not.toContain('session/set_mode');
     expect(fake(2).paramsOf('session/set_config_option')).toEqual([]);
   });
 
@@ -1268,8 +1279,13 @@ describe('approvals and questions', () => {
     await until(has('approval-requested'));
     await session.setMode('yolo');
     expect(await waiting).toEqual({ outcome: { outcome: 'selected', optionId: 'allow-once' } });
-    expect(fake().paramsOf('session/set_mode').at(-1)).toMatchObject({
-      modeId: 'bypassPermissions',
+    // The running session takes the mode as a resume in its own process, with its servers again.
+    expect(fakes).toHaveLength(1);
+    expect(fake().paramsOf('session/resume').at(-1)).toEqual({
+      cwd: '/work',
+      mcpServers: [],
+      sessionId: 'grok-1',
+      _meta: { askUserQuestion: true, yoloMode: true },
     });
     expect(last(events, 'mode')).toEqual({ type: 'mode', mode: 'yolo' });
     expect(await fake().request(permission('make test'))).toEqual({
@@ -1376,13 +1392,13 @@ describe('switching', () => {
       'initialize',
       'session/resume',
       '_x.ai/models/list',
-      'session/set_mode',
       'session/set_config_option',
     ]);
+    // The new process takes the session's mode with the resume.
     expect(fake(1).paramsOf('session/resume')[0]).toEqual({
       cwd: '/work',
       mcpServers: [],
-      _meta: { askUserQuestion: true },
+      _meta: { askUserQuestion: true, autoMode: true },
       sessionId: 'grok-1',
     });
     expect(last(events, 'settings')).toEqual({ type: 'settings', sandbox: 'read-only' });
@@ -1402,7 +1418,7 @@ describe('switching', () => {
     await session.setSandbox('full-access');
     expect(fakes).toHaveLength(1);
     fake().endPrompt('end_turn');
-    await until(() => fakes.length === 2 && fake(1).methods().includes('session/set_mode'));
+    await until(() => fakes.length === 2 && fake(1).methods().includes('_x.ai/models/list'));
     expect(fake(1).args[2]).toBe('off');
   });
 
@@ -1454,7 +1470,7 @@ describe('resuming and history', () => {
     expect(fake().paramsOf('session/load')[0]).toEqual({
       cwd: '/work',
       mcpServers: [],
-      _meta: { askUserQuestion: true },
+      _meta: { askUserQuestion: true, autoMode: true },
       sessionId: 's9',
     });
     expect(

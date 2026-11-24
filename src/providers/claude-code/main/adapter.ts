@@ -803,6 +803,10 @@ class ClaudeCodeSession implements ProviderSession {
                     timeout: settings.toolset.callTimeoutMs,
                   },
                 },
+                // Over Claude Code's standard input as it initializes, which the Claude Code bundled
+                // with the SDK reads, rather than on its command line, where other users of the Mac
+                // could read the credential in the headers.
+                mcpServersDelivery: 'initialize',
                 allowedTools: access.tools?.map(
                   (name) => `mcp__${settings.toolset?.name ?? ''}__${name}`,
                 ),

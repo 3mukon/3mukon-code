@@ -90,7 +90,7 @@ export async function readGateway(dir: string, name: string): Promise<GatewaySet
   };
 }
 
-// Codex 0.166.0's built-in model providers, which a configuration may name but never define anew.
+// Codex 0.171.0's built-in model providers, which a configuration may name but never define anew.
 const BUILT_IN_PROVIDERS: ReadonlySet<string> = new Set([
   'openai',
   'amazon-bedrock',
@@ -103,12 +103,13 @@ const BUILT_IN_PROVIDERS: ReadonlySet<string> = new Set([
 const PLAIN_KEY = /^[A-Za-z0-9_-]+$/;
 
 // What the app-server of a session through the gateway starts with, so that Codex takes the gateway's
-// provider. Codex 0.166.0 takes a thread's messages only on the provider of its own configuration, the
-// one its home folder and its command line give, never on one that the thread alone was started with,
-// and it keeps each thread on the provider it started with. So the provider's id goes on the command
-// line, and, where the file defines that provider itself, a definition holding nothing but that id as
-// its name, so that Codex knows the provider as it starts; the file's settings, a token included, still
-// go only with the thread. A gateway that names no provider needs nothing.
+// provider. Codex 0.166.0 took a thread's messages only on the provider of its own configuration, the
+// one its home folder and its command line give, never on one that the thread alone was started with;
+// Codex 0.171.0 takes them on the thread's own provider too, and still on this one. Codex keeps each
+// thread on the provider it started with. So the provider's id goes on the command line, and, where the
+// file defines that provider itself, a definition holding nothing but that id as its name, so that
+// Codex knows the provider as it starts; the file's settings, a token included, still go only with the
+// thread. A gateway that names no provider needs nothing.
 export function gatewayLaunchArgs(name: string, settings: GatewaySettings): string[] {
   const id = settings.modelProvider;
   if (id === undefined) return [];

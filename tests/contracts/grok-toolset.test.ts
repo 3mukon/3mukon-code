@@ -90,7 +90,6 @@ it.each(['sanmukon-code', 'foreign'])(
             );
             return { sessionId: 'native-session' };
           })
-          .onRequest('session/set_mode', () => ({}))
           .onRequest('session/prompt', async ({ client }) => {
             const identity = { sessionId: 'native-session', toolCallId: 'native-present' };
             const meta = {

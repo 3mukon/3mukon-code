@@ -10,7 +10,7 @@ import {
 
 // Grok Build's undocumented extension methods behind its text interface's /usage (ADR-0017): how it is
 // signed in, which it answers from its own settings, and the plan's current period, which it reads
-// from Grok's service. Checked as Grok Build 1.0.70 answers; an answer of another shape leaves the
+// from Grok's service. Checked as Grok Build 1.0.92 answers; an answer of another shape leaves the
 // sign-in unknown or the usage unread.
 export const AUTH_INFO = '_x.ai/auth/info';
 export const BILLING = '_x.ai/billing';

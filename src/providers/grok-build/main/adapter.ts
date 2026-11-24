@@ -66,7 +66,7 @@ import {
   type AskUserQuestionParams,
   type AskUserQuestionResult,
 } from './requests';
-import { currentChoices, grokServerName, modeIds, toolArguments, Translator } from './translate';
+import { currentChoices, grokServerName, toolArguments, Translator } from './translate';
 import {
   completedTurn,
   INTERJECT,
@@ -108,8 +108,17 @@ function launchArgs(sandbox: SandboxLevel, hostTools: readonly string[] = []): s
   ];
 }
 
-// Tells Grok Build that the app shows the questions of its own question tool.
-const SESSION_META = { askUserQuestion: true };
+// Tells Grok Build that the app shows the questions of its own question tool and, for a session's own
+// process, in which permission mode the session runs (ADR-0006). Grok 1.0.92 takes the mode only as
+// these flags of session/new, session/load and session/resume, where autoMode turns its auto mode on
+// even over always-approve: without them a session runs in its ask mode, and session/set_mode refuses
+// every mode but its conversation's default and plan. The probes, which act on nothing, pass none.
+function sessionMeta(mode?: PermissionMode): Record<string, boolean> {
+  if (mode === undefined) return { askUserQuestion: true };
+  return mode === 'yolo'
+    ? { askUserQuestion: true, yoloMode: true }
+    : { askUserQuestion: true, autoMode: true };
+}
 
 // Grok's undocumented requests that give a session a title and delete one from its history, each
 // answering { success: true }: rename takes { sessionId, title } and delete { sessionId }.
@@ -228,7 +237,7 @@ export function createGrokBuildProvider(
           await connection.agent.request('session/load', {
             cwd,
             mcpServers: [],
-            _meta: SESSION_META,
+            _meta: sessionMeta(),
             sessionId,
           });
           translator.endMessage();
@@ -444,7 +453,7 @@ async function writeTitle(
       const created = await connection.agent.request('session/new', {
         cwd,
         mcpServers: [],
-        _meta: SESSION_META,
+        _meta: sessionMeta(),
       });
       const id = created.sessionId;
       sessionId = id;
@@ -646,12 +655,14 @@ function sessionSettings(options: StartOptions): SessionSettings {
   };
 }
 
-// A process with the session created, loaded or resumed on it, not yet in use.
+// A process with the session created, loaded or resumed on it, not yet in use, and the MCP servers it
+// was given for the session.
 interface Attached {
   agent: Agent;
   generation: number;
   sessionId: string;
   configOptions: SessionConfigOption[];
+  mcpServers: NewSessionRequest['mcpServers'];
 }
 
 type Pending =
@@ -717,6 +728,8 @@ class GrokSession implements ProviderSession {
   private generations = 0;
   private catalog: Catalog = { models: [], defaultModel: undefined, defaultEfforts: new Map() };
   private configOptions: SessionConfigOption[] = [];
+  // The MCP servers the current process was given for the session, which a resume there gives again.
+  private mcpServers: NewSessionRequest['mcpServers'] = [];
   private readonly pending = new Map<string, Pending>();
   // While Grok replays a session it loads, the user's own messages come from it; otherwise from the
   // session.
@@ -935,14 +948,18 @@ class GrokSession implements ProviderSession {
     return Promise.resolve();
   }
 
-  // Grok switches its mode at once. Approvals already waiting are allowed as soon as the session is in
-  // yolo.
+  // Grok switches its mode at once, through a resume of the running session in the same process with
+  // the mode's flags, which replays nothing; each of the session's updates still reaches the app once.
+  // Approvals already waiting are allowed as soon as the session is in yolo.
   async setMode(mode: PermissionMode): Promise<void> {
     await this.ready();
-    await this.agent.connection.agent.request('session/set_mode', {
+    const { configOptions } = await this.agent.connection.agent.request('session/resume', {
+      cwd: this.settings.cwd,
+      mcpServers: this.mcpServers,
       sessionId: this.sessionId,
-      modeId: modeIds[mode],
+      _meta: sessionMeta(mode),
     });
+    if (configOptions) this.configOptions = configOptions;
     this.settings.mode = mode;
     this.onEvent({ type: 'mode', mode });
     if (mode !== 'yolo') return;
@@ -1083,8 +1100,9 @@ class GrokSession implements ProviderSession {
               },
             ]
           : [],
-      _meta: SESSION_META,
+      _meta: sessionMeta(this.settings.mode),
     };
+    const { mcpServers } = params;
     try {
       if (existing === null) {
         const response = await agent.connection.agent.request('session/new', params);
@@ -1093,6 +1111,7 @@ class GrokSession implements ProviderSession {
           generation,
           sessionId: response.sessionId,
           configOptions: response.configOptions ?? [],
+          mcpServers,
         };
       }
       const { resumeId: sessionId } = existing;
@@ -1100,7 +1119,13 @@ class GrokSession implements ProviderSession {
       const response = existing.load
         ? await agent.connection.agent.request('session/load', { ...params, sessionId })
         : await agent.connection.agent.request('session/resume', { ...params, sessionId });
-      return { agent, generation, sessionId, configOptions: response.configOptions ?? [] };
+      return {
+        agent,
+        generation,
+        sessionId,
+        configOptions: response.configOptions ?? [],
+        mcpServers,
+      };
     } catch (error) {
       if (this.generation === generation) this.generation = 0;
       access?.close();
@@ -1113,11 +1138,12 @@ class GrokSession implements ProviderSession {
   }
 
   // Makes an attached process the session's current one; its end ends the session.
-  private use({ agent, generation, sessionId, configOptions }: Attached): void {
+  private use({ agent, generation, sessionId, configOptions, mcpServers }: Attached): void {
     this.agent = agent;
     this.generation = generation;
     this.sessionId = sessionId;
     this.configOptions = configOptions;
+    this.mcpServers = mcpServers;
     this.catalog = catalogOf(agent.initialize._meta?.modelState);
     void agent.process.ended.then((error) => {
       if (generation === this.generation) this.finish(error);
@@ -1206,13 +1232,10 @@ class GrokSession implements ProviderSession {
     };
   }
 
-  // The session's mode, and the model and effort chosen for it, on its current process.
+  // The model and effort chosen for the session, on its current process, whose session/new, load or
+  // resume carried its mode.
   private async applySettings(): Promise<void> {
-    const { mode, model, effort } = this.settings;
-    await this.agent.connection.agent.request('session/set_mode', {
-      sessionId: this.sessionId,
-      modeId: modeIds[mode],
-    });
+    const { model, effort } = this.settings;
     if (model !== null) await this.setOption('model', model);
     if (effort !== null) await this.setOption('reasoning_effort', effort);
   }

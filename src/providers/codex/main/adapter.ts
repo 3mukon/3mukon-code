@@ -544,7 +544,7 @@ function gatewayDefaults({ model, effort }: GatewaySettings): Defaults {
 
 // What Codex's own configuration names, as config/read gives it, for the folder where one is given,
 // whose project settings then count, as for a thread there: a trusted project's, and none for a folder
-// that does not exist yet. Codex 0.166.0 refuses the legacy `profile` key, so these are what it runs.
+// that does not exist yet. Codex 0.171.0 refuses the legacy `profile` key, so these are what it runs.
 // Should Codex not answer, nothing counts as named, and the catalog's defaults stand.
 async function configuredDefaults(rpc: Rpc, cwd?: string): Promise<Defaults> {
   const params: ConfigReadParams = cwd === undefined ? {} : { cwd };
@@ -838,7 +838,7 @@ class CodexSession implements ProviderSession {
     return Promise.resolve();
   }
 
-  // Codex 0.166.0 takes a sandbox only for the turns that follow, in its stable and its experimental
+  // Codex 0.171.0 takes a sandbox only for the turns that follow, in its stable and its experimental
   // API alike, so a switch during a turn applies from the next one.
   setSandbox(sandbox: SandboxLevel): Promise<void> {
     this.settings.sandbox = sandbox;
