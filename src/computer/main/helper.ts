@@ -202,14 +202,20 @@ export class NativeHelper implements HelperSetup {
   }
 
   // Reading status for Settings does not need to keep the operating helper running. If an
-  // operation started it meanwhile, read that generation so restart requirements are correct.
+  // operation started it meanwhile, read that generation so restart requirements are correct. A
+  // probe that fails, as one may on a busy Mac, tells nothing of the permissions, so the facts last
+  // read stay; with none read yet, they are unavailable.
   private async readIdlePermissions(): Promise<Outcome<HelperStatus>> {
     const epoch = this.epoch;
     const permissions = await this.freshPermissions();
     if (!this.isCurrent(epoch)) return unavailable();
     if (this.wire) return this.readPermissions();
-    this.current = inactive(permissions === undefined ? 'unavailable' : 'idle');
-    return permissions === undefined ? unavailable() : okay(this.savePermissions(permissions));
+    if (permissions === undefined) {
+      if (this.current.checkedAt === null) this.current = inactive('unavailable');
+      return unavailable();
+    }
+    this.current = inactive('idle');
+    return okay(this.savePermissions(permissions));
   }
 
   private async readPermissions(): Promise<Outcome<HelperStatus>> {
@@ -351,7 +357,7 @@ export class NativeHelper implements HelperSetup {
         return dispatched ? this.lostAction(binding) : unavailable();
       }
       if (this.current.generation !== wire.generation) {
-        const cached = this.current.connection === 'idle' ? this.current : inactive('idle');
+        const cached = this.current.checkedAt === null ? inactive('idle') : this.current;
         this.current = { ...cached, connection: 'ready', generation: wire.generation };
       }
       return okay(reply);
@@ -359,7 +365,7 @@ export class NativeHelper implements HelperSetup {
       if (epoch === this.epoch) {
         const state = error instanceof ProtocolMismatch ? 'protocol-mismatch' : 'unavailable';
         if (this.wire) this.retire(this.wire, state);
-        else this.current = inactive(state);
+        else this.current = this.without(state);
       }
       // Retirement waits for the specific child. An executor must keep its broker lease until the
       // process can no longer post input, even when the provider's call has already been cancelled.
@@ -386,9 +392,17 @@ export class NativeHelper implements HelperSetup {
     return !this.closed && epoch === this.epoch;
   }
 
+  // The status with no helper running. A helper that exits, fails to start or stops tells nothing
+  // of the permissions, so the facts last read stay until a new read; before any has been read, they
+  // are unknown while idle and unavailable otherwise.
+  private without(connection: InactiveConnection): HelperStatus {
+    if (this.current.checkedAt === null) return inactive(connection);
+    return { ...this.current, connection, generation: null };
+  }
+
   private retire(wire: HelperWire, state: InactiveConnection): void {
     this.wire = undefined;
-    this.current = inactive(state);
+    this.current = this.without(state);
     wire.close();
     this.drain = wire.child.stop();
     this.generationEnded(wire.generation);
@@ -398,7 +412,7 @@ export class NativeHelper implements HelperSetup {
     this.epoch++;
     const wire = this.wire;
     if (wire) this.retire(wire, 'idle');
-    else this.current = inactive('idle');
+    else this.current = this.without('idle');
     await this.probe?.stop();
     await this.checking;
     await this.requests;

@@ -18,8 +18,6 @@ const PERMISSION_PANES: Record<Permission, string> = {
   'input-monitoring': 'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent',
 };
 
-const PERMISSION_REFRESH_MS = 60_000;
-
 const verified: Outcome<null> = { status: 'verified', value: null };
 const noProfiles: ChromeProfileList = { status: 'read', profiles: [] };
 const chromeUnavailable: Outcome<null> = {
@@ -42,13 +40,16 @@ type ChromeSetupPort = Pick<
 
 // What the window's settings and setup notices show of browser and computer use, and the steps the
 // user's click takes there: the app's browser, whose sign-ins Clear Sign-Ins clears through the
-// embedded browser, and the macOS permissions, which the helper reports. Permissions are checked
-// from startup, periodically and on focus without opening System Settings. The first settings or
-// notice read waits for Chrome's version and profiles; later reads return cached facts.
+// embedded browser, and the macOS permissions, which the helper reports. A permission check opens
+// no System Settings but usually starts a helper, whose every start compares its bundle with the
+// packaged one and checks its signature, so the permissions are checked only as the app starts and
+// at each read, which Settings makes as it opens and as its window regains the focus, as it does
+// when the user comes back from System Settings; never on a timer. The first settings or notice
+// read waits for Chrome's version and profiles; later reads return cached facts. Each read
+// publishes what its permission check finds.
 export class UserSetup implements UserSetupBridge {
   private readonly listeners = new Set<(snapshot: SetupSnapshot) => void>();
   private readonly stopWatchingChrome: (() => void) | undefined;
-  private permissionsTimer?: ReturnType<typeof setInterval>;
   private checkingPermissions = false;
   private lastPublished?: string;
   private closed = false;
@@ -73,22 +74,13 @@ export class UserSetup implements UserSetupBridge {
     });
   }
 
+  // The check that lets Settings, opened later, tell an unchecked permission from a missing one.
   start(): void {
-    if (this.closed || this.permissionsTimer !== undefined) return;
-    this.refreshPermissions();
-    this.permissionsTimer = setInterval(() => {
-      this.refreshPermissions();
-    }, PERMISSION_REFRESH_MS);
-    this.permissionsTimer.unref();
-  }
-
-  focused(): void {
     this.refreshPermissions();
   }
 
   close(): void {
     this.closed = true;
-    clearInterval(this.permissionsTimer);
     this.stopWatchingChrome?.();
     this.listeners.clear();
   }

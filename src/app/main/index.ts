@@ -265,12 +265,7 @@ void app
       accountsUi: (window) => windowAccountsUi(windowPrompts(window), t),
       page: pageUrl(),
     });
-    const refreshSetupOnFocus = (_event: Electron.Event, window: BrowserWindow) => {
-      if (!controlWindow?.owns(window.webContents)) setup.focused();
-    };
-    app.on('browser-window-focus', refreshSetupOnFocus);
     closeBeforeQuitting(adapters, async () => {
-      app.removeListener('browser-window-focus', refreshSetupOnFocus);
       setup.close();
       stopWatchingControl?.();
       stopControlSettings?.();

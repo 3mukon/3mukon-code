@@ -62,7 +62,7 @@ function setup(installedChromeVersion: () => Promise<string | null> = () => Prom
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('UserSetup', () => {
-  it('caches startup permissions, refreshes them on focus and at intervals, and stops on close', async () => {
+  it('checks permissions as it starts and at each read, never on a timer, and stops on close', async () => {
     vi.useFakeTimers();
     const installed = vi.fn(() => Promise.resolve(null));
     const { host, helper, restart, openUrl, reportPermissions } = setup(installed);
@@ -71,14 +71,24 @@ describe('UserSetup', () => {
     try {
       host.start();
       host.start();
-      host.focused();
       expect(helper.check).toHaveBeenCalledExactlyOnceWith({ transient: true });
+      // A check usually starts a helper, which verifies its bundle first, so nothing waits to check
+      // again.
+      expect(vi.getTimerCount()).toBe(0);
       await vi.advanceTimersByTimeAsync(0);
       expect(installed).not.toHaveBeenCalled();
       expect(heard).toHaveLength(1);
 
+      reportPermissions({ accessibility: 'granted', screenRecording: 'granted' });
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(helper.check).toHaveBeenCalledOnce();
+      expect(heard).toHaveLength(1);
+
+      // Settings opens: the first read waits for Chrome's facts, and checks again.
+      reportPermissions({ accessibility: 'granted', screenRecording: 'not-granted' });
       const first = await host.snapshot();
       expect(installed).toHaveBeenCalledOnce();
+      expect(helper.check).toHaveBeenCalledTimes(2);
       expect(first.computer).toMatchObject({
         accessibility: 'granted',
         screenRecording: 'not-granted',
@@ -86,24 +96,22 @@ describe('UserSetup', () => {
       expect(first.appProfile).toEqual({ id: 'embedded-app', canClear: true });
       expect(heard).toHaveLength(1);
 
+      // Its window regains the focus as the user comes back from System Settings: the read answers
+      // from the cache at once and publishes what its check finds.
       reportPermissions({ accessibility: 'granted', screenRecording: 'granted' });
-      await vi.advanceTimersByTimeAsync(60_000);
+      const cached = await host.snapshot();
+      expect(cached.computer.screenRecording).toBe('not-granted');
+      await vi.advanceTimersByTimeAsync(0);
       expect(heard.at(-1)?.computer.screenRecording).toBe('granted');
       expect(helper.check).toHaveBeenCalledTimes(3);
-
-      reportPermissions({ accessibility: 'not-granted', screenRecording: 'granted' });
-      host.focused();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(heard.at(-1)?.computer.accessibility).toBe('not-granted');
-      expect(helper.check).toHaveBeenCalledTimes(4);
-      expect(installed).toHaveBeenCalledOnce();
       expect(restart).not.toHaveBeenCalled();
       expect(helper.request).not.toHaveBeenCalled();
       expect(openUrl).not.toHaveBeenCalled();
 
       host.close();
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(helper.check).toHaveBeenCalledTimes(4);
+      await host.snapshot();
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(helper.check).toHaveBeenCalledTimes(3);
     } finally {
       host.close();
       vi.useRealTimers();

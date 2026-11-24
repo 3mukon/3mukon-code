@@ -202,6 +202,37 @@ it('caches permissions from an idle probe without leaving the probe running', as
   }
 });
 
+it('keeps the permissions it last read where a later probe fails, and has them unavailable before any is read', async () => {
+  const probe = childFixture({ allowed: { ...NONE, accessibility: true } });
+  // As when the signature check runs out of time on a busy Mac.
+  const late = new Error('The signature check timed out.');
+  const launch = vi
+    .fn<() => Promise<HelperChild>>()
+    .mockRejectedValueOnce(late)
+    .mockResolvedValueOnce(probe.child)
+    .mockRejectedValueOnce(late);
+  const helper = new NativeHelper(launch);
+  try {
+    expect((await helper.check({ transient: true })).status).toBe('refused');
+    expect(helper.status()).toMatchObject({
+      checkedAt: null,
+      permissions: { accessibility: 'unavailable', screenRecording: 'unavailable' },
+    });
+    expect((await helper.check({ transient: true })).status).toBe('verified');
+    const read = helper.status();
+    expect(read).toMatchObject({
+      connection: 'idle',
+      permissions: { accessibility: 'granted', screenRecording: 'not-granted' },
+    });
+    expect((await helper.check({ transient: true })).status).toBe('refused');
+    expect(helper.status()).toEqual(read);
+    expect(launch).toHaveBeenCalledTimes(3);
+    expect(probe.stop).toHaveBeenCalledOnce();
+  } finally {
+    await helper.close();
+  }
+});
+
 it('accepts only current native control clicks, and the stop shortcut while a control shows, even with no outstanding tool request', async () => {
   const fixture = childFixture();
   const clicked = vi.fn();
@@ -372,7 +403,7 @@ it('keeps an unanswered mutation pending until the timed-out child is reaped', a
   }
 });
 
-it('invalidates a crashed generation and reaps it before opening a replacement', async () => {
+it('invalidates a crashed generation, keeping the permissions it read, and reaps it before opening a replacement', async () => {
   const first = childFixture();
   const second = childFixture();
   const retired = vi.fn();
@@ -386,11 +417,13 @@ it('invalidates a crashed generation and reaps it before opening a replacement',
   first.crash();
   await Promise.resolve();
   expect(launch).toHaveBeenCalledOnce();
+  // An exit says nothing of the permissions, so Settings keeps showing what was read.
   expect(helper.status()).toMatchObject({
     connection: 'unavailable',
     generation: null,
-    permissions: { accessibility: 'unavailable', screenRecording: 'unavailable' },
+    permissions: { accessibility: 'granted', screenRecording: 'granted' },
   });
+  expect(helper.status().checkedAt).not.toBeNull();
   expect(retired).toHaveBeenCalledWith(before);
   expect((await helper.restart()).status).toBe('verified');
   expect(helper.status().generation).not.toBe(before);
