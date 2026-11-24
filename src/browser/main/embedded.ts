@@ -188,6 +188,12 @@ export class EmbeddedBrowser implements BrowserTabs {
   ): Promise<Outcome<null>> {
     const tab = this.find(owner, ref);
     if (!tab) return refused('stale-target');
+    if (command.kind === 'close') {
+      // The user's Close ends the tab and the agent's use of it, whoever has the tab, as closing the
+      // session would; a Chrome task tab the user took over stays open in Chrome as the user's own.
+      await this.resources.ended(owner, tab.state.ref, 'tab-closed');
+      return okay();
+    }
     if (command.kind === 'open-external') {
       if (!tab.page?.openExternal) return refused('background-unavailable');
       const taken = this.setControl(tab, 'user');

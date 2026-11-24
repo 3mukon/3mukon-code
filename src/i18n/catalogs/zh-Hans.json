@@ -202,14 +202,16 @@
         "waiting-grant": "等你回应后才能使用 {{target}}",
         "paused": "已在 {{target}} 中暂停",
         "stopping": "正在停止使用 {{target}}",
-        "more_other": "等 {{count}} 项",
         "blank": "空白标签页",
         "background": "在后台",
+        "panel": "在面板中",
         "foreground": "在前台",
         "show": "显示",
-        "stop": "停止",
+        "showNamed": "显示：{{target}}",
+        "close": "关闭",
+        "closeNamed": "关闭：{{target}}",
         "cantShow": "现在无法显示。",
-        "cantStop": "无法停止。"
+        "cantClose": "无法关闭。"
       },
       "sharing": {
         "none": "不共享",

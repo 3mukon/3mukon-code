@@ -1,7 +1,12 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
-import type { AutomationLiveState, Operation, TargetSummary } from '../shared/automation';
+import type {
+  AutomationLiveState,
+  HostApproval,
+  Operation,
+  TargetSummary,
+} from '../shared/automation';
 import { AutomationLine } from './automation-line';
 
 beforeAll(() => {
@@ -16,6 +21,13 @@ const tab: TargetSummary = {
   address: 'https://example.com/pricing',
   sharing: 'none',
   browser: 'embedded',
+};
+const docs: TargetSummary = {
+  ...tab,
+  ref: { ...tab.ref, id: 'tab-2' },
+  name: 'Docs',
+  address: 'https://docs.example.com/start',
+  sharing: 'app',
 };
 const mail: TargetSummary = {
   ref: { id: 'app-1', kind: 'application', generation: 1 },
@@ -54,12 +66,15 @@ function state(fields: Partial<AutomationLiveState>): AutomationLiveState {
 
 const settle = () => act(() => Promise.resolve());
 const yes = () => Promise.resolve(true);
+// Nothing the session uses shows in a panel.
+const hidden = () => false;
 
-// The line's words, whose target is drawn in the ink apart from the rest.
+// A row's words, whose target is drawn in the ink apart from the rest.
 function words(text: string | RegExp): HTMLElement {
   return screen.getByText(
     (_, element) =>
       element instanceof HTMLElement &&
+      element.tagName === 'SPAN' &&
       element.classList.contains('truncate') &&
       (typeof text === 'string' ? element.textContent === text : text.test(element.textContent)),
   );
@@ -68,36 +83,47 @@ function words(text: string | RegExp): HTMLElement {
 describe('AutomationLine', () => {
   it('shows nothing while the session uses no tab or application', () => {
     const { container } = render(
-      <AutomationLine state={state({ resources: [] })} onShow={yes} onStop={yes} />,
+      <AutomationLine shown={hidden} state={state({ resources: [] })} onShow={yes} onClose={yes} />,
     );
     expect(container.textContent).toBe('');
     cleanup();
-    const before = render(<AutomationLine state={undefined} onShow={yes} onStop={yes} />);
+    const before = render(
+      <AutomationLine shown={hidden} state={undefined} onShow={yes} onClose={yes} />,
+    );
     expect(before.container.textContent).toBe('');
   });
 
-  it('names what the session uses in faint small type, the target in the ink, with its sharing and delivery, or the first and how many more', () => {
-    const { container } = render(<AutomationLine state={state({})} onShow={yes} onStop={yes} />);
+  it('names each tab and application on a row of its own, in faint small type, with its sharing and where it works, and offers no Stop', () => {
+    const { container } = render(
+      <AutomationLine shown={hidden} state={state({})} onShow={yes} onClose={yes} />,
+    );
     words('Using example.com · No sharing · in the background');
     expect(screen.getByText('example.com').className).toContain('text-ink');
     expect(container.firstElementChild?.className).toContain('text-faint');
     expect(container.querySelector('[aria-hidden="true"]')?.className).toContain('bg-accent');
-    expect(screen.getByRole('button', { name: 'Show' }).className).toContain('border-line');
+    expect(screen.getByRole('button', { name: 'Show: example.com' }).className).toContain(
+      'border-line',
+    );
+    expect(screen.queryByRole('button', { name: /^Stop/ })).toBeNull();
     cleanup();
     render(
       <AutomationLine
+        shown={hidden}
         state={state({
-          resources: [mail],
+          resources: [tab, docs, mail],
           operations: [operation({ target: mail.ref, kind: 'application-foreground' })],
         })}
         onShow={yes}
-        onStop={yes}
+        onClose={yes}
       />,
     );
+    words('Using example.com · No sharing · in the background');
+    words('Using docs.example.com · App sign-ins · in the background');
     words('Using Mail · in the foreground');
-    cleanup();
-    render(<AutomationLine state={state({ resources: [tab, mail] })} onShow={yes} onStop={yes} />);
-    words('Using example.com · and 1 more');
+    // Only tabs close; an application stays as it is.
+    expect(screen.getByRole('button', { name: 'Close: example.com' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Close: docs.example.com' })).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Close: Mail' })).toBeNull();
     cleanup();
     // An application counts once, with the windows of it that the session knows.
     const inbox: TargetSummary = {
@@ -107,60 +133,142 @@ describe('AutomationLine', () => {
       applicationName: 'Mail',
       application: mail.ref,
     };
+    const second = { ...inbox, ref: { ...inbox.ref, id: 'window-2' } };
     const onShow = vi.fn(yes);
     render(
       <AutomationLine
+        shown={hidden}
         state={state({
-          resources: [mail, inbox, { ...inbox, ref: { ...inbox.ref, id: 'window-2' } }],
+          resources: [mail, inbox, second],
           operations: [operation({ target: mail.ref, kind: 'application-background' })],
         })}
         onShow={onShow}
-        onStop={yes}
+        onClose={yes}
       />,
     );
     words('Using Mail · in the background');
-    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
-    expect(onShow).toHaveBeenCalledWith([
-      mail,
-      inbox,
-      { ...inbox, ref: { ...inbox.ref, id: 'window-2' } },
-    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Show: Mail' }));
+    expect(onShow).toHaveBeenCalledWith([mail, inbox, second]);
   });
 
-  it('says when it waits for the user, pauses or stops, and offers Stop only while there is work', () => {
+  it('says for each row whether the session waits for the user, pauses or stops there', () => {
+    const approval: HostApproval = {
+      id: 'a1',
+      callId: 'c1',
+      source: 'host',
+      operation: operation({ target: docs.ref, state: 'waiting' }),
+      target: docs,
+      canAllowForSession: true,
+      requestedAt: 0,
+    };
     const waiting = render(
-      <AutomationLine state={state({ phase: 'waiting-grant' })} onShow={yes} onStop={yes} />,
+      <AutomationLine
+        shown={hidden}
+        state={state({
+          phase: 'waiting-grant',
+          resources: [tab, docs],
+          pendingApprovals: [approval],
+        })}
+        onShow={yes}
+        onClose={yes}
+      />,
     );
-    words('Waiting for your answer to use example.com · No sharing · in the background');
-    expect(waiting.container.querySelector('[aria-hidden="true"]')?.className).toContain('bg-wait');
-    cleanup();
-    render(<AutomationLine state={state({ phase: 'stopping' })} onShow={yes} onStop={yes} />);
-    words(/^Stopping in example\.com/);
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    words('Using example.com · No sharing · in the background');
+    words('Waiting for your answer to use docs.example.com · App sign-ins · in the background');
+    const dots = waiting.container.querySelectorAll('[aria-hidden="true"]');
+    expect(dots[1]?.className).toContain('bg-wait');
     cleanup();
     render(
-      <AutomationLine state={state({ phase: 'idle', operations: [] })} onShow={yes} onStop={yes} />,
+      <AutomationLine
+        shown={hidden}
+        state={state({
+          phase: 'paused',
+          operations: [],
+          pausedTargets: [{ target: tab.ref, reason: 'user-input' }],
+        })}
+        onShow={yes}
+        onClose={yes}
+      />,
     );
-    expect(screen.getByRole('button', { name: 'Show' })).toBeDefined();
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    words(/^Paused in example\.com/);
+    cleanup();
+    render(
+      <AutomationLine
+        shown={hidden}
+        state={state({ phase: 'stopping', operations: [operation({ state: 'stopping' })] })}
+        onShow={yes}
+        onClose={yes}
+      />,
+    );
+    words(/^Stopping in example\.com/);
+    cleanup();
+    const idle = render(
+      <AutomationLine
+        shown={hidden}
+        state={state({ phase: 'idle', operations: [] })}
+        onShow={yes}
+        onClose={yes}
+      />,
+    );
+    words('Using example.com · No sharing · in the background');
+    expect(idle.container.querySelector('[aria-hidden="true"]')?.className).not.toContain(
+      'bg-accent',
+    );
   });
 
-  it('presents what the session uses with Show and stops its work with Stop, saying what failed', async () => {
-    const onShow = vi.fn(() => Promise.resolve(false));
-    const onStop = vi.fn(() => Promise.resolve(false));
+  it('says a page a panel shows is in a panel, and offers Show only for what no panel shows', () => {
+    const onShow = vi.fn(yes);
+    const shownTab = (target: TargetSummary) => target.ref.id === tab.ref.id;
     render(
-      <AutomationLine state={state({ resources: [tab, mail] })} onShow={onShow} onStop={onStop} />,
+      <AutomationLine
+        state={state({ resources: [tab, mail] })}
+        shown={shownTab}
+        onShow={onShow}
+        onClose={yes}
+      />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+    words('Using example.com · No sharing · in a panel');
+    expect(screen.queryByRole('button', { name: 'Show: example.com' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show: Mail' }));
+    expect(onShow).toHaveBeenCalledWith([mail]);
+    cleanup();
+    // An application's preview never makes its work foreground or background: its delivery stays.
+    render(
+      <AutomationLine
+        state={state({
+          resources: [mail],
+          operations: [operation({ target: mail.ref, kind: 'application-background' })],
+        })}
+        shown={() => true}
+        onShow={onShow}
+        onClose={yes}
+      />,
+    );
+    words('Using Mail · in the background');
+    expect(screen.queryByRole('button', { name: 'Show: Mail' })).toBeNull();
+  });
+
+  it('closes each tab from its own row, and says what could not be shown or closed', async () => {
+    const onShow = vi.fn(() => Promise.resolve(false));
+    const onClose = vi.fn(() => Promise.resolve(false));
+    render(
+      <AutomationLine
+        shown={hidden}
+        state={state({ resources: [tab, docs] })}
+        onShow={onShow}
+        onClose={onClose}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Show: example.com' }));
     await settle();
-    expect(onShow).toHaveBeenCalledWith([tab, mail]);
+    expect(onShow).toHaveBeenCalledWith([tab]);
     expect(screen.getByRole('status').textContent).toBe('It can’t be shown now.');
-    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close: docs.example.com' }));
     await settle();
-    expect(onStop).toHaveBeenCalledOnce();
-    expect(screen.getByRole('status').textContent).toBe('It couldn’t be stopped.');
-    onStop.mockResolvedValue(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(onClose).toHaveBeenCalledExactlyOnceWith(docs);
+    expect(screen.getByRole('status').textContent).toBe('It couldn’t be closed.');
+    onClose.mockResolvedValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Close: docs.example.com' }));
     await settle();
     expect(screen.getByRole('status').textContent).toBe('');
   });

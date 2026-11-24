@@ -370,3 +370,34 @@ it('allows read-only navigation but rejects mutations, other schemes and global 
     await f.end();
   }
 });
+
+it('closes a tab at the user’s Close, ending the agent’s use of it, also while the user has it', async () => {
+  const f = fixture();
+  try {
+    const a = await f.bind('a');
+    const kept = await f.open(a, 'none');
+    const tab = await f.open(a, 'app');
+    const loading = f.call(a, 'navigate', { target: tab, url: targetUrl });
+    await f.allow('a');
+    await loading;
+    expect(await f.browser.command('a', tab, { kind: 'take-control' })).toMatchObject({
+      status: 'verified',
+    });
+    expect(await f.browser.command('b', tab, { kind: 'close' })).toMatchObject({
+      code: 'stale-target',
+    });
+    expect(await f.browser.command('a', tab, { kind: 'close' })).toEqual({
+      status: 'verified',
+      value: null,
+    });
+    expect(await f.browser.snapshot('a', tab)).toBeNull();
+    expect(f.closed).toHaveBeenCalledOnce();
+    expect(f.broker.snapshot('a').value.resources.map(({ ref }) => ref.id)).toEqual([kept.id]);
+    expect(f.broker.snapshot('a').value.operations).toEqual([]);
+    expect((await f.call(a, 'snapshot', { target: tab })).outcome).toMatchObject({
+      status: 'refused',
+    });
+  } finally {
+    await f.end();
+  }
+});

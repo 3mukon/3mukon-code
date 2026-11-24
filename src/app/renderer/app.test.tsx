@@ -1688,6 +1688,10 @@ describe('App', () => {
       },
       artifact: () => Promise.resolve(null),
     };
+    const closing = vi.fn<Bridge['browser']['command']>(() =>
+      Promise.resolve({ status: 'verified', value: null }),
+    );
+    bridge.browser.command = closing;
     await renderApp(bridge);
     fireEvent.click(
       within(screen.getByRole('region', { name: 'Sessions' })).getByRole('button', {
@@ -1704,16 +1708,22 @@ describe('App', () => {
     expect(
       within(panel).getByText(textOf('Using example.com · No sharing · in the background')),
     ).toBeTruthy();
-    fireEvent.click(within(panel).getByRole('button', { name: 'Show' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Show: example.com' }));
     const request = sent.at(-1);
     if (request?.kind !== 'show' || !('content' in request)) {
       throw new Error('The window asked main to show nothing.');
     }
     expect(request).toMatchObject({ owner: 's1', content: { kind: 'browser', tabId: 'tab-1' } });
-    fireEvent.click(within(panel).getByRole('button', { name: 'Stop' }));
+    // The line closes each tab on its own; the composer's Stop stops the session's work.
+    fireEvent.click(within(panel).getByRole('button', { name: 'Close: example.com' }));
     await waitFor(() => {
-      expect(automation.commands).toContainEqual({ kind: 'stop', sessionId: 's1' });
+      expect(closing).toHaveBeenCalledExactlyOnceWith(
+        's1',
+        { id: 'tab-1', generation: 1, kind: 'browser-tab' },
+        { kind: 'close' },
+      );
     });
+    expect(automation.commands).not.toContainEqual({ kind: 'stop', sessionId: 's1' });
   });
 
   it('shows a tab its session presents as its live page, in a panel named by the page, with its sharing and what the session does with it', async () => {

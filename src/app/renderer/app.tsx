@@ -546,6 +546,25 @@ export function App({ bridge }: { bridge: Bridge }) {
       );
   // Presents beside the session each tab or application it uses, as the user asks from the line
   // above its composer; true once each is shown.
+  // Closes a tab a session uses, as its row above the composer asks.
+  const closeTab = (sessionId: string, target: TargetSummary): Promise<boolean> =>
+    target.ref.kind === 'browser-tab'
+      ? bridge.browser
+          .command(
+            sessionId,
+            { id: target.ref.id, generation: target.ref.generation, kind: 'browser-tab' },
+            { kind: 'close' },
+          )
+          .then((outcome) => outcome.status === 'verified')
+      : Promise.resolve(false);
+  // Whether a panel shows a tab or an application a session uses.
+  const shownUsed = (target: TargetSummary): boolean => {
+    const content = usedContent(target);
+    return (
+      content !== null &&
+      panelsOf(panels.layout).some((panel) => sameContent(panel.content, content))
+    );
+  };
   const showUsed = (sessionId: string, targets: readonly TargetSummary[]): Promise<boolean> =>
     Promise.all(
       targets
@@ -776,12 +795,9 @@ export function App({ bridge }: { bridge: Bridge }) {
                   <>
                     <AutomationLine
                       state={automation.get(sessionId)}
+                      shown={shownUsed}
                       onShow={(targets) => showUsed(sessionId, targets)}
-                      onStop={() =>
-                        bridge.automation
-                          .stop(sessionId)
-                          .then((outcome) => outcome.status === 'verified')
-                      }
+                      onClose={(target) => closeTab(sessionId, target)}
                     />
                     <GrantsLine
                       grants={automation.get(sessionId)?.grants ?? []}

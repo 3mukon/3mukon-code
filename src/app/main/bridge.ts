@@ -213,6 +213,7 @@ const browserCommand = z.discriminatedUnion('kind', [
       'take-control',
       'hand-back',
       'open-external',
+      'close',
     ]),
   }),
 ]);

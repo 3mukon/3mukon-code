@@ -30,7 +30,12 @@ export type BrowserNavigation =
   { kind: 'navigate'; url: string } | { kind: 'back' | 'forward' | 'reload' | 'stop-loading' };
 
 export type BrowserTabCommand =
-  BrowserNavigation | { kind: 'take-control' } | { kind: 'hand-back' } | { kind: 'open-external' };
+  | BrowserNavigation
+  | { kind: 'take-control' }
+  | { kind: 'hand-back' }
+  | { kind: 'open-external' }
+  // The user's own Close, which ends the tab whoever has it.
+  | { kind: 'close' };
 
 export interface BrowserTabs {
   snapshot(owner: string, tab: BrowserTabRef): Promise<BrowserTabState | null>;

@@ -204,15 +204,16 @@
         "waiting-grant": "Waiting for your answer to use {{target}}",
         "paused": "Paused in {{target}}",
         "stopping": "Stopping in {{target}}",
-        "more_one": "and {{count}} more",
-        "more_other": "and {{count}} more",
         "blank": "a blank tab",
         "background": "in the background",
+        "panel": "in a panel",
         "foreground": "in the foreground",
         "show": "Show",
-        "stop": "Stop",
+        "showNamed": "Show: {{target}}",
+        "close": "Close",
+        "closeNamed": "Close: {{target}}",
         "cantShow": "It can’t be shown now.",
-        "cantStop": "It couldn’t be stopped."
+        "cantClose": "It couldn’t be closed."
       },
       "sharing": {
         "none": "No sharing",
