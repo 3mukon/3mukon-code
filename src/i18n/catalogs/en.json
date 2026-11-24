@@ -1,6 +1,10 @@
 {
   "sidebar": {
-    "label": "Sidebar"
+    "label": "Sidebar",
+    "hide": "Hide Sidebar",
+    "show": "Show Sidebar",
+    "hideTip": "Hide Sidebar (⌘B)",
+    "showTip": "Show Sidebar (⌘B)"
   },
   "workspaces": {
     "heading": "Workspaces",

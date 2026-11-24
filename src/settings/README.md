@@ -5,14 +5,14 @@ title: settings module
 status: current
 visibility: public
 date: 2026-11-03
-summary: The app's settings, the window's language, its appearance and whether its tooltips show, kept in the app's own data, with the panel that changes them in the e-ink look and the hook that keeps the window's language in step with them
+summary: The app's settings, the window's language, its appearance, whether its tooltips show and whether its sidebar is hidden, kept in the app's own data, with the panel that changes them in the e-ink look and the hook that keeps the window's language in step with them
 scope: ["src/settings/**"]
 tags: []
 ---
 
 ## Responsibilities
 
-- The contract (`shared/settings.ts`): `AppSettings`, the language, `system` for macOS's preferred languages or `en` or `zh-Hans`, the appearance, `system`, `light` or `dark`, and `tooltips`, whether the window draws its controls' tooltips (ADR-0021); `settingsOf`, which takes the settings from a value of any shape, what is not one of the choices giving way to the default (`defaultSettings`, System for the first two and the tooltips off); `sameSettings`, whether two sets of settings choose the same in every setting; `preferredLanguages`, the preferred languages a choice of language stands for; and `SettingsBridge`, what the window asks of the settings through the preload bridge: the settings it opened with, without a call, reading and changing them, and hearing each change.
+- The contract (`shared/settings.ts`): `AppSettings`, the language, `system` for macOS's preferred languages or `en` or `zh-Hans`, the appearance, `system`, `light` or `dark`, `tooltips`, whether the window draws its controls' tooltips (ADR-0021), and `sidebarHidden`, whether the window's sidebar is hidden, as its button and ⌘B leave it, which the panel does not show; `settingsOf`, which takes the settings from a value of any shape, what is not one of the choices giving way to the default (`defaultSettings`, System for the first two, the tooltips off and the sidebar shown); `sameSettings`, whether two sets of settings choose the same in every setting; `preferredLanguages`, the preferred languages a choice of language stands for; and `SettingsBridge`, what the window asks of the settings through the preload bridge: the settings it opened with, without a call, reading and changing them, and hearing each change.
 - The store (`main/settings.ts`): `Settings` keeps the settings in `settings.json` in the app's data, readable by the user alone (`settingsStorage`), and tells its listeners whenever a change changes them; a change to what they are already, in every setting, changes nothing.
 - The panel (`renderer/settings-panel.tsx`): `SettingsPanel`, the settings as a panel shows them on the window's paper, each a row of choices drawn with the ui module's `Segmented`, the chosen one in ink: the language, System, English or 简体中文, each language named in itself, the appearance, System, Light or Dark, and the tooltips, Off or On, each with a line of what it does.
 - The hook (`renderer/use-settings.ts`): `useSettings` keeps the settings current through the bridge and changes them, and switches the window's language as the language setting changes, through the i18n module.

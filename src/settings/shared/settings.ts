@@ -12,12 +12,16 @@ export interface AppSettings {
   appearance: Appearance;
   // Whether the window draws its controls' tooltips (ADR-0021), off unless the user turns them on.
   tooltips: boolean;
+  // Whether the window's sidebar is hidden, as its button and ⌘B leave it; the Settings panel does not
+  // show it.
+  sidebarHidden: boolean;
 }
 
 export const defaultSettings: AppSettings = {
   language: 'system',
   appearance: 'system',
   tooltips: false,
+  sidebarHidden: false,
 };
 
 const languages: readonly LanguageChoice[] = ['system', 'en', 'zh-Hans'];
@@ -41,10 +45,13 @@ export function settingsOf(value: unknown): AppSettings {
   const language = 'language' in given ? given.language : undefined;
   const appearance = 'appearance' in given ? given.appearance : undefined;
   const tooltips = 'tooltips' in given ? given.tooltips : undefined;
+  const sidebarHidden = 'sidebarHidden' in given ? given.sidebarHidden : undefined;
   return {
     language: languages.find((choice) => choice === language) ?? defaultSettings.language,
     appearance: appearances.find((choice) => choice === appearance) ?? defaultSettings.appearance,
     tooltips: typeof tooltips === 'boolean' ? tooltips : defaultSettings.tooltips,
+    sidebarHidden:
+      typeof sidebarHidden === 'boolean' ? sidebarHidden : defaultSettings.sidebarHidden,
   };
 }
 

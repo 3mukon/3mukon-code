@@ -85,6 +85,8 @@ export interface Press {
 // composer, telling what became of it.
 export interface PanelAreaHandle {
   dragItem(item: DraggedItem, label: string, press: Press): void;
+  // Gives the keyboard focus to the focused panel, where there is one.
+  focus(): void;
   show(owner: string, presentationId: string): Promise<ShowOutcome>;
   showUsed(owner: string, content: UsedContent): Promise<ShowOutcome>;
 }
@@ -369,6 +371,9 @@ export function PanelArea({
       page.current?.show(owner, { presentationId }) ?? Promise.resolve('unavailable'),
     showUsed: (owner, content) =>
       page.current?.show(owner, { content }) ?? Promise.resolve('unavailable'),
+    focus: () => {
+      if (panels.focusedId !== null) elements.current.get(panels.focusedId)?.focus();
+    },
   }));
 
   // Finder items, which come as a drag of the system's.

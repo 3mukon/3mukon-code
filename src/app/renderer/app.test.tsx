@@ -142,8 +142,14 @@ function fakeBridge(
       answerQuestion: () => Promise.resolve(),
     },
     settings: {
-      initial: { language: 'system', appearance: 'system', tooltips: false },
-      get: () => Promise.resolve({ language: 'system', appearance: 'system', tooltips: false }),
+      initial: { language: 'system', appearance: 'system', tooltips: false, sidebarHidden: false },
+      get: () =>
+        Promise.resolve({
+          language: 'system',
+          appearance: 'system',
+          tooltips: false,
+          sidebarHidden: false,
+        }),
       set: () => Promise.resolve(),
       onChange: () => () => undefined,
     },
@@ -349,6 +355,50 @@ describe('App', () => {
     expect(header()?.className).toContain('pl-[84px]');
   });
 
+  it('hides and shows the sidebar from its button as with ⌘B, opens it as the user left it, and gives the focus to the focused panel when it hides with the focus inside', async () => {
+    const bridge = fakeBridge({
+      workspaces: [{ id: 'w1', name: 'web', path: '/Users/me/web', trusted: true }],
+      selectedId: 'w1',
+    });
+    const set = vi.fn<Bridge['settings']['set']>(() => Promise.resolve());
+    bridge.settings = { ...bridge.settings, set };
+    await renderApp(bridge);
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+    const hide = within(sidebar).getByRole('button', { name: 'Hide Sidebar' });
+    expect(hide.getAttribute('aria-expanded')).toBe('true');
+    expect(hide.getAttribute('aria-controls')).toBe(sidebar.id);
+    expect(hide.title).toBe('Hide Sidebar (⌘B)');
+    fireEvent.click(hide);
+    expect(sidebar.hasAttribute('inert')).toBe(true);
+    const show = within(screen.getByRole('main')).getByRole('button', { name: 'Show Sidebar' });
+    expect(show.getAttribute('aria-expanded')).toBe('false');
+    expect(show.title).toBe('Show Sidebar (⌘B)');
+    expect(set).toHaveBeenLastCalledWith({ sidebarHidden: true });
+    fireEvent.click(show);
+    expect(sidebar.hasAttribute('inert')).toBe(false);
+    expect(set).toHaveBeenLastCalledWith({ sidebarHidden: false });
+
+    // With a panel open and the focus in the sidebar, hiding it gives the focus to the panel.
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'New session' }));
+    within(sidebar).getByRole('button', { name: 'New session' }).focus();
+    expect(sidebar.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(window, { key: 'b', metaKey: true });
+    expect(sidebar.hasAttribute('inert')).toBe(true);
+    expect(screen.getByRole('main').contains(document.activeElement)).toBe(true);
+    expect(set).toHaveBeenLastCalledWith({ sidebarHidden: true });
+    cleanup();
+
+    // The window opens with the sidebar as the user last left it.
+    const hidden = fakeBridge();
+    hidden.settings = {
+      ...hidden.settings,
+      initial: { ...hidden.settings.initial, sidebarHidden: true },
+    };
+    await renderApp(hidden);
+    expect(screen.getByRole('complementary', { name: 'Sidebar' }).hasAttribute('inert')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Show Sidebar' })).toBeDefined();
+  });
+
   it('opens a session page with New session, in the selected workspace or else the day’s folder', async () => {
     await renderApp(
       fakeBridge({
@@ -391,13 +441,15 @@ describe('App', () => {
     const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
     fireEvent.click(within(sidebar).getByRole('button', { name: label }));
     within(screen.getByRole('main')).getByRole('region', { name: 'Update the docs' });
-    // Just after the archived sessions' button and the settings' gear, which keep their places beside
-    // the window buttons; with the sidebar hidden, all three lie in the top-left panel's header.
+    // Just after the sidebar's button, the archived sessions' button and the settings' gear, which keep
+    // their places beside the window buttons; with the sidebar hidden, all of them lie in the top-left
+    // panel's header.
     const named = (element: Element | null | undefined) =>
       [...(element?.querySelectorAll('button') ?? [])].map((button) =>
         button.getAttribute('aria-label'),
       );
     expect(named(within(sidebar).getByRole('button', { name: label }).parentElement)).toEqual([
+      'Hide Sidebar',
       'Archived sessions',
       'Accounts',
       'Settings',
@@ -408,6 +460,7 @@ describe('App', () => {
       .getByRole('region', { name: 'Update the docs' })
       .querySelector('header');
     expect(named(header?.firstElementChild)).toEqual([
+      'Show Sidebar',
       'Archived sessions',
       'Accounts',
       'Settings',
@@ -1007,7 +1060,12 @@ describe('App', () => {
 
   it('opens the settings in a panel of their own with the gear or ⌘,, and the window takes the language they choose', async () => {
     const bridge = fakeBridge();
-    let current: AppSettings = { language: 'system', appearance: 'system', tooltips: false };
+    let current: AppSettings = {
+      language: 'system',
+      appearance: 'system',
+      tooltips: false,
+      sidebarHidden: false,
+    };
     const listeners = new Set<(settings: AppSettings) => void>();
     const set = vi.fn<Bridge['settings']['set']>((change) => {
       current = { ...current, ...change };

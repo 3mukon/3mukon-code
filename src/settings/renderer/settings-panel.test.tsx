@@ -14,7 +14,12 @@ describe('SettingsPanel', () => {
     const onChange = vi.fn<(change: Partial<AppSettings>) => void>();
     render(
       <SettingsPanel
-        settings={{ language: 'zh-Hans', appearance: 'system', tooltips: false }}
+        settings={{
+          language: 'zh-Hans',
+          appearance: 'system',
+          tooltips: false,
+          sidebarHidden: false,
+        }}
         onChange={onChange}
       />,
     );

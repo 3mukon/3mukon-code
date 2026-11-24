@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccountsButton, AccountsPanel } from '../../accounts/renderer/accounts-panel';
 import { SignInPrompt, UsageNotice } from '../../accounts/renderer/session-notes';
@@ -67,7 +67,7 @@ import { SettingsPanel } from '../../settings/renderer/settings-panel';
 import { useSettings } from '../../settings/renderer/use-settings';
 import { TerminalPanel } from '../../terminal/renderer/terminal-panel';
 import { TerminalViews } from '../../terminal/renderer/terminal-views';
-import { Gear } from '../../ui/renderer/icons';
+import { Gear, PanelLeft } from '../../ui/renderer/icons';
 import { Tag } from '../../ui/renderer/tag';
 import { TooltipHost } from '../../ui/renderer/tooltip';
 import { useWorkspaces } from '../../workspaces/renderer/use-workspaces';
@@ -79,12 +79,14 @@ import { useAutomation } from './use-automation';
 import { useUserSetup } from './use-user-setup';
 import { PromptHost } from './prompt-host';
 
-// The window shell: a full-height sidebar, which ⌘B shows and hides, beside the main area. The
-// window's top 40px form its title bar, which moves the window, shows no title and has no line
-// beneath it: in the sidebar, the row of the window buttons; over the main area, the headers of the
-// panels at the top, or an empty strip while none is open. Just after the window buttons, wherever
-// they lie, the button of the archived sessions keeps its place, and after it the count of sessions
-// waiting on the user shows the one that has waited longest. The sidebar's divider runs through the
+// The window shell: a full-height sidebar, which its button and ⌘B hide and show, beside the main
+// area; the window opens with it as the user last left it, and hiding it with the focus inside gives
+// the focus to the focused panel. The window's top 40px form its title bar, which moves the window,
+// shows no title and has no line beneath it: in the sidebar, the row of the window buttons; over the
+// main area, the headers of the panels at the top, or an empty strip while none is open. Just after
+// the window buttons, wherever they lie, the sidebar's button and then the button of the archived
+// sessions keep their place, and after them the count of sessions waiting on the user shows the one
+// that has waited longest. The sidebar's divider runs through the
 // title bar, and while the sidebar is hidden, the window buttons lie over the main area. The sidebar
 // holds the Workspaces section above the Sessions section, with a thin line between them; the main
 // area holds the panel area, blank until something opens in it. The workspaces' tree rows and the
@@ -110,7 +112,9 @@ import { PromptHost } from './prompt-host';
 // the app's own look.
 export function App({ bridge }: { bridge: Bridge }) {
   const { t, i18n } = useTranslation();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(!bridge.settings.initial.sidebarHidden);
+  const sidebar = useRef<HTMLElement>(null);
+  const sidebarId = useId();
   const workspaces = useWorkspaces(bridge.workspaces);
   const sessions = useSessions(bridge.sessions);
   // The archived session last opened from the archived list, as the list showed it, until the main
@@ -228,11 +232,34 @@ export function App({ bridge }: { bridge: Bridge }) {
     setRequestFocus((previous) => ({ sessionId: session.id, key: (previous?.key ?? 0) + 1 }));
   };
 
-  // Beside the window buttons: the archived sessions' button, the accounts' gauge, the settings' gear,
-  // whose panel ⌘, opens too, then the count of sessions waiting on the user, which shows the one that
-  // has waited longest.
+  // Hides or shows the sidebar, from its button or ⌘B; hiding it with the focus inside, where nothing
+  // keeps it once hidden, first gives the focus to the focused panel.
+  const toggleSidebar = useCallback(() => {
+    if (sidebar.current?.contains(document.activeElement)) area.current?.focus();
+    setSidebarOpen((open) => !open);
+  }, []);
+
+  // The window opens with the sidebar as the user last left it.
+  useEffect(() => {
+    bridge.settings.set({ sidebarHidden: !sidebarOpen }).catch(reportSidebar);
+  }, [bridge.settings, sidebarOpen]);
+
+  // Beside the window buttons: the sidebar's button, the archived sessions' button, the accounts'
+  // gauge, the settings' gear, whose panel ⌘, opens too, then the count of sessions waiting on the
+  // user, which shows the one that has waited longest.
   const besideWindowButtons = (
     <div className="flex shrink-0 items-center gap-1">
+      <button
+        type="button"
+        onClick={toggleSidebar}
+        aria-label={sidebarOpen ? t('sidebar.hide') : t('sidebar.show')}
+        aria-expanded={sidebarOpen}
+        aria-controls={sidebarId}
+        title={sidebarOpen ? t('sidebar.hideTip') : t('sidebar.showTip')}
+        className="grid size-5 shrink-0 place-items-center rounded-md text-faint [-webkit-app-region:no-drag] hover:bg-hover hover:text-ink"
+      >
+        <PanelLeft className="size-3.5" />
+      </button>
       <ArchivedButton
         count={sessions.archived}
         onOpen={() => {
@@ -872,29 +899,32 @@ export function App({ bridge }: { bridge: Bridge }) {
   });
 
   useEffect(() => {
-    const toggleSidebar = (event: KeyboardEvent) => {
+    const onKeyDown = (event: KeyboardEvent) => {
       const onlyCommand = event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey;
       if (!onlyCommand || event.key.toLowerCase() !== 'b') return;
       event.preventDefault();
-      setSidebarOpen((open) => !open);
+      toggleSidebar();
     };
-    window.addEventListener('keydown', toggleSidebar);
+    window.addEventListener('keydown', onKeyDown);
     return () => {
-      window.removeEventListener('keydown', toggleSidebar);
+      window.removeEventListener('keydown', onKeyDown);
     };
-  }, []);
+  }, [toggleSidebar]);
 
   return (
     <div className="flex h-full">
       <aside
+        ref={sidebar}
+        id={sidebarId}
         aria-label={t('sidebar.label')}
         inert={!sidebarOpen}
         className={`shrink-0 overflow-hidden select-none motion-safe:transition-[width] motion-safe:duration-200 ${sidebarOpen ? 'w-[220px]' : 'w-0'}`}
       >
         <div className="flex h-full w-[220px] flex-col border-r border-line">
           {/* The sidebar's part of the title bar, where macOS draws the traffic lights, with the
-              archived sessions' button, the settings' gear and the count of sessions waiting on the
-              user just after them; no line separates it from the rest of the sidebar. */}
+              sidebar's button, the archived sessions' button, the settings' gear and the count of
+              sessions waiting on the user just after them; no line separates it from the rest of the
+              sidebar. */}
           <div className="flex h-10 shrink-0 items-center pl-[84px] [-webkit-app-region:drag]">
             {sidebarOpen && besideWindowButtons}
           </div>
@@ -966,6 +996,10 @@ function reportMenu(error: unknown): void {
 
 function reportReadAhead(error: unknown): void {
   console.error('The session’s history could not be read ahead:', error);
+}
+
+function reportSidebar(error: unknown): void {
+  console.error('Whether the sidebar is hidden could not be kept:', error);
 }
 
 function reportTerminal(error: unknown): void {

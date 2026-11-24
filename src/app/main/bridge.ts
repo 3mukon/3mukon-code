@@ -154,6 +154,7 @@ const settingsChange = z
     language: z.enum(['system', 'en', 'zh-Hans']).optional(),
     appearance: z.enum(['system', 'light', 'dark']).optional(),
     tooltips: z.boolean().optional(),
+    sidebarHidden: z.boolean().optional(),
   })
   .strict();
 const choice = z
@@ -648,6 +649,7 @@ export function serveBridge({
     if (given.language !== undefined) change.language = given.language;
     if (given.appearance !== undefined) change.appearance = given.appearance;
     if (given.tooltips !== undefined) change.tooltips = given.tooltips;
+    if (given.sidebarHidden !== undefined) change.sidebarHidden = given.sidebarHidden;
     settings.set(change);
   });
   // The page's answer to a menu or question it was asked to draw.

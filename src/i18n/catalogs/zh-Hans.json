@@ -1,6 +1,10 @@
 {
   "sidebar": {
-    "label": "边栏"
+    "label": "边栏",
+    "hide": "隐藏边栏",
+    "show": "显示边栏",
+    "hideTip": "隐藏边栏（⌘B）",
+    "showTip": "显示边栏（⌘B）"
   },
   "workspaces": {
     "heading": "工作区",

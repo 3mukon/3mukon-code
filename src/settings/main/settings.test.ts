@@ -17,7 +17,12 @@ function folder(): string {
 }
 
 function memory(
-  start: AppSettings = { language: 'system', appearance: 'system', tooltips: false },
+  start: AppSettings = {
+    language: 'system',
+    appearance: 'system',
+    tooltips: false,
+    sidebarHidden: false,
+  },
 ) {
   const saved: AppSettings[] = [];
   const storage: SettingsStorage = {
@@ -35,16 +40,33 @@ describe('Settings', () => {
     const stop = settings.onChange((current) => heard.push(current));
     settings.set({ appearance: 'dark' });
     settings.set({ appearance: 'dark' });
-    expect(settings.get()).toEqual({ language: 'system', appearance: 'dark', tooltips: false });
-    expect(saved).toEqual([{ language: 'system', appearance: 'dark', tooltips: false }]);
+    expect(settings.get()).toEqual({
+      language: 'system',
+      appearance: 'dark',
+      tooltips: false,
+      sidebarHidden: false,
+    });
+    expect(saved).toEqual([
+      { language: 'system', appearance: 'dark', tooltips: false, sidebarHidden: false },
+    ]);
     expect(heard).toEqual(saved);
     // The tooltips change too, though language and appearance stay as they are.
     settings.set({ tooltips: true });
-    expect(heard.at(-1)).toEqual({ language: 'system', appearance: 'dark', tooltips: true });
+    expect(heard.at(-1)).toEqual({
+      language: 'system',
+      appearance: 'dark',
+      tooltips: true,
+      sidebarHidden: false,
+    });
     stop();
     settings.set({ language: 'zh-Hans' });
     expect(heard).toHaveLength(2);
-    expect(saved.at(-1)).toEqual({ language: 'zh-Hans', appearance: 'dark', tooltips: true });
+    expect(saved.at(-1)).toEqual({
+      language: 'zh-Hans',
+      appearance: 'dark',
+      tooltips: true,
+      sidebarHidden: false,
+    });
   });
 
   it('keeps the settings in settings.json, readable by the user alone, and starts from the defaults', () => {
@@ -53,23 +75,27 @@ describe('Settings', () => {
       language: 'system',
       appearance: 'system',
       tooltips: false,
+      sidebarHidden: false,
     });
     new Settings(settingsStorage(data)).set({
       language: 'en',
       appearance: 'light',
       tooltips: true,
+      sidebarHidden: false,
     });
     const file = join(data, 'settings.json');
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({
       language: 'en',
       appearance: 'light',
       tooltips: true,
+      sidebarHidden: false,
     });
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(new Settings(settingsStorage(data)).get()).toEqual({
       language: 'en',
       appearance: 'light',
       tooltips: true,
+      sidebarHidden: false,
     });
   });
 
@@ -81,12 +107,14 @@ describe('Settings', () => {
       language: 'system',
       appearance: 'dark',
       tooltips: false,
+      sidebarHidden: false,
     });
     writeFileSync(file, 'not json');
     expect(settingsStorage(data).load()).toEqual({
       language: 'system',
       appearance: 'system',
       tooltips: false,
+      sidebarHidden: false,
     });
   });
 });

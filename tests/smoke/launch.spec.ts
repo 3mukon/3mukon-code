@@ -195,7 +195,7 @@ test('the page reaches the main process only through the bridge’s functions', 
   });
 });
 
-test('Command-B hides the sidebar and shows it again', async () => {
+test('Command-B and the sidebar’s button hide the sidebar and show it again', async () => {
   await withApp(async (electronApp) => {
     const window = await electronApp.firstWindow();
     const sidebar = window.locator('aside');
@@ -208,6 +208,15 @@ test('Command-B hides the sidebar and shows it again', async () => {
     await window.keyboard.press('Meta+B');
     await expect(sidebar).toHaveCSS('width', '220px');
     await expect(sidebar).not.toHaveAttribute('inert');
+    // The button keeps its place just after the traffic lights whether the sidebar shows or not.
+    const hide = window.getByRole('button', { name: 'Hide Sidebar' });
+    const shown = await hide.boundingBox();
+    await hide.click();
+    await expect(sidebar).toHaveCSS('width', '0px');
+    const show = window.getByRole('button', { name: 'Show Sidebar' });
+    expect(await show.boundingBox()).toEqual(shown);
+    await show.click();
+    await expect(sidebar).toHaveCSS('width', '220px');
   });
 });
 
@@ -215,17 +224,21 @@ test('the traffic lights are centred in the 40px title bar, on one line with the
   await withApp(async (electronApp) => {
     const window = await electronApp.firstWindow();
     // The traffic lights, 14pt circles, set 13pt from the top: their centre lies 20pt down, as the
-    // archived sessions' button's does, centred in the page's title bar.
+    // sidebar's button's does, centred in the page's title bar.
     const position = await electronApp.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]?.getWindowButtonPosition(),
     );
     expect(position).toEqual({ x: 12, y: 13 });
+    const toggle = await window.getByRole('button', { name: 'Hide Sidebar' }).boundingBox();
+    if (toggle === null) throw new Error('The sidebar’s button is not shown.');
+    expect(toggle.y + toggle.height / 2).toBe(13 + 14 / 2);
+    // It lies just after them, the archived sessions' button just after it, then the accounts' gauge
+    // and the settings' gear, on the same line.
+    expect(toggle.x).toBe(84);
     const button = await window.getByRole('button', { name: 'Archived sessions' }).boundingBox();
     if (button === null) throw new Error('The archived sessions’ button is not shown.');
     expect(button.y + button.height / 2).toBe(13 + 14 / 2);
-    // It lies just after them, the accounts' gauge just after it and the settings' gear after that,
-    // on the same line.
-    expect(button.x).toBe(84);
+    expect(button.x).toBe(toggle.x + toggle.width + 4);
     const gauge = await window.getByRole('button', { name: 'Accounts' }).boundingBox();
     if (gauge === null) throw new Error('The accounts’ gauge is not shown.');
     expect(gauge.y + gauge.height / 2).toBe(13 + 14 / 2);

@@ -19,6 +19,7 @@ import {
   Lock as LucideLock,
   Monitor as LucideMonitor,
   MousePointer2 as LucideMousePointer2,
+  PanelLeft as LucidePanelLeft,
   PanelRight as LucidePanelRight,
   Pencil as LucidePencil,
   Plus as LucidePlus,
@@ -86,5 +87,6 @@ export const CircleAlert = decorative(LucideCircleAlert);
 export const Lock = decorative(LucideLock);
 export const Monitor = decorative(LucideMonitor);
 export const Pointer = decorative(LucideMousePointer2);
+export const PanelLeft = decorative(LucidePanelLeft);
 export const PanelRight = decorative(LucidePanelRight);
 export const Inbox = decorative(LucideInbox);

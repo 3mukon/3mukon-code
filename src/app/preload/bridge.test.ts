@@ -23,7 +23,12 @@ function fakeIpc() {
 }
 
 // The settings the window opened with.
-const opening: AppSettings = { language: 'zh-Hans', appearance: 'dark', tooltips: false };
+const opening: AppSettings = {
+  language: 'zh-Hans',
+  appearance: 'dark',
+  tooltips: false,
+  sidebarHidden: false,
+};
 
 describe('createBridge', () => {
   it('scopes automation events to the subscription and owner, including cleanup before acceptance', async () => {
