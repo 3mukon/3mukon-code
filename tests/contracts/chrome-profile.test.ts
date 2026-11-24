@@ -69,7 +69,10 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
   const sockets: Socket[] = [];
   let app = new ChromeProfileConnection(folder, ports);
   try {
+    // An agent's Chrome tab waits on Connect until a connection is live, also while connecting.
+    expect(app.requirement()).toEqual({ kind: 'browser', browser: 'chrome', step: 'connect' });
     const initial = app.connect(name.id);
+    expect(app.requirement()).toEqual({ kind: 'browser', browser: 'chrome', step: 'connect' });
     const ticket = await Promise.race([
       setup.promise,
       initial.then(() => {
@@ -97,6 +100,7 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
     expect(await browser.next()).toEqual({ kind: 'ready' });
     expect(await initial).toEqual({ status: 'verified', value: null });
     expect(app.profile()).toEqual(name);
+    expect(app.requirement()).toBeUndefined();
     const first = app.tab();
     expect(first).toMatchObject({ browser: 'chrome', profile: name });
     const released = vi.fn();
@@ -108,10 +112,14 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
     });
     expect(released).toHaveBeenCalledOnce();
     expect(app.rememberedProfile()).toEqual(name);
+    // A saved connection that dropped comes back within the extension's retry period, so an agent's
+    // tab waits for it rather than needing setup, also after the app starts again.
+    expect(app.requirement()).toBeUndefined();
     app.close();
     app = new ChromeProfileConnection(folder, ports);
     expect(app.rememberedProfile()).toEqual(name);
     expect(app.requirement()).toBeUndefined();
+    const coming = app.liveTab(new AbortController().signal);
     await vi.waitFor(async () => {
       expect((await lstat(join(folder, 'channel'))).isSocket()).toBe(true);
     });
@@ -119,7 +127,9 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
     sockets.push(restored.socket);
     restored.send({ kind: 'restore', proof: offer.proof, build });
     expect(await restored.next()).toEqual({ kind: 'ready' });
+    expect(await coming).toMatchObject({ browser: 'chrome', profile: name });
     expect(app.profile()).toEqual(name);
+    expect(app.requirement()).toBeUndefined();
     expect(ports.openSetup).toHaveBeenCalledOnce();
 
     const ended = app.disconnect(name.id);
@@ -564,6 +574,65 @@ it('asks before the first use of a task tab in the connected profile, opens it o
     await browser.close();
     app.close();
     extension.current?.socket.destroy();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+it('refuses a Chrome tab as needing setup when no connection came back while it waited', async () => {
+  const engine = { page: vi.fn(), clear: vi.fn() } satisfies EmbeddedEngine;
+  const chrome = { requirement: () => undefined, liveTab: () => Promise.resolve(null) };
+  const { tools } = embeddedBrowser(engine, () => broker, chrome);
+  const broker = new AutomationBroker(tools);
+  await broker.bind('a', process.cwd(), { mode: 'auto', sandbox: 'workspace-write' });
+  const access = broker.openAccess('a');
+  broker.beginTurn('a');
+  const { outcome } = await broker.dispatch(
+    access,
+    'browser_open',
+    { sharing: 'global' },
+    { actionId: 'lost' },
+  );
+  expect(outcome).toEqual({
+    status: 'refused',
+    code: 'setup-required',
+    dispatched: false,
+    detail: { kind: 'setup', requirement: { kind: 'browser', browser: 'chrome', step: 'connect' } },
+  });
+  expect(engine.page).not.toHaveBeenCalled();
+});
+
+it('waits for a saved connection only within its retry period, and not past a stop', async () => {
+  const folder = await mkdtemp('/private/tmp/chrome-wait-');
+  const proof = randomBytes(32).toString('hex');
+  await writeFile(join(folder, 'connection.json'), JSON.stringify({ profile: name, proof }), {
+    mode: 0o600,
+  });
+  const ports = {
+    profiles: vi.fn(() => Promise.resolve({ status: 'read' as const, profiles: [name] })),
+    build,
+    install: vi.fn(() => Promise.resolve()),
+    renew: vi.fn(() => Promise.resolve()),
+    openSetup: vi.fn(() => Promise.resolve()),
+    activate: vi.fn(() => Promise.resolve()),
+    reconnectMs: 300,
+  };
+  const app = new ChromeProfileConnection(folder, ports);
+  try {
+    expect(app.requirement()).toBeUndefined();
+    const stop = new AbortController();
+    const stopped = app.liveTab(stop.signal);
+    stop.abort();
+    expect(await stopped).toBeNull();
+    const started = Date.now();
+    expect(await app.liveTab(new AbortController().signal)).toBeNull();
+    expect(Date.now() - started).toBeGreaterThanOrEqual(150);
+    // Past its retry period nothing comes back by itself: Chrome needs the user, at once.
+    expect(app.requirement()).toEqual({ kind: 'browser', browser: 'chrome', step: 'connect' });
+    const now = Date.now();
+    expect(await app.liveTab(new AbortController().signal)).toBeNull();
+    expect(Date.now() - now).toBeLessThan(100);
+  } finally {
+    app.close();
     await rm(folder, { recursive: true, force: true });
   }
 });

@@ -11,6 +11,9 @@ import { ChromePage, type ChromeCommand, type ChromePageDriver } from './chrome-
 import { refused, type ExternalTab } from './page';
 
 const okay: Outcome<null> = { status: 'verified', value: null };
+// How long a saved connection may take to come back after the app starts listening for it or after it
+// drops: the extension tries again every 30 seconds, and a margin.
+const RECONNECT_MS = 35_000;
 const profileId = z.string().regex(/^(Default|Profile [1-9][0-9]{0,3})$/);
 const savedLink = z.strictObject({
   profile: z.strictObject({ id: profileId, name: z.string().min(1).max(256) }),
@@ -48,6 +51,8 @@ export interface ChromeProfilePorts {
     install: (folder: string) => void,
   ): Promise<void>;
   activate(): Promise<void>;
+  // How long a saved connection may take to come back, where a test needs it shorter.
+  reconnectMs?: number;
 }
 
 // The inherited browser identity lives in Chrome. Each authorized tab is a new
@@ -65,6 +70,9 @@ export class ChromeProfileConnection {
   private active?: ChromeNativePeer;
   private pairing?: Pairing;
   private binding?: Promise<void>;
+  // Since when a saved connection has waited for the extension: the app started listening for it, or
+  // it dropped.
+  private waitingSince?: number;
   private readonly renewed: Promise<void>;
   private closed = false;
 
@@ -83,12 +91,22 @@ export class ChromeProfileConnection {
     this.renewed = this.ports.renew().catch((error: unknown) => {
       console.error('Chrome’s connector could not be renewed:', error);
     });
-    if (this.saved)
+    if (this.saved) {
+      this.waitingSince = Date.now();
       void this.renewed
         .then(() => this.listen())
+        .then(() => {
+          if (!this.active && this.saved && !this.closed) {
+            this.waitingSince = Date.now();
+            this.publish();
+          }
+        })
         .catch(() => {
+          // Nothing listens, so nothing comes back.
+          this.waitingSince = undefined;
           this.publish();
         });
+    }
   }
 
   profile(): ProfileSummary | null {
@@ -107,9 +125,50 @@ export class ChromeProfileConnection {
     return this.pairing?.extensionFolder;
   }
 
+  // The step an agent's Chrome tab waits on: none while a connection is live or a saved one is coming
+  // back, else Connect, also while connecting and while a saved connection waits for Chrome and its
+  // extension past their retry period, since the app never starts them itself for background work.
   requirement(): SetupRequirement | undefined {
-    if (this.saved || this.pairing) return;
+    if (this.active || this.reconnecting()) return;
     return { kind: 'browser', browser: 'chrome', step: 'connect' };
+  }
+
+  // A tab of the live connection, after waiting while a saved connection is coming back, as it does
+  // for up to half a minute after the app starts or the connection drops; null once that wait is over
+  // without one, or when the call stops.
+  async liveTab(signal: AbortSignal): Promise<ExternalTab | null> {
+    // Listening can begin while a request is already waiting. Recalculate the deadline on each
+    // connection change so the request follows the same retry window as the setup requirement.
+    while (!signal.aborted && this.reconnecting()) {
+      const left = (this.waitingSince ?? 0) + this.reconnectMs() - Date.now();
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(timer);
+          stop();
+          signal.removeEventListener('abort', done);
+          resolve();
+        };
+        const timer = setTimeout(done, Math.max(0, left));
+        const stop = this.subscribe(done);
+        signal.addEventListener('abort', done, { once: true });
+      });
+    }
+    return signal.aborted ? null : this.tab();
+  }
+
+  // Whether a saved connection may still come back on its own.
+  private reconnecting(): boolean {
+    return (
+      !this.active &&
+      !!this.saved &&
+      !this.closed &&
+      this.waitingSince !== undefined &&
+      Date.now() - this.waitingSince < this.reconnectMs()
+    );
+  }
+
+  private reconnectMs(): number {
+    return this.ports.reconnectMs ?? RECONNECT_MS;
   }
 
   profiles(): Promise<ChromeProfileList> {
@@ -234,6 +293,7 @@ export class ChromeProfileConnection {
         this.peers.delete(peer);
         if (this.active === peer) {
           this.active = undefined;
+          this.waitingSince = Date.now();
           this.endTabs();
           this.publish();
         }

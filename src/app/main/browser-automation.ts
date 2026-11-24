@@ -94,7 +94,11 @@ export function embeddedBrowser(
   return { browser, tools: browserTools(browser, chrome) };
 }
 
-type ChromeBrowser = Pick<ChromeProfileConnection, 'tab' | 'requirement'>;
+type ChromeBrowser = Pick<ChromeProfileConnection, 'liveTab' | 'requirement'>;
+const chromeSetup = {
+  kind: 'setup',
+  requirement: { kind: 'browser', browser: 'chrome', step: 'connect' },
+} as const;
 
 export function browserTools(browser: EmbeddedBrowser, chrome?: ChromeBrowser): AutomationTool[] {
   return [
@@ -106,15 +110,28 @@ export function browserTools(browser: EmbeddedBrowser, chrome?: ChromeBrowser): 
         const setup = sharing === 'global' ? chrome?.requirement() : undefined;
         return setup ? { ...metadata, setup } : metadata;
       },
-      ({ sharing }, { owner, signal }) => {
-        const connected = sharing === 'global' ? chrome?.tab() : undefined;
+      async ({ sharing }, { owner, signal }) => {
+        // A saved connection that is coming back, as after the app starts, is waited for.
+        const connected = sharing === 'global' ? await chrome?.liveTab(signal) : undefined;
+        if (signal.aborted)
+          return { outcome: { status: 'cancelled-before-dispatch', effects: 'none' } };
+        // No connection came back: Chrome needs the user, as the session's setup notice says.
+        if (sharing === 'global' && chrome && !connected)
+          return {
+            outcome: {
+              status: 'refused',
+              code: 'setup-required',
+              dispatched: false,
+              detail: chromeSetup,
+            },
+          };
         const outcome = browser.open(owner, sharing ?? 'none', signal, connected ?? undefined);
-        return Promise.resolve({
+        return {
           outcome:
             outcome.status === 'verified'
               ? { status: 'verified', value: { ...outcome.value } }
               : outcome,
-        });
+        };
       },
     ),
     define(
