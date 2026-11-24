@@ -335,6 +335,7 @@
         "foreground": "前台的{{app}}",
         "dialog": "{{app}}的对话框",
         "title": "授权",
+        "hide": "隐藏",
         "scope": {
           "operation": "本次操作",
           "session": "此会话"

@@ -15,7 +15,8 @@ const GAP = 4;
 // While a session holds grants, a line above its composer's divider says how many, in the ink, and
 // what each lets its agent use, a page by its host and an application by its name, in small faint
 // type, as the line of what the session uses does; Show opens a sheet that lists each grant, for this
-// operation or for this session, with End, which ends it at once, queued work included (ADR-0027).
+// operation or for this session, with End, which ends it at once, queued work included (ADR-0027), and
+// reads Hide while the sheet is open, which it closes again.
 export function GrantsLine({
   grants,
   onEnd,
@@ -39,16 +40,22 @@ export function GrantsLine({
       <span className="flex-1" />
       <Button
         small
-        label={t('sessions.automation.line.show')}
+        label={t(
+          listing === null ? 'sessions.automation.line.show' : 'sessions.automation.grants.hide',
+        )}
+        expanded={listing !== null}
         onClick={(event) => {
           const opener = event.currentTarget;
-          setListing({ box: opener.getBoundingClientRect(), opener });
+          setListing((open) =>
+            open === null ? { box: opener.getBoundingClientRect(), opener } : null,
+          );
         }}
       />
       {listing !== null && (
         <GrantsSheet
           grants={grants}
           below={listing.box}
+          opener={listing.opener}
           onEnd={onEnd}
           onClose={(byKey) => {
             setListing(null);
@@ -63,17 +70,21 @@ export function GrantsLine({
 // The grants as a sheet of the window's paper under a dashed line, as a menu is drawn, above the
 // button that opened it and level with its right edge, with the keyboard focus on the first End, each
 // End telling VoiceOver which grant it ends. As a menu does, it closes at Escape, which gives the
-// focus back to the button, at a press of the pointer beside it, and as the window loses the focus or
-// changes size; it lies over the page, so a web page in a panel shows still beneath it.
+// focus back to the button, at a press of the pointer beside it, though not on its own button, whose
+// click closes it, and as the window loses the focus or changes size; it lies over the page, so a web
+// page in a panel shows still beneath it.
 function GrantsSheet({
   grants,
   below,
+  opener,
   onEnd,
   onClose,
 }: {
   grants: readonly Grant[];
   // The box of the button the sheet opens above.
   below: DOMRect;
+  // That button, a press on which is its own to answer.
+  opener: HTMLButtonElement;
   onEnd: (grantId: string) => Promise<boolean>;
   // Called as the sheet closes; with true where the user closed it with Escape.
   onClose: (byKey: boolean) => void;
@@ -98,7 +109,8 @@ function GrantsSheet({
       dismiss(false);
     };
     const beside = (event: Event) => {
-      if (!(event.target instanceof Node && element.contains(event.target))) leave();
+      const target = event.target instanceof Node ? event.target : null;
+      if (target === null || (!element.contains(target) && !opener.contains(target))) leave();
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -117,7 +129,7 @@ function GrantsSheet({
       uncover();
       element.hidePopover();
     };
-  }, [below]);
+  }, [below, opener]);
   const end = (id: string) => {
     setFailed(false);
     setEnding((now) => new Set(now).add(id));

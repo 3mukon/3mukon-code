@@ -339,6 +339,7 @@
         "foreground": "{{app}} in the foreground",
         "dialog": "a dialog in {{app}}",
         "title": "Grants",
+        "hide": "Hide",
         "scope": {
           "operation": "this operation",
           "session": "this session"

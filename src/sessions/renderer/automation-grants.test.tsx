@@ -77,6 +77,31 @@ describe('GrantsLine', () => {
     expect(onEnd).toHaveBeenCalledExactlyOnceWith('g2');
   });
 
+  it('closes the sheet at a second press of its button, which reads Hide while it is open', () => {
+    render(<GrantsLine grants={[chromeTab]} onEnd={vi.fn()} />);
+    const show = screen.getByRole('button', { name: 'Show' });
+    expect(show.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.pointerDown(show);
+    fireEvent.click(show);
+    expect(screen.getByRole('dialog', { name: 'Grants' }).dataset.shown).toBe('true');
+    const hide = screen.getByRole('button', { name: 'Hide' });
+    expect(hide).toBe(show);
+    expect(hide.getAttribute('aria-expanded')).toBe('true');
+    // A press on the button is not a press beside the sheet, which would close it only for the
+    // click to open it again.
+    fireEvent.pointerDown(hide);
+    expect(screen.getByRole('dialog', { name: 'Grants' })).toBeDefined();
+    fireEvent.click(hide);
+    expect(screen.queryByRole('dialog', { name: 'Grants' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show' }).getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    // A press beside it still closes it.
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('dialog', { name: 'Grants' })).toBeNull();
+  });
+
   it('says when End did not go, and closes at Escape, giving the focus back to Show', async () => {
     render(<GrantsLine grants={[chromeTab]} onEnd={() => Promise.resolve(false)} />);
     fireEvent.click(screen.getByRole('button', { name: 'Show' }));
