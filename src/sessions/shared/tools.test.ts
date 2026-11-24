@@ -37,6 +37,22 @@ describe('appCall', () => {
     expect(long.endsWith('…')).toBe(true);
   });
 
+  it('marks the clicks of the browser’s and the computer’s actions, and no other action', () => {
+    expect(appCall('browser_act', { action: { kind: 'click', element: 3 } }).clicks).toBe(true);
+    expect(appCall('computer_act', { action: { kind: 'point-click', x: 1, y: 2 } }).clicks).toBe(
+      true,
+    );
+    expect(
+      appCall('browser_act', { action: { kind: 'scroll', deltaY: 40 } }).clicks,
+    ).toBeUndefined();
+    expect(appCall('computer_act', { action: 'click' }).clicks).toBeUndefined();
+    expect(appCall('browser_open', { sharing: 'none' })).toEqual({
+      server: TOOLSET_NAME,
+      tool: 'browser_open',
+      app: true,
+    });
+  });
+
   it('tells reading the inbox from reading one message, and leaves out what it cannot read', () => {
     expect(appCall('message_read', {}).action).toBe('message_read_inbox');
     expect(appCall('message_read', { messageId: 'm1' }).action).toBeUndefined();

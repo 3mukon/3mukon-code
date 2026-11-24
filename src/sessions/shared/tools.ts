@@ -17,6 +17,9 @@ export interface McpCall {
   action?: string;
   // What the call acts on, in a few words from its arguments, such as a message's summary.
   subject?: string;
+  // For one of the app's browser or computer tools, whether its action clicks, which the activity
+  // marks with a pointer, as it marks the app's own record of the call.
+  clicks?: true;
 }
 
 // How long a call's subject may run, in characters, cut at the end with an ellipsis beyond.
@@ -48,9 +51,19 @@ export function appCall(tool: string, input: unknown): McpCall {
       return withSubject(call, said('title'));
     case 'browser_navigate':
       return withSubject(call, said('url'));
+    case 'browser_act':
+    case 'computer_act':
+      return clicking(args.action) ? { ...call, clicks: true } : call;
     default:
       return call;
   }
+}
+
+// Whether an action of the app's browser or computer tools clicks, at a control or at a point.
+function clicking(action: unknown): boolean {
+  if (typeof action !== 'object' || action === null) return false;
+  const { kind } = action as { kind?: unknown };
+  return kind === 'click' || kind === 'point-click';
 }
 
 // A tool's name in words, for a tool the activity has no words of its own for: snake_case,

@@ -199,6 +199,41 @@ describe('ToolCall’s MCP calls', () => {
     expect(line()).toBe('a tool to come');
   });
 
+  it('marks a call of the app’s browser and computer tools from the start as the app’s record of it will be', () => {
+    const icon = () => document.querySelector('svg')?.getAttribute('class') ?? '';
+    const named = () => document.querySelector('.sr-only')?.textContent;
+    const call = (name: string, clicks = false) => (
+      <ToolCall
+        item={tool({
+          title: `mcp__3mukon-code__${name}`,
+          status: 'running',
+          mcp: {
+            server: '3mukon-code',
+            tool: name,
+            app: true,
+            ...(clicks ? { clicks: true as const } : {}),
+          },
+        })}
+      />
+    );
+    const { rerender } = render(call('browser_open'));
+    expect(icon()).toContain('lucide-globe');
+    expect(icon()).toContain('text-run');
+    expect(named()).toBe('Browser:');
+    expect(line()).toBe('Opened a tab');
+    rerender(call('browser_act', true));
+    expect(icon()).toContain('lucide-mouse-pointer-2');
+    rerender(call('computer_observe'));
+    expect(icon()).toContain('lucide-monitor');
+    expect(named()).toBe('Computer use:');
+    rerender(call('computer_act', true));
+    expect(icon()).toContain('lucide-mouse-pointer-2');
+    // The app's other tools, and other servers' tools, keep the icon of their kind.
+    rerender(call('message_send'));
+    expect(icon()).toContain('lucide-wrench');
+    expect(named()).toBe('Tool:');
+  });
+
   it('names another server’s tool by the server and the tool’s name in words', () => {
     render(
       <ToolCall

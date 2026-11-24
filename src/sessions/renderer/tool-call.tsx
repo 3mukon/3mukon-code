@@ -6,7 +6,9 @@ import {
   FileText,
   FolderInput,
   Globe,
+  Monitor,
   Pencil,
+  Pointer,
   Search,
   Terminal,
   ToggleRight,
@@ -55,7 +57,11 @@ const changeKinds: Record<FileChange['kind'], ToolKind> = {
 // several names each file above its diff.
 export function ToolCall({ item }: { item: ToolItem }) {
   const { t } = useTranslation();
-  const kind = t(`sessions.tool.kind.${item.kind}`);
+  const family = appFamily(item.mcp);
+  const kind =
+    family === undefined
+      ? t(`sessions.tool.kind.${item.kind}`)
+      : t(`sessions.automation.kind.${family}`);
   const only = item.changes.length === 1 ? item.changes[0] : undefined;
   let title: ReactNode = item.title === '' ? (item.command ?? kind) : item.title;
   if (item.mcp !== undefined) title = <McpTitle call={item.mcp} />;
@@ -76,9 +82,17 @@ export function ToolCall({ item }: { item: ToolItem }) {
       </>
     );
   }
+  const icon =
+    family === undefined
+      ? kindIcons[item.kind]
+      : item.mcp?.clicks === true
+        ? Pointer
+        : family === 'browser'
+          ? Globe
+          : Monitor;
   return (
     <Entry
-      icon={kindIcons[item.kind]}
+      icon={icon}
       kind={kind}
       status={item.status}
       title={title}
@@ -87,6 +101,17 @@ export function ToolCall({ item }: { item: ToolItem }) {
       body={body}
     />
   );
+}
+
+// Which of the app's own browser and computer tools a call is, if it is one: until the app's record of
+// the call takes the provider's entry's place, the entry is marked and named for VoiceOver as that
+// record will be, a page with a globe, an application with a screen and a click with a pointer,
+// rather than as any other tool.
+function appFamily(call: McpCall | undefined): 'browser' | 'computer' | undefined {
+  if (call?.app !== true) return undefined;
+  if (call.tool.startsWith('browser_')) return 'browser';
+  if (call.tool.startsWith('computer_')) return 'computer';
+  return undefined;
 }
 
 // Where a label's subject goes, which no translation holds.
