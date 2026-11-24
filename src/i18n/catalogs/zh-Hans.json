@@ -17,7 +17,7 @@
     },
     "trust": {
       "message": "你信任“{{name}}”中的文件吗？",
-      "detail": "{{path}}\n\n3mukon-code 会把你的回答与这个工作区一起保存，你之后可以在工作区的菜单中更改。Claude Code、Codex 和 Grok Build 仍按各自的信任规则处理。",
+      "detail": "{{path}}\n\n3mukon-code 会把你的回答与这个工作区一起保存，你之后可以在工作区的菜单中更改。{{claudeCode}}、{{codex}} 和 {{grokBuild}} 仍按各自的信任规则处理。",
       "trust": "信任",
       "distrust": "不信任"
     },

@@ -325,7 +325,7 @@ describe('Translator.live', () => {
         type: 'tool',
         id: 'c1',
         status: 'failed',
-        output: "Codex's automatic review denied this: It deletes files",
+        output: "Codex CLI's automatic review denied this: It deletes files",
       },
     ]);
     expect(translator.live('item/autoApprovalReview/completed', review('approved'))).toEqual([]);

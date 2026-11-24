@@ -123,7 +123,7 @@ export function gatewayLaunchArgs(name: string, settings: GatewaySettings): stri
   if (!defined || BUILT_IN_PROVIDERS.has(id)) return args;
   if (!PLAIN_KEY.test(id)) {
     throw new Error(
-      `The gateway "${name}" defines a provider whose id Codex cannot take from its command line: use letters, digits, hyphens and underscores.`,
+      `The gateway "${name}" defines a provider whose id Codex CLI cannot take from its command line: use letters, digits, hyphens and underscores.`,
     );
   }
   return [...args, '-c', `model_providers.${id}.name=${JSON.stringify(id)}`];
@@ -165,13 +165,13 @@ function jsonValue(value: unknown, gateway: string, key: string): JsonValue {
     const entries = Object.entries(value).map(([child, entry]): [string, JsonValue] => {
       const childKey = key === '' ? child : `${key}.${child}`;
       if (UNSAFE_KEYS.has(child)) {
-        throw new Error(`The gateway "${gateway}" uses a key Codex cannot take: ${childKey}.`);
+        throw new Error(`The gateway "${gateway}" uses a key Codex CLI cannot take: ${childKey}.`);
       }
       return [child, jsonValue(entry, gateway, childKey)];
     });
     return Object.fromEntries(entries);
   }
-  throw new Error(`The gateway "${gateway}" has a value Codex cannot take at ${key}.`);
+  throw new Error(`The gateway "${gateway}" has a value Codex CLI cannot take at ${key}.`);
 }
 
 async function isFile(path: string): Promise<boolean> {

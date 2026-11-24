@@ -314,7 +314,7 @@ export class Translator {
         type: 'tool',
         id: targetItemId,
         status: 'failed',
-        output: `Codex's automatic review denied this${rationale}`,
+        output: `Codex CLI's automatic review denied this${rationale}`,
       },
     ];
   }

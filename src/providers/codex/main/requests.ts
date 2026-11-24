@@ -93,7 +93,7 @@ export function permissionsApproval(
     request: {
       id,
       action: 'permissions',
-      ...(wants.length === 0 ? {} : { title: `Codex asks for ${wants.join(', ')}` }),
+      ...(wants.length === 0 ? {} : { title: `Codex CLI asks for ${wants.join(', ')}` }),
       ...(params.reason === null ? {} : { reason: params.reason }),
       ...(paths.length === 0 ? {} : { paths }),
       canAllowForSession: true,

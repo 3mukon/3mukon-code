@@ -23,7 +23,13 @@ export function windowWorkspacesUi(
     async askTrust(name, path) {
       const answer = await prompts.ask({
         message: t('workspaces.trust.message', { name }),
-        detail: t('workspaces.trust.detail', { path }),
+        // The providers go by the names they have everywhere else in the app.
+        detail: t('workspaces.trust.detail', {
+          path,
+          claudeCode: t('providers.claude-code'),
+          codex: t('providers.codex'),
+          grokBuild: t('providers.grok-build'),
+        }),
         answers: [
           { id: 'trust', label: t('workspaces.trust.trust') },
           { id: 'distrust', label: t('workspaces.trust.distrust') },

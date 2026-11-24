@@ -633,7 +633,7 @@ describe('the Codex provider', () => {
       ['model_provider = "my.proxy"', '[model_providers."my.proxy"]', 'base_url = "x"'].join('\n'),
     );
     await expect(startSession({ gateway: 'dotted' })).rejects.toThrow(
-      'The gateway "dotted" defines a provider whose id Codex cannot take',
+      'The gateway "dotted" defines a provider whose id Codex CLI cannot take',
     );
     expect(fakes).toHaveLength(0);
     expect(toolset.opened[0]?.closed).toBe(true);
@@ -1217,7 +1217,7 @@ describe('a Codex session', () => {
     );
     const { session, events } = await startSession();
     const why =
-      'Codex keeps this session on the model provider it started with, so it stays on Codex\'s own configuration; the gateway "work" applies to new sessions.';
+      'Codex CLI keeps this session on the model provider it started with, so it stays on Codex CLI\'s own configuration; the gateway "work" applies to new sessions.';
     await expect(session.setGateway('work')).rejects.toThrow(why);
     expect(fakes).toHaveLength(3);
     expect(current().launch?.args).not.toContain('model_provider="proxy"');
@@ -1284,11 +1284,11 @@ describe('a Codex session', () => {
     expect(closing.events.at(-1)).toEqual({ type: 'closed' });
     const failing = await startSession();
     const approval = current().ask('item/commandExecution/requestApproval', approvalParams, 11);
-    current().stop('Codex stopped unexpectedly (exit code 1).');
+    current().stop('Codex CLI stopped unexpectedly (exit code 1).');
     expect(await approval).toEqual({ decision: 'decline' });
     expect(failing.events.slice(-2)).toEqual([
       { type: 'request-resolved', requestId: '11', outcome: 'cancelled' },
-      { type: 'closed', error: 'Codex stopped unexpectedly (exit code 1).' },
+      { type: 'closed', error: 'Codex CLI stopped unexpectedly (exit code 1).' },
     ]);
   });
 });
@@ -1362,7 +1362,7 @@ class SlowCodex extends FakeCodex {
 
   override async close(): Promise<void> {
     await this.exited;
-    this.stopListing(new Error('Codex has stopped.'));
+    this.stopListing(new Error('Codex CLI has stopped.'));
     await super.close();
   }
 }

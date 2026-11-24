@@ -94,10 +94,10 @@ describe('CodexRpc', () => {
 
   it('reports an unexpected exit, and fails what was waiting', async () => {
     const { rpc, exits } = connect(() => Promise.resolve(null));
-    await expect(rpc.request('exit', {})).rejects.toThrow('Codex has stopped.');
+    await expect(rpc.request('exit', {})).rejects.toThrow('Codex CLI has stopped.');
     await waitFor(() => exits.length === 1);
-    expect(exits).toEqual(['Codex stopped unexpectedly (exit code 3).']);
-    await expect(rpc.request('echo', {})).rejects.toThrow('Codex has stopped.');
+    expect(exits).toEqual(['Codex CLI stopped unexpectedly (exit code 3).']);
+    await expect(rpc.request('echo', {})).rejects.toThrow('Codex CLI has stopped.');
   });
 
   it('starts the app-server with the launch’s arguments and environment', async () => {

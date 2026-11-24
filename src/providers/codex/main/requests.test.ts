@@ -79,7 +79,7 @@ describe('approvals', () => {
     );
     expect(request.request).toMatchObject({
       action: 'permissions',
-      title: 'Codex asks for network access',
+      title: 'Codex CLI asks for network access',
       reason: 'To download',
     });
     if (request.kind !== 'permissions') throw new Error('Expected a permissions request.');

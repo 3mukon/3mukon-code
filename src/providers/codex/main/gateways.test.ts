@@ -122,6 +122,6 @@ describe('Codex gateways', () => {
     expect(await launchOf('model', ['model = "gpt-other"'])).toEqual([]);
     await expect(
       launchOf('dotted', ['model_provider = "my.proxy"', '[model_providers."my.proxy"]']),
-    ).rejects.toThrow('The gateway "dotted" defines a provider whose id Codex cannot take');
+    ).rejects.toThrow('The gateway "dotted" defines a provider whose id Codex CLI cannot take');
   });
 });

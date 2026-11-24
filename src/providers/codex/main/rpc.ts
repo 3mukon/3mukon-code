@@ -68,10 +68,10 @@ export class CodexRpc implements Rpc {
       // The process has gone; its exit reports it.
     });
     child.on('error', (error) => {
-      this.end(`Codex could not start: ${error.message}`);
+      this.end(`Codex CLI could not start: ${error.message}`);
     });
     child.on('exit', (code, signal) => {
-      this.end(`Codex stopped unexpectedly (${signal ?? `exit code ${String(code)}`}).`);
+      this.end(`Codex CLI stopped unexpectedly (${signal ?? `exit code ${String(code)}`}).`);
     });
   }
 
@@ -91,7 +91,7 @@ export class CodexRpc implements Rpc {
   }
 
   request<Result>(method: string, params: unknown): Promise<Result> {
-    if (this.ended) return Promise.reject(new Error('Codex has stopped.'));
+    if (this.ended) return Promise.reject(new Error('Codex CLI has stopped.'));
     const id = this.nextId++;
     return new Promise<Result>((resolve, reject) => {
       this.waiting.set(id, {
@@ -144,7 +144,7 @@ export class CodexRpc implements Rpc {
       const kind = (error.data as { type?: unknown } | null | undefined)?.type;
       waiting.reject(
         new CodexError(
-          typeof error.message === 'string' ? error.message : 'Codex refused the request.',
+          typeof error.message === 'string' ? error.message : 'Codex CLI refused the request.',
           typeof kind === 'string' ? kind : undefined,
         ),
       );
@@ -165,7 +165,9 @@ export class CodexRpc implements Rpc {
   private end(error: string): void {
     if (this.ended) return;
     this.ended = true;
-    for (const waiting of this.waiting.values()) waiting.reject(new Error('Codex has stopped.'));
+    for (const waiting of this.waiting.values()) {
+      waiting.reject(new Error('Codex CLI has stopped.'));
+    }
     this.waiting.clear();
     this.handlers.exit(this.closing ? undefined : error);
     this.markExited();

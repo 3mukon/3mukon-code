@@ -138,7 +138,7 @@ test('a Codex session through a gateway gets its answers from the gateway’s se
       await gateway.selectOption('');
       await expect(
         main.getByText(
-          'Codex keeps this session on the model provider it started with, so it stays on the gateway "local"; Codex\'s own configuration applies to new sessions.',
+          'Codex CLI keeps this session on the model provider it started with, so it stays on the gateway "local"; Codex CLI\'s own configuration applies to new sessions.',
         ),
       ).toBeVisible({ timeout: 30_000 });
       await expect(gateway).toHaveValue('local');

@@ -452,7 +452,7 @@ async function writeTitle(
           // stops it.
           const { item } = params as ItemCompletedNotification;
           if (!TITLE_ITEMS.has(item.type)) {
-            settle?.fail(new Error('Codex started a tool instead of writing the title.'));
+            settle?.fail(new Error('Codex CLI started a tool instead of writing the title.'));
           }
         } else if (method === 'item/completed') {
           const { item } = params as ItemCompletedNotification;
@@ -460,12 +460,12 @@ async function writeTitle(
         } else if (method === 'turn/completed') {
           const { turn } = params as TurnCompletedNotification;
           if (turn.status === 'completed') settle?.done(reply);
-          else settle?.fail(new Error(turn.error?.message ?? 'Codex did not write the title.'));
+          else settle?.fail(new Error(turn.error?.message ?? 'Codex CLI did not write the title.'));
         }
       },
       request: (method) => Promise.reject(new Error(`3mukon-code does not answer ${method} here.`)),
       exit: () => {
-        settle?.fail(new Error('Codex ended before it wrote the title.'));
+        settle?.fail(new Error('Codex CLI ended before it wrote the title.'));
       },
     },
     launch,
@@ -488,7 +488,11 @@ async function writeTitle(
       ...(effort === null ? {} : { effort }),
     };
     await rpc.request<TurnStartResponse>('turn/start', turn);
-    return await withinTime(completed, TITLE_TIMEOUT_MS, 'Codex did not write the title in time.');
+    return await withinTime(
+      completed,
+      TITLE_TIMEOUT_MS,
+      'Codex CLI did not write the title in time.',
+    );
   } catch (error) {
     // Without the original error as its cause, since that may show the gateway's settings.
     const kind = error instanceof CodexError ? error.kind : undefined;
@@ -619,7 +623,7 @@ function keepsProvider(error: unknown): boolean {
 
 // A gateway in words, or Codex's own configuration where there is none.
 function gatewayWords(gateway: string | null): string {
-  return gateway === null ? "Codex's own configuration" : `the gateway "${gateway}"`;
+  return gateway === null ? "Codex CLI's own configuration" : `the gateway "${gateway}"`;
 }
 
 interface SessionSettings {
@@ -1056,7 +1060,7 @@ class CodexSession implements ProviderSession {
         throw error;
       }
       if (!keepsProvider(error)) throw error;
-      const message = `Codex keeps this session on the model provider it started with, so it stays on ${gatewayWords(previousGateway)}; ${gatewayWords(gateway)} applies to new sessions.`;
+      const message = `Codex CLI keeps this session on the model provider it started with, so it stays on ${gatewayWords(previousGateway)}; ${gatewayWords(gateway)} applies to new sessions.`;
       this.onEvent({ type: 'error', message });
       throw new Error(message, { cause: error });
     }
