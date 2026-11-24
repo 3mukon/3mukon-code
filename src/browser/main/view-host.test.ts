@@ -229,3 +229,46 @@ it('discards an in-flight response when the presentation closes and releases on 
     code: 'stale-target',
   });
 });
+
+it('lays the page again where its panel last asked once its tab has loaded, never over the paper', async () => {
+  vi.useFakeTimers();
+  const { host, window, bind, page, mount, tabs } = fixture();
+  const id = bind();
+  const laid = { x: 0, y: 24, width: 250, height: 176 };
+  expect(await host.place(window, id, 1, box)).toMatchObject({ value: { kind: 'live' } });
+  expect(mount.show).toHaveBeenCalledOnce();
+  // A navigation takes the page off while it loads, under the panel's paper, also when the panel
+  // asks again meanwhile, and lays it again as the panel last asked once it has loaded.
+  tabs.show({ ...initial, loading: true, documentGeneration: 2 });
+  expect(mount.hide).toHaveBeenCalledOnce();
+  expect(await host.place(window, id, 2, { ...box, dim: '#efece4' })).toMatchObject({
+    value: { kind: 'paper' },
+  });
+  expect(mount.show).toHaveBeenCalledOnce();
+  tabs.show({ ...initial, documentGeneration: 2 });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mount.show).toHaveBeenCalledTimes(2);
+  expect(mount.show).toHaveBeenLastCalledWith(laid, '#efece4');
+  await vi.advanceTimersByTimeAsync(200);
+  expect(page.capture).toHaveBeenCalled();
+  // A page that failed stays off until a reload has loaded.
+  tabs.show({ ...initial, documentGeneration: 3, error: 'unreachable' });
+  expect(await host.place(window, id, 3, box)).toMatchObject({ value: { kind: 'paper' } });
+  tabs.show({ ...initial, documentGeneration: 3, loading: true });
+  expect(mount.show).toHaveBeenCalledTimes(2);
+  tabs.show({ ...initial, documentGeneration: 3 });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mount.show).toHaveBeenCalledTimes(3);
+  expect(mount.show).toHaveBeenLastCalledWith(laid, null);
+  // Under a cover, or parked, a page that loads stays off until the panel asks again.
+  await host.place(window, id, 4, { ...box, covered: true });
+  tabs.show({ ...initial, documentGeneration: 4, loading: true });
+  tabs.show({ ...initial, documentGeneration: 4 });
+  await host.place(window, id, 5, { ...box, bounds: null });
+  tabs.show({ ...initial, documentGeneration: 5, loading: true });
+  tabs.show({ ...initial, documentGeneration: 5 });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mount.show).toHaveBeenCalledTimes(3);
+  expect(await host.place(window, id, 6, box)).toMatchObject({ value: { kind: 'live' } });
+  expect(mount.show).toHaveBeenCalledTimes(4);
+});

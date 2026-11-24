@@ -28,6 +28,9 @@ interface Binding {
   frame: Extract<BrowserViewDisplay, { kind: 'frame' }> | null;
   // Bounds of the last live viewport, in window units.
   liveBounds?: BrowserViewBounds;
+  // Where and how dimmed the panel last asked for the live page, which the page takes again once
+  // its tab has loaded, since the panel asks again only when its box or its covers change.
+  wanted?: { bounds: BrowserViewBounds; dim: string | null };
   pendingFrame?: Promise<void>;
   captureTimer?: ReturnType<typeof setTimeout>;
 }
@@ -94,8 +97,11 @@ export class BrowserViewHost {
         return;
       }
       if (!sameViewport(entry.state, state) || state.loading || state.error) entry.frame = null;
+      const before = entry.state;
       entry.state = state;
-      if (state.loading || state.error || !state.address) entry.view?.hide();
+      // While the tab loads or failed, the panel's paper says so, which the page would cover.
+      if (!showable(state)) entry.view?.hide();
+      else if (before !== null && !showable(before)) void this.reveal(entry);
     });
     if (!this.bindings.has(id)) {
       stop();
@@ -123,6 +129,7 @@ export class BrowserViewHost {
     const bounds = placement.bounds && windowBounds(window, placement.bounds);
     const current = () => this.bindings.get(id) === entry && entry.revision === revision;
     if (!bounds || this.browser.pageForView(entry.owner, entry.tab) !== entry.page) {
+      delete entry.wanted;
       entry.view?.hide();
       return verified(paper);
     }
@@ -135,11 +142,17 @@ export class BrowserViewHost {
       return current() ? verified(entry.frame ?? paper) : refused('request-conflict');
     }
     if (placement.covered) {
+      delete entry.wanted;
       entry.view.hide();
       // When covered before the first mount, the background viewport need not match this panel.
       if (!entry.liveBounds) return verified(paper);
       await withinCoverBudget(this.capture(entry));
       return current() ? verified(entry.frame ?? paper) : refused('request-conflict');
+    }
+    entry.wanted = { bounds, dim: placement.dim };
+    if (!showable(entry.state)) {
+      entry.view.hide();
+      return verified(paper);
     }
     const visible = await entry.view.show(bounds, placement.dim);
     if (!current()) return refused('request-conflict');
@@ -149,6 +162,24 @@ export class BrowserViewHost {
     // Keep a bounded frame after a show or resize. Repeated layout changes coalesce.
     entry.captureTimer = setTimeout(() => void this.capture(entry), FRAME_DELAY_MS);
     return verified({ kind: 'live' });
+  }
+
+  // Lays the page again where its panel last asked for it live, once its tab has loaded, unless the
+  // panel has asked for something newer meanwhile.
+  private async reveal(entry: Binding): Promise<void> {
+    const { wanted, view, revision } = entry;
+    if (
+      !wanted ||
+      !view ||
+      !this.shown(entry.owner, entry.presentation, entry.tab) ||
+      this.browser.pageForView(entry.owner, entry.tab) !== entry.page
+    )
+      return;
+    const visible = await view.show(wanted.bounds, wanted.dim);
+    if (!visible || this.bindings.get(entry.id) !== entry || entry.revision !== revision) return;
+    entry.liveBounds = wanted.bounds;
+    clearTimeout(entry.captureTimer);
+    entry.captureTimer = setTimeout(() => void this.capture(entry), FRAME_DELAY_MS);
   }
 
   release(window: number, id: string): void {
@@ -207,6 +238,11 @@ export class BrowserViewHost {
       });
     return entry.pendingFrame;
   }
+}
+
+// Whether the tab's page can lie over its panel: loaded, at an address, without an error.
+function showable(state: BrowserTabState | null): boolean {
+  return !!state && !state.loading && !state.error && !!state.address;
 }
 
 function sameViewport(first: BrowserTabState | null, second: BrowserTabState | null): boolean {
