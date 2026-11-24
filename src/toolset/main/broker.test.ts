@@ -147,6 +147,48 @@ const tab = (owner = 'a', sharing: 'none' | 'app' | 'global' = 'none') =>
     },
   });
 
+it('replays a settled action ID only within its turn, so a later turn that numbers its actions afresh makes new requests', async () => {
+  const present = (value: number, actionId: string) =>
+    broker.dispatch(a, 'panel_present', { value }, { actionId });
+  const first = await present(1, 'step-1');
+  await present(2, 'step-2');
+  expect(execute).toHaveBeenCalledTimes(2);
+  // Within the turn, a retry answers from its record, and changed arguments conflict.
+  expect((await present(1, 'step-1')).outcome).toEqual(first.outcome);
+  expect((await present(3, 'step-1')).outcome).toMatchObject({ code: 'request-conflict' });
+  expect(execute).toHaveBeenCalledTimes(2);
+  // A later turn's settled IDs are new: the same call, and another under a used ID, run anew.
+  broker.endTurn('a');
+  broker.beginTurn('a');
+  broker.beginTurn('a');
+  expect((await present(1, 'step-1')).outcome.status).toBe('verified');
+  expect((await present(5, 'step-2')).outcome.status).toBe('verified');
+  expect(execute).toHaveBeenCalledTimes(4);
+  // Within that turn, its own IDs replay as before.
+  await present(5, 'step-2');
+  expect((await present(6, 'step-2')).outcome).toMatchObject({ code: 'request-conflict' });
+  expect(execute).toHaveBeenCalledTimes(4);
+});
+
+it('never runs again in a later turn the very call whose effect an earlier turn left unsettled', async () => {
+  const present = (value: number, actionId: string) =>
+    broker.dispatch(a, 'panel_present', { value }, { actionId });
+  execute.mockResolvedValueOnce({
+    outcome: { status: 'indeterminate', reason: 'backend-lost', exclusionHeld: false },
+  });
+  await present(1, 'step-1');
+  expect(execute).toHaveBeenCalledTimes(1);
+  broker.endTurn('a');
+  broker.beginTurn('a');
+  // The same call under its ID gets its outcome back, as after a reconnect, and does not run.
+  expect((await present(1, 'step-1')).outcome).toMatchObject({ status: 'indeterminate' });
+  expect(execute).toHaveBeenCalledTimes(1);
+  // Another call under that ID is a new request, and then holds the ID for its turn.
+  expect((await present(2, 'step-1')).outcome.status).toBe('verified');
+  expect(execute).toHaveBeenCalledTimes(2);
+  expect((await present(1, 'step-1')).outcome).toMatchObject({ code: 'request-conflict' });
+});
+
 it('rolls settled request identities past the bound while pinning running and uncertain effects', async () => {
   await broker.dispatch(a, 'panel_present', {}, { actionId: 'old' });
   execute.mockResolvedValueOnce({

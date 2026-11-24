@@ -95,7 +95,7 @@ export async function startToolset({
                 .min(1)
                 .max(128)
                 .describe(
-                  'A unique ID for this action. Reuse it only for an immediate retry with the exact same arguments. Settled IDs have a bounded retention window; give each new action a new ID.',
+                  'A unique ID for this action within the turn. Reuse it only for an immediate retry with the exact same arguments; give each new action a new ID. An ID used in an earlier turn names a new action, except in an exact repeat of a call whose effect was left uncertain, which returns that outcome rather than running again.',
                 ),
             }),
           ),

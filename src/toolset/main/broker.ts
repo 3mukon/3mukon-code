@@ -111,7 +111,7 @@ interface Owner {
   operations: Map<string, PendingOperation>;
   grants: Map<string, Grant>;
   ends: GrantEndRecord[];
-  actions: Map<string, { hash: string; callId: string; evictable: boolean }>;
+  actions: Map<string, { hash: string; callId: string; evictable: boolean; turn: string }>;
   calls: Set<Work>;
   paused: Map<string, ControlPauseReason>;
 }
@@ -251,7 +251,14 @@ export class AutomationBroker {
   beginTurn(id: string): string {
     const owner = this.owner(id);
     if (!owner.open) throw new Error('The owner is closed.');
-    owner.turn ??= randomUUID();
+    if (owner.turn === null) {
+      owner.turn = randomUUID();
+      // A provider retries a call only within its turn, so the earlier turns' settled action IDs go: an
+      // agent that numbers its actions afresh in a later turn makes new requests, which would otherwise
+      // get the last turn's results back, or conflict with them. An ID whose effect is unsettled stays.
+      for (const [actionId, action] of owner.actions)
+        if (action.evictable) owner.actions.delete(actionId);
+    }
     return owner.turn;
   }
   endTurn(id: string): void {
@@ -732,8 +739,14 @@ export class AutomationBroker {
     if (!request) return finish(invalidInput);
     const { key, args, plan } = request;
     const hash = createHash('sha256').update(name).update('\0').update(key).digest('hex');
+    // Within its turn, an ID answers from its record, and conflicts with other arguments. An earlier
+    // turn's ID names a new request, unless it repeats the very call whose effect is unsettled, which
+    // it then gets back rather than running again, as after a reconnect.
     const previous = owner.actions.get(actionId);
-    if (previous) {
+    if (
+      previous &&
+      (previous.turn === owner.turn || (!previous.evictable && previous.hash === hash))
+    ) {
       if (previous.hash !== hash) return finish(refuse('request-conflict'));
       const known = owner.activity.get(previous.callId);
       if (!known || known.framesState === 'evicted') return finish(refuse('result-expired'));
@@ -757,12 +770,13 @@ export class AutomationBroker {
         known.family === 'panel' ? known.presentations : [],
       );
     }
+    if (previous) owner.actions.delete(actionId);
     if (owner.actions.size >= 4096) {
       const oldest = [...owner.actions].find(([, action]) => action.evictable);
       if (!oldest) return finish(refuse('limit-exceeded'));
       owner.actions.delete(oldest[0]);
     }
-    const action = { hash, callId: record.callId, evictable: false };
+    const action = { hash, callId: record.callId, evictable: false, turn: owner.turn };
     owner.actions.set(actionId, action);
     const controller = new AbortController();
     const timeout = Math.max(1, Math.min(options.timeoutMs ?? CALL_TIMEOUT, CALL_TIMEOUT));
