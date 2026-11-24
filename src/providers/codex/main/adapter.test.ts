@@ -639,11 +639,12 @@ describe('the Codex provider', () => {
     expect(toolset.opened[0]?.closed).toBe(true);
   });
 
-  it('starts each session’s app-server with the toolset, its credential in the environment only', async () => {
+  it('starts the session with the app toolset and disables Codex’s bundled Unified Computer Use plugin', async () => {
     await startSession();
     const server = 'mcp_servers.3mukon-code';
     expect(current().launch).toEqual({
       args: [
+        'plugins.unified-computer-use@openai-bundled.enabled=false',
         `${server}.url="http://127.0.0.1:4000/mcp"`,
         `${server}.bearer_token_env_var="TOOLSET_3MUKON_CODE_TOKEN"`,
         `${server}.default_tools_approval_mode="approve"`,

@@ -168,6 +168,8 @@ process.on('exit', () => {
 function toolsetLaunch(toolset: Toolset, access: ToolsetAccess): Launch {
   const server = `mcp_servers.${toolset.name}`;
   const settings = [
+    // Codex uses each segment of a dotted launch override as a literal key.
+    'plugins.unified-computer-use@openai-bundled.enabled=false',
     `${server}.url=${JSON.stringify(access.url)}`,
     `${server}.bearer_token_env_var=${JSON.stringify(TOOLSET_VARIABLE)}`,
     `${server}.default_tools_approval_mode="approve"`,
