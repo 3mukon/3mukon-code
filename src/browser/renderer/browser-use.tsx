@@ -5,7 +5,13 @@ import { Menu } from '../../ui/renderer/menu';
 import { SettingGroup, SettingItem, SettingProblem } from '../../ui/renderer/setting-group';
 import type { ProfileSummary, SetupSnapshot } from '../../sessions/shared/automation';
 import { ChromeInstallHelp } from './chrome-install-help';
-import { chromeProfile, chromeState, type ChromeSetup } from './chrome-state';
+import {
+  chromeProfile,
+  chromeState,
+  hasNoProfiles,
+  WrongChromeFolder,
+  type ChromeSetup,
+} from './chrome-state';
 
 // Chrome setup connects a profile and guides the first local extension load.
 export interface ChromeSteps {
@@ -67,22 +73,23 @@ export function BrowserUseSetting({
 function ChromeSetting({ chrome, steps }: { chrome: SetupSnapshot['chrome']; steps: ChromeSteps }) {
   const { t } = useTranslation();
   const [running, setRunning] = useState(false);
-  const [failed, setFailed] = useState(false);
+  // What went wrong with the last step: a folder other than Chrome's, or anything else.
+  const [problem, setProblem] = useState<'wrong-folder' | 'failed' | null>(null);
   const [choosing, setChoosing] = useState<{
     at: { x: number; y: number };
     profiles: readonly ProfileSummary[];
   } | null>(null);
   const run = (step: () => Promise<boolean>) => {
-    setFailed(false);
+    setProblem(null);
     setRunning(true);
     step().then(
       (done) => {
         setRunning(false);
-        if (!done) setFailed(true);
+        if (!done) setProblem('failed');
       },
       () => {
         setRunning(false);
-        setFailed(true);
+        setProblem('failed');
       },
     );
   };
@@ -105,16 +112,16 @@ function ChromeSetting({ chrome, steps }: { chrome: SetupSnapshot['chrome']; ste
       chooseProfile(chrome, at);
       return;
     }
-    setFailed(false);
+    setProblem(null);
     setRunning(true);
     void steps.allowProfiles().then(
       (available) => {
         setRunning(false);
         if (available !== null) chooseProfile(available, at);
       },
-      () => {
+      (error: unknown) => {
         setRunning(false);
-        setFailed(true);
+        setProblem(error instanceof WrongChromeFolder ? 'wrong-folder' : 'failed');
       },
     );
   };
@@ -124,9 +131,11 @@ function ChromeSetting({ chrome, steps }: { chrome: SetupSnapshot['chrome']; ste
         name={t('sessions.automation.sharing.chrome')}
         {...(state === null ? {} : { state: state.state, stateTone: state.tone })}
         line={
-          profile === null
-            ? t('browser.chrome.line')
-            : t('browser.chrome.profileLine', { profile: profile.name })
+          profile !== null
+            ? t('browser.chrome.profileLine', { profile: profile.name })
+            : hasNoProfiles(chrome)
+              ? t('browser.chrome.createProfile')
+              : t('browser.chrome.line')
         }
       >
         {profile !== null ? (
@@ -154,7 +163,11 @@ function ChromeSetting({ chrome, steps }: { chrome: SetupSnapshot['chrome']; ste
           className="px-2.5 pb-2 text-[11px]"
         />
       )}
-      {failed && <SettingProblem text={t('browser.failed')} />}
+      {problem !== null && (
+        <SettingProblem
+          text={problem === 'wrong-folder' ? t('browser.chrome.wrongFolder') : t('browser.failed')}
+        />
+      )}
       {choosing !== null && (
         <Menu
           entries={choosing.profiles.map((entry) => ({ id: entry.id, label: entry.name }))}

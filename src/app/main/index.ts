@@ -108,7 +108,7 @@ void app
         },
     });
     const chrome = app.isPackaged
-      ? await stagedChromeConnection(process.resourcesPath, data, process.getSystemVersion())
+      ? await stagedChromeConnection(process.resourcesPath, data)
       : undefined;
     const embedded = embeddedBrowser(
       new ElectronEmbeddedEngine(),

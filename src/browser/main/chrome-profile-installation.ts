@@ -18,18 +18,16 @@ const localState = z.object({
 });
 const profileName = z.object({ name: z.string().trim().min(1) });
 
-// A stat can tell whether a new Chrome installation has an index without opening it. On macOS
-// versions that protect Chrome's data, leave its contents alone until the user selects the folder.
 // Project only the profile names and directory keys, never read a profile's preferences or sign-ins.
-async function readChromeProfiles(
-  directory: string,
-  allowRead: boolean,
-): Promise<ChromeProfileList> {
+// macOS 27 protects Chrome's data folder: a read it refuses fails without a prompt, and the user's
+// selection of the folder in the system picker lets the app read it, also after the app starts
+// again, until the Mac restarts. So the index is always read first, and a refused read asks for the
+// folder.
+async function readChromeProfiles(directory: string): Promise<ChromeProfileList> {
   try {
     const path = join(directory, 'Local State');
     const info = await lstat(path);
     if (!info.isFile() || info.size > 4 * 1024 * 1024) return { status: 'unavailable' };
-    if (!allowRead) return { status: 'access-required' };
     const { profile } = localState.parse(JSON.parse(await readFile(path, 'utf8')));
     const profiles = Object.entries(profile.info_cache)
       .flatMap(([id, entry]) => {
@@ -50,7 +48,6 @@ async function readChromeProfiles(
 export async function stagedChromeConnection(
   resourcesPath: string,
   appData: string,
-  macOSVersion: string,
 ): Promise<ChromeProfileConnection | undefined> {
   const stage = join(resourcesPath, 'chrome-connector');
   const descriptor = join(stage, 'connector.json');
@@ -77,7 +74,6 @@ export async function stagedChromeConnection(
       extensionId,
       bundledExtension,
       build,
-      requireProfileConsent: Number.parseInt(macOSVersion, 10) >= 27,
     });
   } catch {
     return undefined;
@@ -94,11 +90,9 @@ export function chromeProfileConnection(setup: {
   extensionId: string;
   bundledExtension: string;
   build: string;
-  requireProfileConsent?: boolean;
 }): ChromeProfileConnection {
   const id = extensionId.parse(setup.extensionId);
   const directory = join(setup.appData, 'chrome-link');
-  let canReadProfiles = !setup.requireProfileConsent;
   const connector = chromeConnector({
     directory,
     browserData: setup.browserData,
@@ -123,19 +117,15 @@ export function chromeProfileConnection(setup: {
   };
   return new ChromeProfileConnection(directory, {
     build: setup.build,
-    async profiles() {
-      const attemptedRead = canReadProfiles;
-      const result = await readChromeProfiles(setup.browserData, attemptedRead);
-      if (attemptedRead && result.status === 'access-required') canReadProfiles = false;
-      return result;
-    },
+    profiles: () => readChromeProfiles(setup.browserData),
+    // The selection is what lets macOS give the app the folder; the next read uses it.
     async selectProfileFolder(pick) {
       const selected = await pick(setup.browserData);
       if (selected === undefined) return { status: 'cancelled-before-dispatch', effects: 'none' };
-      // Do not accept another Chrome root, a profile subdirectory or an arbitrary path.
+      // Do not accept another Chrome root, a profile subdirectory or an arbitrary path: the window
+      // names this refusal as a folder that isn't Chrome's.
       if (resolve(selected) !== resolve(setup.browserData))
         return { status: 'refused', code: 'invalid-request', dispatched: false };
-      canReadProfiles = true;
       return { status: 'verified', value: null };
     },
     install: () => connector.install(),

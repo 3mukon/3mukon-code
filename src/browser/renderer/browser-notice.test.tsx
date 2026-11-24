@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { ProfileSummary } from '../../sessions/shared/automation';
 import { BrowserSetupNotice, type BrowserSetupSteps } from './browser-notice';
-import type { ChromeSetup } from './chrome-state';
+import { WrongChromeFolder, type ChromeSetup } from './chrome-state';
 
 beforeAll(() => {
   initI18n(['en-US']);
@@ -137,6 +137,33 @@ describe('BrowserSetupNotice', () => {
     expect(screen.getByText('Copied')).toBeDefined();
     given.report(chromeOf({ connection: 'connected', profile: PERSONAL }));
     expect(screen.queryByRole('button', { name: 'Copy Folder Path' })).toBeNull();
+  });
+
+  it('says Chrome has no profile yet once Connect finds none, and how to make one', async () => {
+    const given = steps(chromeOf({}, []));
+    render(<BrowserSetupNotice steps={given} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await settle();
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
+    expect(screen.getByText('No profiles yet').className).toContain('text-wait');
+    expect(
+      screen.getByText('Open Chrome once to create a profile, then connect it here.'),
+    ).toBeDefined();
+    expect(given.connectChrome).not.toHaveBeenCalled();
+  });
+
+  it('names a selected folder that isn’t Chrome’s and offers Connect again', async () => {
+    const given = steps(chromeOf({ profileAccessRequired: true }, []));
+    given.allowProfiles.mockRejectedValueOnce(new WrongChromeFolder());
+    render(<BrowserSetupNotice steps={given} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await settle();
+    await settle();
+    expect(screen.getByRole('status').textContent).toBe(
+      'That isn’t Chrome’s folder. Choose Connect again and click Open without selecting anything.',
+    );
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Connect' }).disabled).toBe(false);
+    expect(given.connectChrome).not.toHaveBeenCalled();
   });
 
   it('asks for access on Connect and connects the profile that is found', async () => {

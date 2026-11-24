@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '../../i18n/renderer/i18n';
 import type { SetupSnapshot } from '../../sessions/shared/automation';
 import { BrowserUseSetting } from './browser-use';
+import { WrongChromeFolder } from './chrome-state';
 
 beforeAll(() => {
   initI18n(['en-US']);
@@ -147,7 +148,7 @@ describe('BrowserUseSetting', () => {
     expect(chromeSteps.connect).toHaveBeenLastCalledWith('Default');
   });
 
-  it('can connect a profile after access is granted, while a known empty list disables Connect', async () => {
+  it('says Chrome has no profile yet instead of offering Connect, names a folder that isn’t Chrome’s, and connects a profile after access is granted', async () => {
     const empty: SetupSnapshot['chrome'] = {
       installedVersion: '158.0.8127.37',
       minimumVersion: '158.0.8127.2',
@@ -159,6 +160,7 @@ describe('BrowserUseSetting', () => {
       allowProfiles: vi
         .fn<() => Promise<SetupSnapshot['chrome'] | null>>()
         .mockResolvedValueOnce(null)
+        .mockRejectedValueOnce(new WrongChromeFolder())
         .mockResolvedValueOnce({ ...empty, profiles: [{ id: 'Default', name: 'Personal' }] }),
       connect: vi.fn(() => Promise.resolve(true)),
       disconnect: vi.fn(),
@@ -168,7 +170,11 @@ describe('BrowserUseSetting', () => {
       <BrowserUseSetting {...props} setup={{ ...snapshot(true), chrome: empty }} />,
     );
     const connect = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Connect' });
-    expect(connect().disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
+    expect(screen.getByText('No profiles yet').className).toContain('text-wait');
+    expect(
+      screen.getByText('Open Chrome once to create a profile, then connect it here.'),
+    ).toBeDefined();
     expect(steps.allowProfiles).not.toHaveBeenCalled();
 
     view.rerender(
@@ -178,6 +184,7 @@ describe('BrowserUseSetting', () => {
       />,
     );
     expect(connect().disabled).toBe(false);
+    expect(screen.queryByText('No profiles yet')).toBeNull();
     fireEvent.click(connect());
     await settle();
     expect(steps.connect).not.toHaveBeenCalled();
@@ -185,7 +192,17 @@ describe('BrowserUseSetting', () => {
 
     fireEvent.click(connect());
     await settle();
+    expect(steps.connect).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        'That isn’t Chrome’s folder. Choose Connect again and click Open without selecting anything.',
+      ),
+    ).toBeDefined();
+
+    fireEvent.click(connect());
+    await settle();
     expect(steps.connect).toHaveBeenCalledExactlyOnceWith('Default');
+    expect(screen.queryByText(/isn’t Chrome’s folder/)).toBeNull();
   });
 
   it('says which version a Chrome too old to connect needs, offering nothing, and hides a Chrome not installed unless a profile is still connected to it', async () => {

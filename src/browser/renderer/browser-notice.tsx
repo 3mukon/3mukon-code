@@ -5,7 +5,13 @@ import { Button } from '../../ui/renderer/button';
 import { CircleAlert } from '../../ui/renderer/icons';
 import { Menu } from '../../ui/renderer/menu';
 import { ChromeInstallHelp } from './chrome-install-help';
-import { chromeProfile, chromeState, type ChromeSetup } from './chrome-state';
+import {
+  chromeProfile,
+  chromeState,
+  hasNoProfiles,
+  WrongChromeFolder,
+  type ChromeSetup,
+} from './chrome-state';
 
 export interface BrowserSetupSteps {
   // Chrome's setup as main reports it, read when the user clicks Connect.
@@ -35,7 +41,8 @@ export function BrowserSetupNotice({ steps }: { steps: BrowserSetupSteps }) {
   // before it may come before main has checked Chrome since the app started, and would mislead.
   const [chrome, setChrome] = useState<ChromeSetup | null>(null);
   const [running, setRunning] = useState(false);
-  const [failed, setFailed] = useState(false);
+  // What went wrong with the last step: a folder other than Chrome's, or anything else.
+  const [problem, setProblem] = useState<'wrong-folder' | 'failed' | null>(null);
   const [choosing, setChoosing] = useState<{
     at: { x: number; y: number };
     profiles: readonly ProfileSummary[];
@@ -54,11 +61,11 @@ export function BrowserSetupNotice({ steps }: { steps: BrowserSetupSteps }) {
     steps.connectChrome(id).then(
       (done) => {
         setRunning(false);
-        if (!done) setFailed(true);
+        if (!done) setProblem('failed');
       },
       () => {
         setRunning(false);
-        setFailed(true);
+        setProblem('failed');
       },
     );
   };
@@ -73,7 +80,7 @@ export function BrowserSetupNotice({ steps }: { steps: BrowserSetupSteps }) {
   };
   const start = (event: MouseEvent<HTMLButtonElement>) => {
     const { left, bottom } = event.currentTarget.getBoundingClientRect();
-    setFailed(false);
+    setProblem(null);
     setRunning(true);
     void discover().then(
       (known) => {
@@ -84,9 +91,9 @@ export function BrowserSetupNotice({ steps }: { steps: BrowserSetupSteps }) {
         if (profiles.length === 1 && only !== undefined) connect(only.id);
         else if (profiles.length > 1) setChoosing({ at: { x: left, y: bottom + 4 }, profiles });
       },
-      () => {
+      (error: unknown) => {
         setRunning(false);
-        setFailed(true);
+        setProblem(error instanceof WrongChromeFolder ? 'wrong-folder' : 'failed');
       },
     );
   };
@@ -121,10 +128,17 @@ export function BrowserSetupNotice({ steps }: { steps: BrowserSetupSteps }) {
                 {t('browser.chrome.profileLine', { profile: profile.name })}
               </span>
             )}
+            {chrome !== null && hasNoProfiles(chrome) && (
+              <span className="min-w-0 text-faint">{t('browser.chrome.createProfile')}</span>
+            )}
           </p>
         )}
         <span role="status" className="min-w-0 text-del">
-          {failed ? t('browser.failed') : ''}
+          {problem === 'wrong-folder'
+            ? t('browser.chrome.wrongFolder')
+            : problem === 'failed'
+              ? t('browser.failed')
+              : ''}
         </span>
       </div>
       {chrome?.connection === 'connecting' && chrome.extensionFolder && steps.copyFolder && (

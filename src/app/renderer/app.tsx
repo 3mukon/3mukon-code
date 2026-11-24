@@ -40,6 +40,7 @@ import { BrowserSetupNotice, type BrowserSetupSteps } from '../../browser/render
 import { BrowserPageView } from '../../browser/renderer/browser-page-view';
 import { BrowserPanel, NO_USE, type TabUse } from '../../browser/renderer/browser-panel';
 import { BrowserUseSetting } from '../../browser/renderer/browser-use';
+import { WrongChromeFolder } from '../../browser/renderer/chrome-state';
 import { useBrowserTabs } from '../../browser/renderer/use-browser-tabs';
 import type { BrowserTabRef } from '../../browser/shared/browser';
 import {
@@ -382,6 +383,9 @@ export function App({ bridge }: { bridge: Bridge }) {
   const allowChromeProfiles = async () => {
     const result = await bridge.setup.act({ kind: 'allow-chrome-profiles' });
     if (result.status === 'cancelled-before-dispatch') return null;
+    // Main refuses a folder other than Chrome's as an invalid request.
+    if (result.status === 'refused' && result.code === 'invalid-request')
+      throw new WrongChromeFolder();
     if (result.status !== 'verified') throw new Error('Chrome profiles could not be read.');
     return (await bridge.setup.snapshot()).chrome;
   };

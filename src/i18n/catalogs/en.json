@@ -693,6 +693,9 @@
       "folderCopied": "Copied",
       "waiting": "Waiting for Chrome",
       "unavailable": "Unavailable",
+      "noProfiles": "No profiles yet",
+      "createProfile": "Open Chrome once to create a profile, then connect it here.",
+      "wrongFolder": "That isn’t Chrome’s folder. Choose Connect again and click Open without selecting anything.",
       "notInstalled": "Not installed"
     },
     "notice": {

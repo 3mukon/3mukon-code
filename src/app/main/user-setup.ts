@@ -202,7 +202,8 @@ export class UserSetup implements UserSetupBridge {
             ? 'waiting'
             : this.ports.chrome?.connecting()
               ? 'connecting'
-              : supported
+              : // A profile index the app cannot read leaves no profile to connect.
+                supported && profiles.status !== 'unavailable'
                 ? 'disconnected'
                 : 'unavailable',
         profile,

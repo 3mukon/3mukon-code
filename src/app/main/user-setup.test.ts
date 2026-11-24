@@ -245,6 +245,38 @@ describe('UserSetup', () => {
     expect(heard.at(-1)?.chrome.profileAccessRequired).toBeUndefined();
   });
 
+  it('says Chrome is unavailable when its profile index cannot be read, rather than listing no profiles', async () => {
+    const pending = () => new Promise<Outcome<HelperStatus>>(() => undefined);
+    const host = new UserSetup({
+      appProfileId: 'embedded-app',
+      installedChromeVersion: () => Promise.resolve('158.0.8127.18'),
+      chrome: {
+        profile: () => null,
+        rememberedProfile: () => null,
+        profiles: () => Promise.resolve({ status: 'unavailable' }),
+        allowProfileAccess: () => Promise.resolve({ status: 'verified', value: null }),
+        connecting: () => false,
+        extensionFolder: () => undefined,
+        connect: () => Promise.resolve({ status: 'verified', value: null }),
+        disconnect: () => Promise.resolve({ status: 'verified', value: null }),
+        subscribe: () => () => undefined,
+      },
+      clearAppSignIns: () => Promise.resolve({ status: 'verified', value: null }),
+      helper: {
+        status: () => status({}),
+        check: pending,
+        restart: pending,
+        request: () => Promise.resolve({ status: 'verified', value: { prompted: false } }),
+      },
+      openUrl: () => Promise.resolve(),
+    });
+    expect((await host.snapshot()).chrome).toMatchObject({
+      installedVersion: '158.0.8127.18',
+      connection: 'unavailable',
+      profiles: [],
+    });
+  });
+
   it('passes on a restart the helper refused', async () => {
     const { host, restart } = setup();
     restart.mockResolvedValueOnce({

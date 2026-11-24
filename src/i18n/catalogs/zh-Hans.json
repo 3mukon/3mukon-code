@@ -687,6 +687,9 @@
       "folderCopied": "已复制",
       "waiting": "正在等待 Chrome",
       "unavailable": "不可用",
+      "noProfiles": "还没有个人资料",
+      "createProfile": "请先打开一次 Chrome 来创建个人资料，然后在这里连接。",
+      "wrongFolder": "这不是 Chrome 的文件夹。请再次选择“连接”，然后不选择任何项目，直接点按“打开”。",
       "notInstalled": "未安装"
     },
     "notice": {

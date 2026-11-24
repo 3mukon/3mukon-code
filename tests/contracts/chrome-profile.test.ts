@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createConnection, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
@@ -139,20 +139,22 @@ it('keeps the confirmed profile across app and native-peer restart and rejects a
   }
 });
 
-it('reads the correct profile names only after the Chrome folder is selected', async () => {
+it('reads the profile names first, asks for the Chrome folder only after a refused read, and reads at once in an app that starts again', async () => {
   const folder = await mkdtemp('/private/tmp/chrome-names-');
   const browserData = join(folder, 'Chrome');
-  const app = chromeProfileConnection({
-    appData: join(folder, 'app'),
-    browserData,
-    browserBundle: join(folder, 'unused'),
-    browserExecutable: join(folder, 'unused'),
-    hostExecutable: join(folder, 'unused'),
-    extensionId: 'abcdefghijklmnopabcdefghijklmnop',
-    bundledExtension: join(folder, 'unused'),
-    build,
-    requireProfileConsent: true,
-  });
+  const connection = () =>
+    chromeProfileConnection({
+      appData: join(folder, 'app'),
+      browserData,
+      browserBundle: join(folder, 'unused'),
+      browserExecutable: join(folder, 'unused'),
+      hostExecutable: join(folder, 'unused'),
+      extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+      bundledExtension: join(folder, 'unused'),
+      build,
+    });
+  const app = connection();
+  let restarted: ChromeProfileConnection | undefined;
   try {
     expect(await app.profiles()).toEqual({ status: 'read', profiles: [] });
     await mkdir(browserData);
@@ -169,6 +171,8 @@ it('reads the correct profile names only after the Chrome folder is selected', a
         },
       }),
     );
+    // What macOS's protection of Chrome's folder does to a read it refuses.
+    await chmod(join(browserData, 'Local State'), 0o000);
     expect(await app.profiles()).toEqual({ status: 'access-required' });
     expect(await app.connect(name.id)).toMatchObject({
       status: 'refused',
@@ -188,9 +192,14 @@ it('reads the correct profile names only after the Chrome folder is selected', a
       status: 'verified',
       value: null,
     });
+    // What macOS gives the app once the user selects the folder, which outlasts the app's process.
+    await chmod(join(browserData, 'Local State'), 0o600);
     expect(await app.profiles()).toEqual({ status: 'read', profiles: [name] });
+    restarted = connection();
+    expect(await restarted.profiles()).toEqual({ status: 'read', profiles: [name] });
   } finally {
     app.close();
+    restarted?.close();
     await rm(folder, { recursive: true, force: true });
   }
 });
