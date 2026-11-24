@@ -103,6 +103,64 @@ it('removes what an install that was cut short left', async () => {
   expect((await readdir(folder)).sort()).toEqual(['Computer Use Helper.app', 'coordination']);
 });
 
+// A thin 64-bit Mach-O executable whose one load command points at its code signature.
+function signed(code: string, signature: string): Buffer {
+  const body = Buffer.from(code);
+  const seal = Buffer.from(signature);
+  const header = Buffer.alloc(32);
+  header.writeUInt32LE(0xfeedfacf, 0);
+  header.writeUInt32LE(1, 16);
+  header.writeUInt32LE(16, 20);
+  const command = Buffer.alloc(16);
+  command.writeUInt32LE(0x1d, 0);
+  command.writeUInt32LE(16, 4);
+  command.writeUInt32LE(48 + body.length, 8);
+  command.writeUInt32LE(seal.length, 12);
+  return Buffer.concat([header, command, body, seal]);
+}
+
+async function writeSigned(bundle: string, code: string, signature: string) {
+  await writeFile(join(bundle, executable), signed(code, signature));
+  await chmod(join(bundle, executable), 0o755);
+}
+
+it('compares signed executables by their signatures alone, leaving the rest to the check', async () => {
+  await writeSigned(packaged, 'the first build', 'signature one');
+  await install();
+  const before = await lstat(join(installed, executable));
+  // The same signature over other code: only the check can tell, so the copy stays where it passes.
+  await writeSigned(installed, 'the other build', 'signature one');
+  verify.mockClear();
+  expect(await install()).toBe(installed);
+  expect((await lstat(join(installed, executable))).ino).toBe(before.ino);
+  expect(verify.mock.calls).toEqual([[installed]]);
+});
+
+it('replaces a copy whose signature differs, and a copy of the same signature that fails its check', async () => {
+  await writeSigned(packaged, 'the first build', 'signature one');
+  await install();
+  await writeSigned(packaged, 'the first build', 'signature two');
+  verify.mockClear();
+  await install();
+  expect(await readFile(join(installed, executable))).toEqual(
+    signed('the first build', 'signature two'),
+  );
+  expect(verify.mock.calls).toEqual([[packaged], [installed]]);
+
+  await writeSigned(installed, 'the other build', 'signature two');
+  const changed = await readFile(join(installed, executable));
+  verify.mockReset();
+  verify.mockImplementation(async (bundle) => {
+    const code = await readFile(join(bundle, executable));
+    if (code.equals(changed)) throw new Error('changed after its install');
+  });
+  await install();
+  expect(await readFile(join(installed, executable))).toEqual(
+    signed('the first build', 'signature two'),
+  );
+  expect(verify.mock.calls).toEqual([[installed], [packaged], [installed]]);
+});
+
 it('installs nothing that fails its check, and runs nothing that does', async () => {
   await install();
   await write(packaged, executable, 'not the app’s', 0o755);
