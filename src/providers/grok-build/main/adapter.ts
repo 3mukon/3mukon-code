@@ -596,6 +596,16 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function isToolDispatcher(meta: Record<string, unknown> | null | undefined): boolean {
+  const native = record(meta?.['x.ai/tool']);
+  return (
+    native?.version === 1 &&
+    native.namespace === 'grok_build' &&
+    native.name === 'use_tool' &&
+    native.kind === 'use_tool'
+  );
+}
+
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
@@ -1161,20 +1171,22 @@ class GrokSession implements ProviderSession {
           !this.replaying &&
           (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update')
         ) {
-          const wrongKind = update.kind && update.kind !== 'other';
-          if (wrongKind) {
+          let name: string | undefined;
+          if (update.kind && update.kind !== 'other') {
             this.toolNames.delete(update.toolCallId);
             this.resultNames.delete(update.toolCallId);
-          }
-          const name = wrongKind
-            ? undefined
-            : this.resultTool(update.toolCallId, update.title, update._meta);
-          // One of the app's tools that Grok titles by its name alone, as its use_tool does.
-          if (name !== undefined && update.title === name) {
-            appTool = {
-              id: update.toolCallId,
-              call: appCall(name, toolArguments(update.rawInput)),
-            };
+          } else {
+            name = this.resultTool(update.toolCallId, update.title, update._meta);
+            const shown =
+              update.title === name
+                ? name
+                : this.dispatcherToolForDisplay(update.title, update._meta, update.rawInput);
+            if (shown !== undefined) {
+              appTool = {
+                id: update.toolCallId,
+                call: appCall(shown, toolArguments(update.rawInput)),
+              };
+            }
           }
           if (name && (update.status === 'completed' || update.status === 'failed')) {
             const content = update.content?.flatMap((part) =>
@@ -1369,6 +1381,23 @@ class GrokSession implements ProviderSession {
     return name ?? this.toolNames.get(id);
   }
 
+  // The first use_tool update names its target in the input before Grok sets the call's title.
+  private dispatcherToolForDisplay(
+    title: string | null | undefined,
+    meta: Record<string, unknown> | null | undefined,
+    input: unknown,
+  ): string | undefined {
+    const toolset = this.settings.toolset;
+    if (!this.hostEnabled || !toolset || title !== 'use_tool' || !isToolDispatcher(meta))
+      return undefined;
+    const target = text(record(input)?.tool_name);
+    if (target === undefined) return undefined;
+    const tools = this.access?.tools;
+    return tools?.includes(target)
+      ? target
+      : registeredTool(target, `${grokServerName(toolset.name)}__`, tools);
+  }
+
   // Grok's native use_tool metadata identifies the dispatcher, not the MCP server. A bare name is
   // only a candidate for receipt correlation, never approval authority. The host must validate the
   // unguessable receipt against its retained call's owner, turn, access generation and tool name
@@ -1381,12 +1410,7 @@ class GrokSession implements ProviderSession {
     const qualified = this.hostTool(id, title);
     if (qualified) return qualified;
     if (!this.hostEnabled) return undefined;
-    const native = record(meta?.['x.ai/tool']);
-    const useTool =
-      native?.version === 1 &&
-      native.namespace === 'grok_build' &&
-      native.name === 'use_tool' &&
-      native.kind === 'use_tool';
+    const useTool = isToolDispatcher(meta);
     if (title && useTool && this.access?.tools?.includes(title)) {
       if (this.resultNames.size >= 256)
         this.resultNames.delete(this.resultNames.keys().next().value ?? '');

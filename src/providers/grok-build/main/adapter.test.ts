@@ -269,6 +269,51 @@ function useToolFixture(id: string, name: string): SessionUpdate[] {
   ];
 }
 
+it('identifies the app’s browser tool on Grok’s first dispatcher update', async () => {
+  automationCapabilities = true;
+  const { session, events, until } = await open((onEvent) =>
+    provider.start(
+      {
+        cwd: '/work',
+        toolset: {
+          name: '3mukon-code',
+          callTimeoutMs: 86_400_000,
+          open: () => ({
+            url: 'http://127.0.0.1:4000/mcp',
+            credential: 'synthetic',
+            tools: ['browser_navigate'],
+            close: vi.fn(),
+          }),
+        },
+      },
+      onEvent,
+    ),
+  );
+  const url = 'https://fixture.example/';
+  const appBrowser = { server: '3mukon-code', tool: 'browser_navigate', app: true, subject: url };
+  const cases = [
+    ['sanmukon-code__browser_navigate', appBrowser],
+    ['browser_navigate', appBrowser],
+    ['foreign__browser_navigate', undefined],
+    ['sanmukon-code__browser_unregistered', undefined],
+  ] as const;
+  try {
+    for (const [name, mcp] of cases) {
+      await fake().update({
+        sessionUpdate: 'tool_call',
+        toolCallId: name,
+        title: 'use_tool',
+        _meta: USE_TOOL_META,
+        rawInput: { variant: null, tool_name: name, tool_input: { url } },
+      });
+      await until(() => last(events, 'tool')?.id === name);
+      expect(last(events, 'tool')?.mcp).toEqual(mcp);
+    }
+  } finally {
+    await session.close();
+  }
+});
+
 it.each([
   { name: 'panel_present', status: 'completed' as const },
   { name: 'sanmukon-code__panel_present', status: 'completed' as const },
