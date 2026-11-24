@@ -168,7 +168,9 @@ process.on('exit', () => {
 function toolsetLaunch(toolset: Toolset, access: ToolsetAccess): Launch {
   const server = `mcp_servers.${toolset.name}`;
   const settings = [
-    // Codex uses each segment of a dotted launch override as a literal key.
+    // Codex's bundled computer-use plugin, which a Codex home may have installed, would put computer
+    // tools of its own beside the toolset's, outside the broker's grants and sandbox levels. Codex
+    // takes each segment of a dotted override as a literal key, so the plugin's id needs no quotes.
     'plugins.unified-computer-use@openai-bundled.enabled=false',
     `${server}.url=${JSON.stringify(access.url)}`,
     `${server}.bearer_token_env_var=${JSON.stringify(TOOLSET_VARIABLE)}`,

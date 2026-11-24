@@ -639,7 +639,7 @@ describe('the Codex provider', () => {
     expect(toolset.opened[0]?.closed).toBe(true);
   });
 
-  it('starts the session with the app toolset and disables Codex’s bundled Unified Computer Use plugin', async () => {
+  it('starts each session’s app-server with the toolset, its credential in the environment only, and Codex’s bundled computer use off', async () => {
     await startSession();
     const server = 'mcp_servers.3mukon-code';
     expect(current().launch).toEqual({
