@@ -1897,6 +1897,20 @@ describe('App', () => {
     await waitFor(() => {
       expect(automation.commands).toContainEqual({ kind: 'stop', sessionId: 's1' });
     });
+    // The line's Close closes the tab and then the panel that shows it, as the agent is told.
+    const page = within(screen.getByRole('main')).getByRole('region', {
+      name: 'Compare pricing pages',
+    });
+    fireEvent.click(within(page).getByRole('button', { name: 'Close: example.com' }));
+    await waitFor(() => {
+      expect(tabs.commands).toContainEqual({ kind: 'close' });
+    });
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('main')).queryByRole('region', { name: 'Pricing · Example' }),
+      ).toBeNull();
+    });
+    expect(sent.at(-1)).toMatchObject({ kind: 'changed', state: { boxes: [null] } });
   });
 
   it('shows a window its session presents as a preview named by its application, with Switch to and what the session does with it', async () => {

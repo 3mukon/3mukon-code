@@ -539,9 +539,8 @@ export function App({ bridge }: { bridge: Bridge }) {
           ? outcome.value.map((frame) => frame.image)
           : Promise.reject(new Error(`The call's screenshots are ${outcome.status}.`)),
       );
-  // Presents beside the session each tab or application it uses, as the user asks from the line
-  // above its composer; true once each is shown.
-  // Closes a tab a session uses, as its row above the composer asks.
+  // Closes a tab a session uses, as its row above the composer asks, and then the panels that show
+  // it, which would only say that it has closed.
   const closeTab = (sessionId: string, target: TargetSummary): Promise<boolean> =>
     target.ref.kind === 'browser-tab'
       ? bridge.browser
@@ -550,7 +549,13 @@ export function App({ bridge }: { bridge: Bridge }) {
             { id: target.ref.id, generation: target.ref.generation, kind: 'browser-tab' },
             { kind: 'close' },
           )
-          .then((outcome) => outcome.status === 'verified')
+          .then((outcome) => {
+            if (outcome.status !== 'verified') return false;
+            const content = usedContent(target);
+            for (const panel of panelsOf(panels.latest().layout))
+              if (content !== null && sameContent(panel.content, content)) panels.close(panel.id);
+            return true;
+          })
       : Promise.resolve(false);
   // Whether a panel shows a tab or an application a session uses.
   const shownUsed = (target: TargetSummary): boolean => {
@@ -560,6 +565,8 @@ export function App({ bridge }: { bridge: Bridge }) {
       panelsOf(panels.layout).some((panel) => sameContent(panel.content, content))
     );
   };
+  // Presents beside the session each tab or application it uses, as the user asks from the line
+  // above its composer; true once each is shown.
   const showUsed = (sessionId: string, targets: readonly TargetSummary[]): Promise<boolean> =>
     Promise.all(
       targets
