@@ -859,6 +859,27 @@ describe('a Claude Code session', () => {
     });
   });
 
+  it('follows a turn Claude Code runs by itself, as for a background task’s notice, from its init to its result', async () => {
+    const { session, events } = await startSession();
+    await playTurn(session, events, 'Start the job in the background');
+    const turns = (type: 'turn-started' | 'turn-ended') =>
+      events.filter((event) => event.type === type).length;
+    expect([turns('turn-started'), turns('turn-ended')]).toEqual([1, 1]);
+    // The job's notice starts a turn without a message of the user's.
+    current().push(init);
+    await waitFor(() => turns('turn-started') === 2);
+    // The turn starts before what its init says.
+    expect(events.slice(-2)).toEqual([{ type: 'turn-started' }, { type: 'mode', mode: 'auto' }]);
+    current().push({ ...result, origin: { kind: 'task-notification' } });
+    await waitFor(() => turns('turn-ended') === 2);
+    expect(events.findLast((event) => event.type === 'turn-ended')).toMatchObject({
+      outcome: 'completed',
+    });
+    // A turn of the app's own opens with an init too, which starts nothing more.
+    await playTurn(session, events, 'Thanks');
+    expect([turns('turn-started'), turns('turn-ended')]).toEqual([3, 3]);
+  });
+
   it('sends a message’s images as content blocks before its text, and shows them with it', async () => {
     const { session, events } = await startSession();
     const image = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };

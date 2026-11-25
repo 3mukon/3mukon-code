@@ -1018,6 +1018,18 @@ class ClaudeCodeSession implements ProviderSession {
           connection.deliveries.delete(taken);
         }
         if (connection !== this.connection && this.retired.has(connection)) continue;
+        // Claude Code also runs turns of its own, as for a background task's notice or an automatic
+        // continuation. Each turn opens with its init, and the session follows such a turn until its
+        // result as it does the app's, so that its calls to the app's tools come within a turn.
+        if (
+          message.type === 'system' &&
+          message.subtype === 'init' &&
+          !this.turnRunning &&
+          !this.closing
+        ) {
+          this.turnRunning = true;
+          this.onEvent({ type: 'turn-started' });
+        }
         // A turn's first message names the model it runs, which the user may have switched.
         if (
           message.type === 'system' &&
