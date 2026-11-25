@@ -32,6 +32,7 @@ const instructions = [
   'Use browser tools for websites and computer tools for native apps.',
   "Prefer the app's own browser, with sharing none for public pages or isolated work and app for the shared app profile's sign-ins. Use global for the connected Chrome profile. Respect the user's requested browser and ask if it is unavailable.",
   'Keep work in the background by default. Use panel tools when the user needs to inspect, compare, decide, or take over.',
+  "Shared sign-ins may be missing or expired, so do not assume a site is signed in: check that the page shows the user's account. When a page asks for a sign-in, never enter a password, code or other credential yourself: present the tab at once with panel_present, without asking first, then ask the user to sign in there and hand the tab back, and continue once they say they have. While the user has the tab, its tools refuse with target-paused.",
   'In auto mode the app requests approval once per operation on a shared or native target. Group related actions on that target within the same turn. A session grant applies to later operations on that target until it ends.',
   'Respect setup requirements, refusals and stopped operations. Ask before broadening sharing or switching identities after a refusal.',
 ].join(' ');

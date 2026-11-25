@@ -124,7 +124,7 @@ export function browserTools(
   return [
     define(
       'browser_open',
-      "Reserve a browser tab. Prefer the app's own browser. Use none for isolated work, app for the shared app profile's sign-ins, or global for the connected Chrome profile. Use browser_navigate to open the task URL. Each shared tab has its own operation grant.",
+      "Reserve a browser tab. Prefer the app's own browser. Use none for isolated work, app for the shared app profile's sign-ins, or global for the connected Chrome profile. Use browser_navigate to open the task URL. Each shared tab has its own operation grant. A shared profile may not be signed in to a site: when a page asks for a sign-in, never enter credentials yourself; present the tab at once with panel_present and ask the user to sign in and hand it back.",
       z.strictObject({ sharing: z.enum(['none', 'app', 'global']).optional() }),
       ({ sharing }) => {
         const setup = sharing === 'global' ? chrome?.requirement() : undefined;
