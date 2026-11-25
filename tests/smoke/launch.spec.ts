@@ -220,6 +220,58 @@ test('Command-B and the sidebar’s button hide the sidebar and show it again', 
   });
 });
 
+test('the buttons beside the traffic lights take presses whether the sidebar shows or not, a panel is open or none', async () => {
+  await withApp(async (electronApp) => {
+    const window = await electronApp.firstWindow();
+    // A press in a draggable part of the page moves the window instead, and on macOS Electron applies
+    // the page's draggable and non-draggable parts in the document's order, each over those before it.
+    // Playwright's presses go to the page itself, past that, so this applies the rule at each button's
+    // centre: whether a draggable part there comes after every non-draggable one.
+    const draggable = () =>
+      window.evaluate(() => {
+        const names = ['Hide Sidebar', 'Show Sidebar', 'Archived sessions', 'Accounts', 'Settings'];
+        return [...document.querySelectorAll('button')]
+          .filter((button) => names.includes(button.getAttribute('aria-label') ?? ''))
+          .map((button) => {
+            const box = button.getBoundingClientRect();
+            const [x, y] = [box.left + box.width / 2, box.top + box.height / 2];
+            let drags = false;
+            for (const element of document.querySelectorAll('*')) {
+              const style = getComputedStyle(element);
+              const region =
+                style.getPropertyValue('app-region') ||
+                style.getPropertyValue('-webkit-app-region');
+              if (region !== 'drag' && region !== 'no-drag') continue;
+              const part = element.getBoundingClientRect();
+              if (x < part.left || x >= part.right || y < part.top || y >= part.bottom) continue;
+              drags = region === 'drag';
+            }
+            return `${button.getAttribute('aria-label') ?? ''}: ${drags ? 'moves the window' : 'pressed'}`;
+          });
+      });
+    const pressed = (toggle: string) => [
+      `${toggle}: pressed`,
+      'Archived sessions: pressed',
+      'Accounts: pressed',
+      'Settings: pressed',
+    ];
+    const sidebar = window.locator('aside');
+    await window.getByRole('button', { name: 'Hide Sidebar' }).waitFor();
+    expect(await draggable()).toEqual(pressed('Hide Sidebar'));
+    await window.keyboard.press('Meta+B');
+    await expect(sidebar).toHaveCSS('width', '0px');
+    // No panel is open: the empty strip of the panel area lies beneath them.
+    expect(await draggable()).toEqual(pressed('Show Sidebar'));
+    await window.keyboard.press('Meta+B');
+    await expect(sidebar).toHaveCSS('width', '220px');
+    await window.getByRole('button', { name: 'New session' }).click();
+    await window.keyboard.press('Meta+B');
+    await expect(sidebar).toHaveCSS('width', '0px');
+    // The header of the panel at the top left lies beneath them.
+    expect(await draggable()).toEqual(pressed('Show Sidebar'));
+  });
+});
+
 test('as the sidebar closes and opens, the top-left panel’s title never passes beneath the buttons beside the traffic lights', async () => {
   await withApp(async (electronApp) => {
     const window = await electronApp.firstWindow();

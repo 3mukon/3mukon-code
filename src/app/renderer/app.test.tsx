@@ -375,6 +375,9 @@ describe('App', () => {
     expect(hide.title).toBe('Hide Sidebar (⌘B)');
     fireEvent.click(hide);
     expect(sidebar.hasAttribute('inert')).toBe(true);
+    // The sidebar's part of the title bar moves the window but for a hole under the buttons.
+    const bar = sidebar.querySelector('[class*="app-region:drag"]');
+    expect(bar?.firstElementChild?.className).toContain('[-webkit-app-region:no-drag]');
     // The same button stays beside the window buttons, outside the hidden sidebar.
     const show = screen.getByRole('button', { name: 'Show Sidebar' });
     expect(show).toBe(hide);

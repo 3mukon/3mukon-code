@@ -41,6 +41,21 @@ interface PaneProps {
   children?: ReactNode;
 }
 
+// What lies just after macOS's window buttons stays in one place above the title bar whatever the
+// sidebar does, and takes presses only where no draggable part of the page comes after it in the
+// document: on macOS, Electron applies the page's draggable and non-draggable parts in the
+// document's order, each over those before it, and a press in a draggable part moves the window. So
+// each draggable part of the title bar that can lie beneath it leaves this hole there, inside it, as
+// wide as the `--beside-window-buttons` property says; the part must be positioned.
+export function WindowButtonsHole() {
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute top-0 left-[84px] h-10 w-(--beside-window-buttons) [-webkit-app-region:no-drag]"
+    />
+  );
+}
+
 // One pane of the main area: a header with the status, title, detail and close button, as tall as the
 // title bar, above a body that its content lays out and scrolls itself. The pane takes focus from the keyboard as a whole, and marks
 // itself as the current one while it has focus. Its title and detail are its handle, which its parent
@@ -76,8 +91,9 @@ export function Pane({
       className={`grid min-h-0 min-w-0 grid-rows-[40px_1fr] outline-none transition-opacity motion-reduce:transition-none ${focused ? '' : 'opacity-70'}`}
     >
       <header
-        className={`flex min-w-0 items-center gap-2.5 pr-3 font-medium motion-safe:transition-[padding] motion-safe:duration-200 ${inTitleBar ? '[-webkit-app-region:drag]' : ''} ${clearsWindowButtons ? 'pl-[calc(84px_+_var(--beside-window-buttons,0px)_+_10px)]' : 'pl-5'}`}
+        className={`relative flex min-w-0 items-center gap-2.5 pr-3 font-medium motion-safe:transition-[padding] motion-safe:duration-200 ${inTitleBar ? '[-webkit-app-region:drag]' : ''} ${clearsWindowButtons ? 'pl-[calc(84px_+_var(--beside-window-buttons,0px)_+_10px)]' : 'pl-5'}`}
       >
+        {inTitleBar && clearsWindowButtons && <WindowButtonsHole />}
         {status !== undefined && <StatusDot status={status} />}
         {statusLabel !== undefined && <span className="sr-only">{statusLabel}</span>}
         <span

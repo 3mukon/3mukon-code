@@ -76,6 +76,7 @@ import { useSettings } from '../../settings/renderer/use-settings';
 import { TerminalPanel } from '../../terminal/renderer/terminal-panel';
 import { TerminalViews } from '../../terminal/renderer/terminal-views';
 import { Gear, PanelLeft } from '../../ui/renderer/icons';
+import { WindowButtonsHole } from '../../ui/renderer/pane';
 import { Tag } from '../../ui/renderer/tag';
 import { TooltipHost } from '../../ui/renderer/tooltip';
 import { useWorkspaces } from '../../workspaces/renderer/use-workspaces';
@@ -972,7 +973,9 @@ export function App({ bridge }: { bridge: Bridge }) {
         <div className="flex h-full w-[220px] flex-col border-r border-line">
           {/* The sidebar's part of the title bar, where macOS draws the traffic lights, under what lies
               beside them; no line separates it from the rest of the sidebar. */}
-          <div className="h-10 shrink-0 [-webkit-app-region:drag]" />
+          <div className="relative h-10 shrink-0 [-webkit-app-region:drag]">
+            <WindowButtonsHole />
+          </div>
           <div className="flex min-h-0 flex-1 flex-col gap-4 px-2.5 pb-3.5">
             {/* The app's name, bold and compact, just below the title bar. */}
             <div className="shrink-0 truncate px-2 leading-5 font-bold">3mukon-code</div>

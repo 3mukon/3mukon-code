@@ -390,8 +390,11 @@ describe('PanelArea', () => {
 
   it('puts the headers of the panels at the top in the title bar, clearing the window buttons when asked', async () => {
     const { root } = renderArea([], true);
-    // While no panel is open, an empty strip at the top moves the window.
-    expect(root.querySelector('[class*="app-region:drag"]')).not.toBeNull();
+    // While no panel is open, an empty strip at the top moves the window, but for a hole under what
+    // lies just after the window buttons.
+    const strip = root.querySelector('[class*="app-region:drag"]');
+    expect(strip).not.toBeNull();
+    expect(strip?.firstElementChild?.className).toContain('[-webkit-app-region:no-drag]');
     await dragIn(file('/Users/me/web/a.ts'));
     fireEvent.keyDown(window, { key: 'd', metaKey: true });
     fireEvent.keyDown(window, { key: 'D', metaKey: true, shiftKey: true });

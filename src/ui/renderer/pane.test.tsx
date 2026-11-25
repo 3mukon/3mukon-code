@@ -101,6 +101,20 @@ describe('Pane', () => {
     for (const part of [handle, screen.getByRole('button')]) {
       expect(part?.className).toContain('[-webkit-app-region:no-drag]');
     }
+    // Under what lies just after the window buttons, which comes before the header in the document,
+    // the header leaves a hole that does not move the window, after its own draggable part.
+    const hole = header?.firstElementChild;
+    expect(hole?.getAttribute('aria-hidden')).toBe('true');
+    expect(hole?.className).toContain('[-webkit-app-region:no-drag]');
+    expect(hole?.className).toContain('left-[84px]');
+    expect(hole?.className).toContain('w-(--beside-window-buttons)');
+    expect(header?.className).toContain('relative');
+  });
+
+  it('leaves no hole in a header that does not clear the window buttons', () => {
+    render(<Pane title="web" focused onFocus={vi.fn()} inTitleBar />);
+    const header = screen.getByRole('region', { name: 'web' }).querySelector('header');
+    expect(header?.querySelector('[aria-hidden="true"]')).toBeNull();
   });
 
   it('gives its parent the presses of its title and detail, whose text does not select, and never drags as the system does', () => {

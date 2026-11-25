@@ -14,7 +14,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { addCover } from '../../ui/renderer/cover';
 import { Divider } from '../../ui/renderer/divider';
-import { Pane } from '../../ui/renderer/pane';
+import { Pane, WindowButtonsHole } from '../../ui/renderer/pane';
 import type { Status } from '../../ui/renderer/status-dot';
 import type { PanelContent, PanelsBridge } from '../shared/panels';
 import type { PresentationBridge, ShowOutcome, UsedContent } from '../shared/presentation';
@@ -483,7 +483,9 @@ export function PanelArea({
         />
       ))}
       {panels.layout === null && (
-        <div className="absolute inset-x-0 top-0 h-10 [-webkit-app-region:drag]" />
+        <div className="absolute inset-x-0 top-0 h-10 [-webkit-app-region:drag]">
+          {clearsWindowButtons && <WindowButtonsHole />}
+        </div>
       )}
       {drop?.kind === 'area' && <DropZone zone="middle" />}
       <div role="status" className="sr-only">
