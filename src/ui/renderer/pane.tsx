@@ -27,11 +27,10 @@ interface PaneProps {
   // The header lies in the window's title bar, and its empty part moves the window, as a title bar
   // does.
   inTitleBar?: boolean;
-  // The header leaves room at its start for macOS's window buttons, which lie over it.
+  // The header leaves room at its start for macOS's window buttons and what lies beside them, which
+  // lie over it: as wide as the `--beside-window-buttons` property says that is. The room grows and
+  // shrinks as the window's sidebar does, so that the title never passes beneath them.
   clearsWindowButtons?: boolean;
-  // Shown at the start of the header, before the status and title, such as what lies beside the
-  // window buttons while the header clears them.
-  start?: ReactNode;
   // Shown at the end of the header, before the close button, such as a choice of how the pane shows
   // what it holds.
   actions?: ReactNode;
@@ -61,7 +60,6 @@ export function Pane({
   closeLabel,
   inTitleBar = false,
   clearsWindowButtons = false,
-  start,
   actions,
   onHandlePointerDown,
   ref,
@@ -78,9 +76,8 @@ export function Pane({
       className={`grid min-h-0 min-w-0 grid-rows-[40px_1fr] outline-none transition-opacity motion-reduce:transition-none ${focused ? '' : 'opacity-70'}`}
     >
       <header
-        className={`flex min-w-0 items-center gap-2.5 pr-3 font-medium ${inTitleBar ? '[-webkit-app-region:drag]' : ''} ${clearsWindowButtons ? 'pl-[84px]' : 'pl-5'}`}
+        className={`flex min-w-0 items-center gap-2.5 pr-3 font-medium motion-safe:transition-[padding] motion-safe:duration-200 ${inTitleBar ? '[-webkit-app-region:drag]' : ''} ${clearsWindowButtons ? 'pl-[calc(84px_+_var(--beside-window-buttons,0px)_+_10px)]' : 'pl-5'}`}
       >
-        {start}
         {status !== undefined && <StatusDot status={status} />}
         {statusLabel !== undefined && <span className="sr-only">{statusLabel}</span>}
         <span

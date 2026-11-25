@@ -59,12 +59,9 @@ interface PanelAreaProps {
   // A session's name, by the app's id for it, for VoiceOver's announcement of what it presents.
   sessionName?: (id: string) => string;
   view?: (panel: Panel) => PanelView;
-  // macOS's window buttons lie over the area's top-left corner, as they do while the sidebar is
-  // hidden.
+  // macOS's window buttons, and what the window shows beside them, lie over the area's top-left
+  // corner, as they do while the sidebar is hidden: the header of the panel there leaves room for them.
   clearsWindowButtons: boolean;
-  // Shown just after the window buttons while they lie over the area: in the header of the panel at
-  // the top left, or in the empty strip while no panel is open.
-  besideWindowButtons?: ReactNode;
   ref?: Ref<PanelAreaHandle>;
 }
 
@@ -149,7 +146,6 @@ export function PanelArea({
   sessionName,
   view,
   clearsWindowButtons,
-  besideWindowButtons,
   ref,
 }: PanelAreaProps) {
   const { t } = useTranslation();
@@ -453,9 +449,6 @@ export function PanelArea({
               focused={panel.id === panels.focusedId}
               inTitleBar={box.y === 0}
               clearsWindowButtons={clearsWindowButtons && box.x === 0 && box.y === 0}
-              {...(clearsWindowButtons && box.x === 0 && box.y === 0
-                ? { start: besideWindowButtons }
-                : {})}
               onFocus={() => {
                 panels.focus(panel.id);
               }}
@@ -490,11 +483,7 @@ export function PanelArea({
         />
       ))}
       {panels.layout === null && (
-        <div
-          className={`absolute inset-x-0 top-0 flex h-10 items-center [-webkit-app-region:drag] ${clearsWindowButtons ? 'pl-[84px]' : ''}`}
-        >
-          {clearsWindowButtons && besideWindowButtons}
-        </div>
+        <div className="absolute inset-x-0 top-0 h-10 [-webkit-app-region:drag]" />
       )}
       {drop?.kind === 'area' && <DropZone zone="middle" />}
       <div role="status" className="sr-only">

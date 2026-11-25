@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { AccountsButton, AccountsPanel } from '../../accounts/renderer/accounts-panel';
 import { SignInPrompt, UsageNotice } from '../../accounts/renderer/session-notes';
@@ -114,6 +122,8 @@ export function App({ bridge }: { bridge: Bridge }) {
   const { t, i18n } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(!bridge.settings.initial.sidebarHidden);
   const sidebar = useRef<HTMLElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  const beside = useRef<HTMLDivElement>(null);
   const sidebarId = useId();
   const workspaces = useWorkspaces(bridge.workspaces);
   // The archived session last opened from the archived list, as the list showed it, until the main
@@ -238,6 +248,22 @@ export function App({ bridge }: { bridge: Bridge }) {
   useEffect(() => {
     bridge.settings.set({ sidebarHidden: !sidebarOpen }).catch(reportSidebar);
   }, [bridge.settings, sidebarOpen]);
+
+  // How wide what lies beside the window buttons is, which the header of the panel beneath it leaves
+  // room for while the sidebar is hidden (`--beside-window-buttons`).
+  useLayoutEffect(() => {
+    const [container, element] = [frame.current, beside.current];
+    if (container === null || element === null) return;
+    const measure = () => {
+      container.style.setProperty('--beside-window-buttons', `${String(element.offsetWidth)}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   // Beside the window buttons: the sidebar's button, the archived sessions' button, the accounts'
   // gauge, the settings' gear, whose panel ⌘, opens too, then the count of sessions waiting on the
@@ -930,7 +956,12 @@ export function App({ bridge }: { bridge: Bridge }) {
   }, [toggleSidebar]);
 
   return (
-    <div className="flex h-full">
+    <div ref={frame} className="relative flex h-full">
+      {/* Just after macOS's window buttons, where it stays as the sidebar opens and closes while the
+          sidebar's part of the title bar or the header of the panel at the top left moves beneath it. */}
+      <div ref={beside} className="absolute top-0 left-[84px] z-30 flex h-10 items-center">
+        {besideWindowButtons}
+      </div>
       <aside
         ref={sidebar}
         id={sidebarId}
@@ -939,13 +970,9 @@ export function App({ bridge }: { bridge: Bridge }) {
         className={`shrink-0 overflow-hidden select-none motion-safe:transition-[width] motion-safe:duration-200 ${sidebarOpen ? 'w-[220px]' : 'w-0'}`}
       >
         <div className="flex h-full w-[220px] flex-col border-r border-line">
-          {/* The sidebar's part of the title bar, where macOS draws the traffic lights, with the
-              sidebar's button, the archived sessions' button, the settings' gear and the count of
-              sessions waiting on the user just after them; no line separates it from the rest of the
-              sidebar. */}
-          <div className="flex h-10 shrink-0 items-center pl-[84px] [-webkit-app-region:drag]">
-            {sidebarOpen && besideWindowButtons}
-          </div>
+          {/* The sidebar's part of the title bar, where macOS draws the traffic lights, under what lies
+              beside them; no line separates it from the rest of the sidebar. */}
+          <div className="h-10 shrink-0 [-webkit-app-region:drag]" />
           <div className="flex min-h-0 flex-1 flex-col gap-4 px-2.5 pb-3.5">
             {/* The app's name, bold and compact, just below the title bar. */}
             <div className="shrink-0 truncate px-2 leading-5 font-bold">3mukon-code</div>
@@ -989,7 +1016,6 @@ export function App({ bridge }: { bridge: Bridge }) {
           sessionName={sessionName}
           view={view}
           clearsWindowButtons={!sidebarOpen}
-          besideWindowButtons={besideWindowButtons}
         />
       </main>
       <PromptHost bridge={bridge.prompts} />

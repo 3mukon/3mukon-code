@@ -220,6 +220,45 @@ test('Command-B and the sidebar’s button hide the sidebar and show it again', 
   });
 });
 
+test('as the sidebar closes and opens, the top-left panel’s title never passes beneath the buttons beside the traffic lights', async () => {
+  await withApp(async (electronApp) => {
+    const window = await electronApp.firstWindow();
+    await window.getByRole('button', { name: 'New session' }).click();
+    await window.getByRole('main').getByRole('region', { name: 'New session' }).waitFor();
+    // Presses the sidebar's button and, at every frame until the sidebar has stopped moving, measures
+    // how far the panel's title starts after the traffic lights, which take the title bar's first 84
+    // points, and the buttons just after them, wherever they are then; the least of it.
+    const leastGap = (button: string) =>
+      window.evaluate(async (name) => {
+        const toggle = () =>
+          document.querySelector(
+            'button[aria-label="Hide Sidebar"], button[aria-label="Show Sidebar"]',
+          );
+        const title = () =>
+          document.querySelector('main section header > span.touch-none > .truncate');
+        const press = document.querySelector(`button[aria-label="${name}"]`);
+        if (!(press instanceof HTMLElement) || title() === null)
+          throw new Error('Nothing to measure.');
+        let least = Infinity;
+        const end = performance.now() + 600;
+        press.click();
+        await new Promise<void>((done) => {
+          const measure = () => {
+            const beside = toggle()?.parentElement?.getBoundingClientRect().right ?? 84;
+            const left = title()?.getBoundingClientRect().left ?? Infinity;
+            least = Math.min(least, left - Math.max(84, beside));
+            if (performance.now() < end) requestAnimationFrame(measure);
+            else done();
+          };
+          measure();
+        });
+        return least;
+      }, button);
+    expect(await leastGap('Hide Sidebar')).toBeGreaterThanOrEqual(0);
+    expect(await leastGap('Show Sidebar')).toBeGreaterThanOrEqual(0);
+  });
+});
+
 test('the traffic lights are centred in the 40px title bar, on one line with the buttons beside them', async () => {
   await withApp(async (electronApp) => {
     const window = await electronApp.firstWindow();

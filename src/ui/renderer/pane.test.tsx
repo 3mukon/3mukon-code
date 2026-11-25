@@ -26,15 +26,23 @@ describe('Pane', () => {
     expect(pane.getAttribute('aria-current')).toBe('true');
   });
 
-  it('shows what it is given at the start of its header, before the title', () => {
-    render(
-      <Pane title="a.ts" focused onFocus={vi.fn()} clearsWindowButtons start={<b>2</b>}>
+  it('leaves room at the start of its header for the window buttons and what lies beside them, growing and shrinking to it', () => {
+    const { rerender } = render(
+      <Pane title="a.ts" focused onFocus={vi.fn()} clearsWindowButtons>
         <p>body</p>
       </Pane>,
     );
     const header = screen.getByRole('region', { name: 'a.ts' }).querySelector('header');
-    expect(header?.firstElementChild?.textContent).toBe('2');
-    expect(header?.className).toContain('pl-[84px]');
+    expect(header?.className).toContain(
+      'pl-[calc(84px_+_var(--beside-window-buttons,0px)_+_10px)]',
+    );
+    expect(header?.className).toContain('motion-safe:transition-[padding]');
+    rerender(
+      <Pane title="a.ts" focused onFocus={vi.fn()}>
+        <p>body</p>
+      </Pane>,
+    );
+    expect(header?.className).toContain('pl-5');
   });
 
   it('marks unsaved changes with a dot in its close button, which VoiceOver hears after the title', () => {
@@ -86,7 +94,7 @@ describe('Pane', () => {
     );
     const header = screen.getByRole('region', { name: 'web' }).querySelector('header');
     expect(header?.className).toContain('[-webkit-app-region:drag]');
-    expect(header?.className).toContain('pl-[84px]');
+    expect(header?.className).toContain('pl-[calc(84px');
     // The title and detail, which make the handle, and the button take clicks.
     const handle = screen.getByText('me').parentElement;
     expect(handle?.contains(screen.getByText('web'))).toBe(true);

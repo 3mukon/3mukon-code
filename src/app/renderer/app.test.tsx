@@ -357,7 +357,7 @@ describe('App', () => {
         .querySelector('header');
     expect(header()?.className).toContain('pl-5');
     fireEvent.keyDown(window, { key: 'b', metaKey: true });
-    expect(header()?.className).toContain('pl-[84px]');
+    expect(header()?.className).toContain('pl-[calc(84px');
   });
 
   it('hides and shows the sidebar from its button as with ⌘B, opens it as the user left it, and gives the focus to the focused panel when it hides with the focus inside', async () => {
@@ -369,13 +369,16 @@ describe('App', () => {
     bridge.settings = { ...bridge.settings, set };
     await renderApp(bridge);
     const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
-    const hide = within(sidebar).getByRole('button', { name: 'Hide Sidebar' });
+    const hide = screen.getByRole('button', { name: 'Hide Sidebar' });
     expect(hide.getAttribute('aria-expanded')).toBe('true');
     expect(hide.getAttribute('aria-controls')).toBe(sidebar.id);
     expect(hide.title).toBe('Hide Sidebar (⌘B)');
     fireEvent.click(hide);
     expect(sidebar.hasAttribute('inert')).toBe(true);
-    const show = within(screen.getByRole('main')).getByRole('button', { name: 'Show Sidebar' });
+    // The same button stays beside the window buttons, outside the hidden sidebar.
+    const show = screen.getByRole('button', { name: 'Show Sidebar' });
+    expect(show).toBe(hide);
+    expect(sidebar.contains(show)).toBe(false);
     expect(show.getAttribute('aria-expanded')).toBe('false');
     expect(show.title).toBe('Show Sidebar (⌘B)');
     expect(set).toHaveBeenLastCalledWith({ sidebarHidden: true });
@@ -443,34 +446,38 @@ describe('App', () => {
       ]),
     );
     const label = 'Sessions waiting on you: 2. Show the one waiting longest (⇧⌘A).';
-    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
-    fireEvent.click(within(sidebar).getByRole('button', { name: label }));
+    const count = screen.getByRole('button', { name: label });
+    fireEvent.click(count);
     within(screen.getByRole('main')).getByRole('region', { name: 'Update the docs' });
     // Just after the sidebar's button, the archived sessions' button and the settings' gear, which keep
-    // their places beside the window buttons; with the sidebar hidden, all of them lie in the top-left
-    // panel's header.
+    // their places beside the window buttons whether the sidebar shows or not; with it hidden, the
+    // top-left panel's header leaves room for them, and holds none of them.
     const named = (element: Element | null | undefined) =>
       [...(element?.querySelectorAll('button') ?? [])].map((button) =>
         button.getAttribute('aria-label'),
       );
-    expect(named(within(sidebar).getByRole('button', { name: label }).parentElement)).toEqual([
+    expect(named(count.parentElement)).toEqual([
       'Hide Sidebar',
       'Archived sessions',
       'Accounts',
       'Settings',
       label,
     ]);
+    expect(screen.getByRole('complementary', { name: 'Sidebar' }).contains(count)).toBe(false);
     fireEvent.keyDown(window, { key: 'b', metaKey: true });
-    const header = within(screen.getByRole('main'))
-      .getByRole('region', { name: 'Update the docs' })
-      .querySelector('header');
-    expect(named(header?.firstElementChild)).toEqual([
+    expect(screen.getByRole('button', { name: label })).toBe(count);
+    expect(named(count.parentElement)).toEqual([
       'Show Sidebar',
       'Archived sessions',
       'Accounts',
       'Settings',
       label,
     ]);
+    const header = within(screen.getByRole('main'))
+      .getByRole('region', { name: 'Update the docs' })
+      .querySelector('header');
+    expect(header?.className).toContain('pl-[calc(84px');
+    expect(named(header)).not.toContain(label);
   });
 
   it('shows a session waiting on an operation’s approval with the focus on that approval', async () => {
@@ -533,9 +540,8 @@ describe('App', () => {
     });
     bridge.automation = automation;
     await renderApp(bridge);
-    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
     fireEvent.click(
-      within(sidebar).getByRole('button', {
+      screen.getByRole('button', {
         name: 'Sessions waiting on you: 1. Show the one waiting longest (⇧⌘A).',
       }),
     );
