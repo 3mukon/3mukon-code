@@ -442,6 +442,28 @@ describe('the session tools', () => {
     expect(sessions.calls).toEqual([]);
   });
 
+  it('tells an agent whose models each provider runs, so that it can choose the provider a model needs', async () => {
+    const { client } = await session('lead', coordinator());
+    const start = (await client.listTools()).tools.find((tool) => tool.name === 'session_start');
+    const provider = start?.inputSchema.properties?.provider as
+      { enum: string[]; description: string } | undefined;
+    // Every provider alike, so that a provider added without its facts fails here as well.
+    const runs = {
+      'claude-code': 'Anthropic’s Claude models',
+      codex: 'OpenAI’s GPT models',
+      'grok-build': 'xAI’s Grok models',
+      antigravity: 'Google’s Gemini models',
+    };
+    expect(provider?.enum).toEqual(Object.keys(runs));
+    for (const [id, models] of Object.entries(runs)) {
+      expect(provider?.description).toContain(`${id} runs ${models}`);
+    }
+    expect(provider?.description).toContain(
+      'Each may also offer other makers’ models that its account or its own settings add.',
+    );
+    expect(start?.description).toContain('A child can run on any provider, not only yours');
+  });
+
   it('calls the sessions as the session whose access calls, never as one its arguments name', async () => {
     const sessions = coordinator();
     const { client } = await session('lead', sessions);

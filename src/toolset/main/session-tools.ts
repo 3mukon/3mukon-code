@@ -4,6 +4,7 @@ import type {
   InboxEntry,
   SessionCoordinator,
 } from '../../sessions/main/provider';
+import type { ProviderId } from '../../sessions/shared/events';
 import { CHILD_LIMIT, MESSAGE_LIMITS } from '../../sessions/shared/inbox';
 
 // One of the tools through which sessions coordinate (ADR-0036): served beside the automation
@@ -25,6 +26,22 @@ export interface SessionTool {
 
 const sessionId = z.string().min(1).max(128);
 
+// Each provider a child can run on, by the same two facts: who makes the models it runs, and their
+// family. An agent asked to have a model do some work needs the provider behind the model, which a
+// provider's id does not always say; agents name providers by their ids, and the providers' names are
+// the i18n catalogs'. Every provider needs an entry, or this does not compile.
+const PROVIDERS: Record<ProviderId, { maker: string; family: string }> = {
+  'claude-code': { maker: 'Anthropic', family: 'Claude' },
+  codex: { maker: 'OpenAI', family: 'GPT' },
+  'grok-build': { maker: 'xAI', family: 'Grok' },
+  antigravity: { maker: 'Google', family: 'Gemini' },
+};
+
+// The providers as the provider argument describes them, every one in the same words.
+const PROVIDER_LINES = Object.entries(PROVIDERS)
+  .map(([id, { maker, family }]) => `${id} runs ${maker}’s ${family} models`)
+  .join('; ');
+
 // The session tools: listing sessions, starting and ending child sessions, sending messages and
 // reading the inbox.
 export function sessionTools(): SessionTool[] {
@@ -39,21 +56,27 @@ export function sessionTools(): SessionTool[] {
           'The child’s first message, which is its task: a self-contained brief with the goal, the scope, what to leave alone, and what to report back to you, and when.',
         ),
       provider: z
-        .enum(['claude-code', 'codex', 'grok-build', 'antigravity'])
+        .enum(Object.keys(PROVIDERS) as [ProviderId, ...ProviderId[]])
         .optional()
-        .describe('The child’s provider; yours when left out.'),
+        .describe(
+          `The child’s provider, which decides the models it can use: ${PROVIDER_LINES}. Each may also offer other makers’ models that its account or its own settings add. Yours when left out.`,
+        ),
       model: z
         .string()
         .min(1)
         .max(200)
         .optional()
-        .describe('A model the provider offers; yours, or the provider’s default, when left out.'),
+        .describe(
+          'A model the child’s provider offers, by its name there; yours when the child has your provider, and otherwise that provider’s default, when left out.',
+        ),
       effort: z
         .string()
         .min(1)
         .max(32)
         .optional()
-        .describe('A reasoning effort level the model takes, such as low, medium or high.'),
+        .describe(
+          'A reasoning effort level the child’s model takes, such as low, medium or high; yours when the child has your model, and otherwise the model’s default, when left out.',
+        ),
       sandbox: z
         .enum(['read-only', 'workspace-write', 'full-access'])
         .optional()
@@ -114,7 +137,7 @@ export function sessionTools(): SessionTool[] {
     },
     {
       name: 'session_start',
-      description: `Start a child session that works beside you, in your folder, on the task its first message gives it; it starts once it has taken that message. It runs in auto mode with your sandbox level or a narrower one, its approvals go to the user, and it uses your provider, model and effort unless you choose others. It can message you with message_send, and you it. A child starts no sessions of its own, and at most ${String(CHILD_LIMIT)} of your children run at once. End a child with session_end once its work is done.`,
+      description: `Start a child session that works beside you, in your folder, on the task its first message gives it; it starts once it has taken that message. It runs in auto mode with your sandbox level or a narrower one, its approvals go to the user, and it uses your provider, model and effort unless you choose others. A child can run on any provider, not only yours, and its provider decides which models it can use: to have a particular model do the work, choose the provider that runs it, as the provider field says. It can message you with message_send, and you it. A child starts no sessions of its own, and at most ${String(CHILD_LIMIT)} of your children run at once. End a child with session_end once its work is done.`,
       inputSchema: start,
       offered: (coordinator, owner) => coordinator.mayStart(owner),
       call: async (coordinator, owner, args) => {
