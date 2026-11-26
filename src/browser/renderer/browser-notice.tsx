@@ -4,6 +4,7 @@ import type { ProfileSummary } from '../../sessions/shared/automation';
 import { Button } from '../../ui/renderer/button';
 import { CircleAlert } from '../../ui/renderer/icons';
 import { Menu } from '../../ui/renderer/menu';
+import { stateColors } from '../../ui/renderer/state-label';
 import { ChromeInstallHelp } from './chrome-install-help';
 import {
   chromeProfile,
@@ -22,14 +23,6 @@ export interface BrowserSetupSteps {
   connectChrome: (profileId: string) => Promise<boolean>;
   copyFolder?: (path: string) => Promise<void>;
 }
-
-// The tones of Chrome's state, as Settings' items have them.
-const toneColors = {
-  muted: 'text-muted',
-  success: 'text-run',
-  error: 'text-del',
-  attention: 'text-wait',
-} as const;
 
 // A session's notice that browser use needs Chrome connected. Connect starts the setup Settings
 // starts, connecting the only profile or the one chosen from a menu of their names; from that
@@ -122,7 +115,7 @@ export function BrowserSetupNotice({ steps }: { steps: BrowserSetupSteps }) {
           />
         ) : (
           <p className="flex min-w-0 items-baseline gap-1.5">
-            <span className={toneColors[state.tone]}>{state.state}</span>
+            <span className={stateColors[state.tone]}>{state.state}</span>
             {profile !== null && (
               <span className="min-w-0 truncate text-faint">
                 {t('browser.chrome.profileLine', { profile: profile.name })}

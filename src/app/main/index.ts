@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron';
-import { Accounts, usageStorage } from '../../accounts/main/accounts';
+import { Accounts, realTimers, usageStorage } from '../../accounts/main/accounts';
 import { windowAccountsUi } from '../../accounts/main/native';
 import type { AccountSource } from '../../accounts/main/source';
 import { dockAttention } from '../../approvals/main/dock';
@@ -23,7 +23,9 @@ import { choiceStorage, RememberedChoices } from '../../sessions/main/choices';
 import { dayRoot } from '../../sessions/main/folders';
 import { SessionHost } from '../../sessions/main/host';
 import { windowSessionsUi } from '../../sessions/main/native';
+import type { ProviderInstall } from '../../installs/main/install';
 import type { Provider } from '../../sessions/main/provider';
+import type { ProviderId } from '../../sessions/shared/events';
 import { inboxStorage, SessionInboxes } from '../../sessions/main/inbox';
 import type { SessionCoordinator } from '../../sessions/main/provider';
 import { recordStorage, SessionRecords } from '../../sessions/main/records';
@@ -40,6 +42,7 @@ import { Terminals } from '../../terminal/main/terminals';
 import { panelTools } from '../../toolset/main/panel-tools';
 import type { AutomationTool } from '../../toolset/main/execution';
 import { loginShellPath } from './shell-path';
+import { providerInstalls } from './provider-installs';
 import { startToolset, type RunningToolset } from '../../toolset/main/server';
 import { windowWorkspacesUi } from '../../workspaces/main/native';
 import { fileStorage } from '../../workspaces/main/storage';
@@ -181,7 +184,8 @@ void app
       app.isPackaged ? loginShellPath(loginShell()) : Promise.resolve(null),
     ]);
     if (shellPath !== null) process.env.PATH = shellPath;
-    const adapters = providers(data, version, toolset);
+    const installs = providerInstalls(data);
+    const adapters = providers(installs, version, toolset);
     // The sessions the app starts, kept in its data, which later runs list and resume, with the text
     // of each one's messages, which the lists search.
     const sessions = new SessionHost(
@@ -215,7 +219,12 @@ void app
       });
     }
     // The providers' sign-ins and usage limits, the usage kept in the app's data (ADR-0017).
-    const accounts = new Accounts(adapters, usageStorage(data));
+    const accounts = new Accounts(
+      adapters,
+      usageStorage(data),
+      realTimers,
+      Object.values(installs),
+    );
     // The terminals the windows open, each running the user's login shell or a sign-in command.
     const terminals = new Terminals(spawnPty, {
       shell: loginShell(),
@@ -367,17 +376,19 @@ async function startToolsetIfPossible(
   }
 }
 
-// The providers, each through its adapter, which also reads its account. Grok Build unpacks its binary
-// into a folder of the app's data the first time a session needs it.
+// The providers, each through its adapter, which also reads its account, and runs the user's CLI or the
+// app's own copy (ADR-0039).
 function providers(
-  data: string,
+  installs: Record<ProviderId, ProviderInstall>,
   version: string,
   toolset: RunningToolset | undefined,
 ): (Provider & AccountSource)[] {
   return [
-    createClaudeCodeProvider(),
-    ...(toolset === undefined ? [] : [createCodexProvider({ clientVersion: version })]),
-    createGrokBuildProvider({ binaryFolder: join(data, 'grok-build'), clientVersion: version }),
+    createClaudeCodeProvider({ install: installs['claude-code'] }),
+    ...(toolset === undefined
+      ? []
+      : [createCodexProvider({ install: installs.codex, clientVersion: version })]),
+    createGrokBuildProvider({ install: installs['grok-build'], clientVersion: version }),
   ];
 }
 

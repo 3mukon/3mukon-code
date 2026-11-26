@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+import type { ProviderInstall } from '../../../installs/main/install';
 import type { ToolsetAccess } from '../../../sessions/main/provider';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,6 +16,16 @@ import type { Availability } from '../../../sessions/shared/automation';
 import type { SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
 import { createClaudeCodeProvider } from './adapter';
 import { sandboxSettings } from './sandbox';
+
+// The app's copy of Claude Code that the adapter runs, which the SDK's fake never starts.
+const binary = { path: '/test/claude', version: '2.1.330', source: 'app' } as const;
+const install: ProviderInstall = {
+  provider: 'claude-code',
+  current: () => Promise.resolve(binary),
+  prepare: () => Promise.resolve(binary),
+  view: () => Promise.resolve({ runs: { source: 'app', version: '2.1.330' }, pinned: '2.1.330' }),
+  onChange: () => () => undefined,
+};
 
 interface QueryParams {
   prompt: AsyncIterable<unknown>;
@@ -191,7 +202,7 @@ async function startSession(
   options: { gateway?: string; model?: string; effort?: string; sandbox?: SandboxLevel } = {},
 ) {
   const events: SessionEvent[] = [];
-  const provider = createClaudeCodeProvider({ gatewaysDir });
+  const provider = createClaudeCodeProvider({ gatewaysDir, install });
   const session = await provider.start({ cwd: '/work', ...options }, (event) => {
     events.push(event);
   });
@@ -202,7 +213,7 @@ async function startSession(
 async function startBound(gateway?: string) {
   const events: SessionEvent[] = [];
   const availability = vi.fn<(value: Availability) => void>();
-  const session = await createClaudeCodeProvider({ gatewaysDir }).start(
+  const session = await createClaudeCodeProvider({ gatewaysDir, install }).start(
     {
       cwd: '/work',
       ...(gateway === undefined ? {} : { gateway }),
@@ -262,7 +273,7 @@ describe('the Claude Code provider', () => {
         },
       };
       const events: SessionEvent[] = [];
-      const provider = createClaudeCodeProvider({ gatewaysDir });
+      const provider = createClaudeCodeProvider({ gatewaysDir, install });
       const session = await provider.start({ cwd: '/work', mode, toolset: bound }, (e) =>
         events.push(e),
       );
@@ -389,6 +400,9 @@ describe('the Claude Code provider', () => {
   it('starts a session with the chosen gateway, model and effort, and reports them and the models', async () => {
     const { events } = await startSession({ gateway: 'work', model: 'opus', effort: 'high' });
     expect(current().params.options).toMatchObject({
+      // The app's copy, which runs with Claude Code's updater off, since it follows the pin.
+      pathToClaudeCodeExecutable: '/test/claude',
+      env: { DISABLE_AUTOUPDATER: '1' },
       settings: join(gatewaysDir, 'work.json'),
       model: 'opus',
       effort: 'high',
@@ -415,7 +429,7 @@ describe('the Claude Code provider', () => {
   });
 
   it('refuses a gateway that does not exist and an effort Claude Code does not have', async () => {
-    const provider = createClaudeCodeProvider({ gatewaysDir });
+    const provider = createClaudeCodeProvider({ gatewaysDir, install });
     const ignore = () => undefined;
     await expect(provider.start({ cwd: '/work', gateway: 'gone' }, ignore)).rejects.toThrow(
       'does not exist',
@@ -427,16 +441,17 @@ describe('the Claude Code provider', () => {
   });
 
   it('lists gateways, and models from a probe that gets no message, with the model a session uses marked', async () => {
-    const provider = createClaudeCodeProvider({ gatewaysDir });
+    const provider = createClaudeCodeProvider({ gatewaysDir, install });
     expect(await provider.listGateways()).toEqual(['work']);
     // Through a gateway, the probe reads only the gateway's file.
     expect(await provider.listModels('work')).toEqual([opus]);
     const probe = current();
     expect(probe.params.options).toMatchObject({
+      pathToClaudeCodeExecutable: '/test/claude',
       settingSources: [],
       persistSession: false,
       settings: join(gatewaysDir, 'work.json'),
-      env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+      env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', DISABLE_AUTOUPDATER: '1' },
     });
     expect(probe.closed).toBe(true);
     expect(probe.inputs).toEqual([]);
@@ -451,7 +466,7 @@ describe('the Claude Code provider', () => {
   });
 
   it('keeps Claude Code’s own default row when no other row is the model a session uses', async () => {
-    const provider = createClaudeCodeProvider({ gatewaysDir });
+    const provider = createClaudeCodeProvider({ gatewaysDir, install });
     fakes.usage.model = 'claude-elsewhere';
     expect((await provider.listModels(null)).map((model) => [model.id, model.default])).toEqual([
       ['default', true],
@@ -462,7 +477,7 @@ describe('the Claude Code provider', () => {
   it('closes a probe that has not started within 30 seconds, and fails the list', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     fakes.stalled.add('initializationResult');
-    const listing = createClaudeCodeProvider({ gatewaysDir }).listModels(null);
+    const listing = createClaudeCodeProvider({ gatewaysDir, install }).listModels(null);
     const failed = expect(listing).rejects.toThrow('did not start in time');
     await vi.waitFor(() => {
       expect(fakes.queries).toHaveLength(1);
@@ -475,7 +490,7 @@ describe('the Claude Code provider', () => {
   it('keeps Claude Code’s own default row marked when its count of the context takes too long', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     fakes.stalled.add('getContextUsage');
-    const listing = createClaudeCodeProvider({ gatewaysDir }).listModels(null);
+    const listing = createClaudeCodeProvider({ gatewaysDir, install }).listModels(null);
     await vi.waitFor(() => {
       expect(fakes.queries).toHaveLength(1);
     });
@@ -493,9 +508,12 @@ describe('a Claude Code session', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     fakes.stalled.add('getContextUsage');
     const events: SessionEvent[] = [];
-    const starting = createClaudeCodeProvider({ gatewaysDir }).start({ cwd: '/work' }, (event) => {
-      events.push(event);
-    });
+    const starting = createClaudeCodeProvider({ gatewaysDir, install }).start(
+      { cwd: '/work' },
+      (event) => {
+        events.push(event);
+      },
+    );
     await vi.waitFor(() => {
       expect(fakes.queries).toHaveLength(1);
     });
@@ -542,7 +560,7 @@ describe('a Claude Code session', () => {
   });
 
   it('writes a title in a Claude Code of its own that keeps no transcript and runs no tools, with the session’s model and effort', async () => {
-    const provider = createClaudeCodeProvider({ gatewaysDir });
+    const provider = createClaudeCodeProvider({ gatewaysDir, install });
     const writing = provider.writeTitle?.({
       gateway: 'work',
       model: 'opus',
@@ -577,7 +595,7 @@ describe('a Claude Code session', () => {
   });
 
   it('fails a title whose turn ends in an error, on the user’s own settings without a gateway', async () => {
-    const provider = createClaudeCodeProvider({ gatewaysDir });
+    const provider = createClaudeCodeProvider({ gatewaysDir, install });
     const writing = provider.writeTitle?.({
       gateway: null,
       model: null,
@@ -682,7 +700,7 @@ describe('a Claude Code session', () => {
   });
 
   it('gives back the notices of new messages from Claude Code’s transcript', async () => {
-    const provider = createClaudeCodeProvider({ gatewaysDir });
+    const provider = createClaudeCodeProvider({ gatewaysDir, install });
     vi.mocked(getSessionMessages).mockResolvedValueOnce([
       {
         type: 'user',
@@ -901,7 +919,7 @@ describe('a Claude Code session', () => {
   });
 
   it('reads the history from Claude Code’s transcript, with the title Claude Code keeps, if any', async () => {
-    const provider = createClaudeCodeProvider({ gatewaysDir });
+    const provider = createClaudeCodeProvider({ gatewaysDir, install });
     vi.mocked(getSessionMessages).mockResolvedValueOnce([
       {
         type: 'user',
@@ -945,7 +963,9 @@ describe('a Claude Code session', () => {
         firstPrompt: 'x',
       },
     ]);
-    expect(await createClaudeCodeProvider({ gatewaysDir }).listSessions('/work', 10)).toEqual([
+    expect(
+      await createClaudeCodeProvider({ gatewaysDir, install }).listSessions('/work', 10),
+    ).toEqual([
       { id: 'a', title: 'First', cwd: '/work', updatedAt: 2 },
       { id: 'b', title: 'Named', cwd: '/work', updatedAt: 1 },
     ]);
@@ -961,7 +981,7 @@ describe('a Claude Code session', () => {
 
 describe('closing the Claude Code provider', () => {
   it('waits for its probes’ Claude Code to exit as it closes, and starts no more', async () => {
-    const provider = createClaudeCodeProvider({ gatewaysDir });
+    const provider = createClaudeCodeProvider({ gatewaysDir, install });
     // The answer comes before the probe's process has exited.
     expect(await provider.listModels(null)).toEqual([opus]);
     const child = current().child;

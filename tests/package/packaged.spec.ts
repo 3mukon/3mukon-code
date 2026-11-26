@@ -1,7 +1,16 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
+import { providerCopies } from '../provider-copies';
 import { isolatedEnvironment } from '../smoke/app';
 
 // The packaged app, as scripts/package.sh builds it.
@@ -14,7 +23,34 @@ test('the packaged app names its Chrome extension’s build', () => {
   );
 });
 
-test('the packaged app starts, and runs each provider’s binary and a terminal from outside its archive', async () => {
+// The names of the files the app's archive holds, from its header: a size, then the header's JSON.
+function archiveHeader(archive: string): string {
+  const file = openSync(archive, 'r');
+  try {
+    const sizes = Buffer.alloc(16);
+    readSync(file, sizes, 0, 16, 0);
+    const header = Buffer.alloc(sizes.readUInt32LE(12));
+    readSync(file, header, 0, header.length, 16);
+    return header.toString('utf8');
+  } finally {
+    closeSync(file);
+  }
+}
+
+test('the packaged app carries the Claude Agent SDK’s code and no provider’s binary', () => {
+  const resources = join(executable, '..', '..', 'Resources');
+  const header = archiveHeader(join(resources, 'app.asar'));
+  expect(header).toContain('"claude-agent-sdk"');
+  expect(header).not.toContain('claude-agent-sdk-darwin-arm64');
+  expect(header).not.toContain('codex-darwin-arm64');
+  expect(header).not.toContain('grok-darwin-arm64');
+  expect(existsSync(join(resources, 'app.asar.unpacked', 'node_modules', '@anthropic-ai'))).toBe(
+    false,
+  );
+  expect(existsSync(join(resources, 'app.asar.unpacked', 'node_modules', '@openai'))).toBe(false);
+});
+
+test('the packaged app starts, and runs each provider’s CLI and a terminal from outside its archive', async () => {
   const data = mkdtempSync(join(tmpdir(), '3mukon-code-packaged-'));
   // The app starts in the isolated environment, each provider reading settings in the throwaway
   // folder, which sign it in to nothing, so that the test reads none of the user's accounts and asks
@@ -22,7 +58,12 @@ test('the packaged app starts, and runs each provider’s binary and a terminal 
   // PATH, as when opened from the Finder.
   const app = await electron.launch({
     executablePath: executable,
-    args: [`--user-data-dir=${join(data, 'app')}`, '--lang=en-US'],
+    // The providers' CLIs are copies of the pinned packages' binaries, never the developer's (ADR-0039).
+    args: [
+      `--user-data-dir=${join(data, 'app')}`,
+      `--provider-path=${providerCopies(data)}`,
+      '--lang=en-US',
+    ],
     env: { ...isolatedEnvironment(data), PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
   });
   try {
@@ -32,8 +73,7 @@ test('the packaged app starts, and runs each provider’s binary and a terminal 
     // window opens (ADR-0019).
     expect(await app.evaluate(() => process.env.PATH)).toContain('/usr/local/bin');
     await expect(window.getByRole('heading', { name: 'Sessions' })).toBeVisible();
-    // Each provider answers that it is signed in to nothing: Claude Code's and Codex's binaries run
-    // from beside the archive, and Grok Build's is unpacked from inside it into the app's data.
+    // Each provider answers that it is signed in to nothing, from the test's copy of its CLI.
     await window.getByRole('button', { name: 'Accounts' }).click();
     const accounts = window.getByRole('main').getByRole('region', { name: 'Accounts' });
     for (const provider of ['Claude Code', 'Codex CLI', 'Grok Build']) {

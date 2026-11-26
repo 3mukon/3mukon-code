@@ -30,7 +30,7 @@ export interface InboxStorage {
   save(messages: InboxMessage[]): void;
 }
 
-// session-inbox.json in the folder, the app's data folder (ADR-0004), readable by the user alone. A
+// session-inbox.json in the folder, the app's data folder (ADR-0039), readable by the user alone. A
 // file that is not JSON is cleared, and an entry of another shape is left out.
 export function inboxStorage(folder: string): InboxStorage {
   const store = new ElectronStore<Record<string, unknown>>({

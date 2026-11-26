@@ -61,7 +61,13 @@ export interface AccountViews {
   signedOut(provider: ProviderId): boolean;
   // Whether the provider is known to be signed in, which a new page prefers.
   signedIn(provider: ProviderId): boolean;
-  // Says that the provider is not signed in and offers its sign-in, at the top of the activity.
+  // Whether the provider is known not to be installed: neither the user's CLI nor the app's copy runs,
+  // which its choice says and its sign-in mends (ADR-0039).
+  notInstalled(provider: ProviderId): boolean;
+  // Whether the app is downloading its copy of the provider, whose progress the sign-in's place shows.
+  downloading(provider: ProviderId): boolean;
+  // Says that the provider is not signed in, or not installed, and offers its sign-in, or a
+  // download's progress, at the top of the activity.
   signIn(provider: ProviderId): ReactNode;
   // The provider's notice of its usage limits, beside the context in use, or null.
   notice(provider: ProviderId): ReactNode;
@@ -168,7 +174,11 @@ export function SessionPage({
   );
   const automatic =
     remembered !== undefined &&
-    !(accounts?.signedOut(remembered.provider) === true && signedIn.length > 0)
+    !(
+      (accounts?.signedOut(remembered.provider) === true ||
+        accounts?.notInstalled(remembered.provider) === true) &&
+      signedIn.length > 0
+    )
       ? remembered.provider
       : (signedIn[0] ?? firstChoice.provider);
   const startsWith = kept ?? automatic;
@@ -437,9 +447,11 @@ export function SessionPage({
           options: (offers.providers ?? [provider]).map((id) => ({
             value: id,
             label:
-              accounts?.signedOut(id) === true
-                ? t('sessions.page.notSignedIn', { provider: t(`providers.${id}`) })
-                : t(`providers.${id}`),
+              accounts?.notInstalled(id) === true
+                ? t('sessions.page.notInstalled', { provider: t(`providers.${id}`) })
+                : accounts?.signedOut(id) === true
+                  ? t('sessions.page.notSignedIn', { provider: t(`providers.${id}`) })
+                  : t(`providers.${id}`),
           })),
           onChange: switchTo.provider,
         }
@@ -529,7 +541,10 @@ export function SessionPage({
           className="relative min-h-0 overflow-y-auto px-5 pt-2 pb-5 font-mono text-[12.5px]/[1.75] text-muted"
         >
           <div ref={activity}>
-            {accounts?.signedOut(provider) === true && accounts.signIn(provider)}
+            {(accounts?.signedOut(provider) === true ||
+              accounts?.notInstalled(provider) === true ||
+              accounts?.downloading(provider) === true) &&
+              accounts.signIn(provider)}
             {/* Said only once the history has taken a while, so that one read quickly, or ahead,
                 shows at once in its place. */}
             {closed && state.loadingHistory && (

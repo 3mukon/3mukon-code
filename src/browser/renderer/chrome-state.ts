@@ -1,5 +1,6 @@
 import type { TFunction } from 'i18next';
 import type { SetupSnapshot } from '../../sessions/shared/automation';
+import type { StateTone } from '../../ui/renderer/state-label';
 
 export type ChromeSetup = SetupSnapshot['chrome'];
 
@@ -11,7 +12,7 @@ export type ChromeSetup = SetupSnapshot['chrome'];
 export function chromeState(
   chrome: ChromeSetup,
   t: TFunction,
-): { state: string; tone: 'muted' | 'success' | 'error' | 'attention' } | null {
+): { state: string; tone: StateTone } | null {
   if (chrome.connection === 'connected')
     return { state: t('browser.chrome.connected'), tone: 'success' };
   if (chrome.installedVersion === null)

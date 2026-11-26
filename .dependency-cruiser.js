@@ -129,18 +129,33 @@ export default {
     {
       name: 'accounts-only-to-sessions-model-ui-and-i18n',
       comment:
-        "The accounts module names the providers by the sessions module's model and uses the ui and i18n modules; the app module hands it the adapters (src/accounts/README.md).",
+        "The accounts module names the providers by the sessions module's model, shows what the installs module says of their CLIs, and uses the ui and i18n modules; the app module hands it the adapters and their installs (src/accounts/README.md).",
       severity: 'error',
       from: { path: '^src/accounts/' },
       to: {
         path: '^src/',
-        pathNot: ['^src/accounts/', '^src/sessions/shared/', '^src/ui/', '^src/i18n/'],
+        pathNot: [
+          '^src/accounts/',
+          '^src/sessions/shared/',
+          '^src/installs/main/install\\.ts$',
+          '^src/installs/shared/',
+          '^src/ui/',
+          '^src/i18n/',
+        ],
       },
+    },
+    {
+      name: 'installs-only-to-sessions-model',
+      comment:
+        "The installs module names the providers by the sessions module's model and uses nothing else of the app's; the adapters describe their CLIs to it (src/installs/README.md).",
+      severity: 'error',
+      from: { path: '^src/installs/' },
+      to: { path: '^src/', pathNot: ['^src/installs/', '^src/sessions/shared/'] },
     },
     {
       name: 'providers-only-to-sessions-and-accounts-contracts',
       comment:
-        'A provider adapter uses only the sessions interface and model and the accounts interface and model, never other modules or UI code (src/providers/claude-code/README.md).',
+        'A provider adapter uses only the sessions interface and model, the accounts interface and model, and the installs interface and model, never other modules or UI code (src/providers/claude-code/README.md).',
       severity: 'error',
       from: { path: '^src/providers/', pathNot: '\\.live\\.test\\.ts$' },
       to: {
@@ -151,6 +166,8 @@ export default {
           '^src/sessions/shared/',
           '^src/accounts/main/source\\.ts$',
           '^src/accounts/shared/',
+          '^src/installs/main/install\\.ts$',
+          '^src/installs/shared/',
         ],
       },
     },
@@ -168,6 +185,8 @@ export default {
           '^src/sessions/shared/',
           '^src/accounts/main/source\\.ts$',
           '^src/accounts/shared/',
+          '^src/installs/main/install\\.ts$',
+          '^src/installs/shared/',
           '^src/toolset/main/server\\.ts$',
         ],
       },

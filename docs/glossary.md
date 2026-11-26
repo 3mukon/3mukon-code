@@ -18,6 +18,8 @@ One name per concept: naming and search follow the Term column, and Avoid lists 
 | maintainer | The person who owns this repository's hard base and approves changes to it | owner, admin |
 | provider | A coding-agent tool the app drives through its own SDK or CLI: Claude Code, Codex or Grok Build | backend, engine |
 | permission mode | What a session asks the user before acting: auto or yolo (ADR-0006) | approval mode |
+| user's CLI | A provider's command-line tool that the user installed and keeps up to date, which the app runs where it is on the PATH at or above the oldest version the adapter drives (ADR-0039) | local install, system CLI |
+| app's copy | A provider's official build at the version and checksum the app pins, which the app downloads into its data folder and runs where it has no user's CLI to run (ADR-0039) | bundled binary, managed install |
 | remote host | A machine other than the user's Mac on which agent sessions or their supporting services run; it may run Linux | server (for this meaning), remote machine |
 | session | One conversation with one provider's agent in one working directory | chat, thread, conversation |
 | session page | A panel that chooses a session's settings and starts the session with its first message, and then shows it | new-session dialog, draft |

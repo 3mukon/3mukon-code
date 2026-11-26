@@ -14,7 +14,7 @@ export interface WorkspaceStorage {
   save(workspaces: StoredWorkspaces): void;
 }
 
-// workspaces.json in the folder, the app's data folder (ADR-0004), readable by the user alone. A file
+// workspaces.json in the folder, the app's data folder (ADR-0039), readable by the user alone. A file
 // that is not JSON is cleared, and one that holds something else counts as no workspaces until the
 // next change replaces it.
 export function fileStorage(folder: string): WorkspaceStorage {

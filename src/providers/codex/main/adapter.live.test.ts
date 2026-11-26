@@ -18,6 +18,7 @@ import {
 } from '../../../sessions/shared/session-state';
 import { startToolset, type RunningToolset } from '../../../toolset/main/server';
 import { createCodexProvider } from './adapter';
+import { pinnedInstall } from '../../../../tests/provider-copies';
 
 // Drives a real Codex session on the signed-in account, in a throwaway folder, on a small model at low
 // effort, with the app's toolset. Only `corepack pnpm run test:live` runs it, never the check command:
@@ -89,7 +90,11 @@ it('runs turns in auto, writes a file, asks with Codex’s own question tool, sw
     mode: 'auto',
     sandbox: 'workspace-write',
   });
-  const provider = createCodexProvider({ toolset: automation.toolset, gatewaysDir });
+  const provider = createCodexProvider({
+    toolset: automation.toolset,
+    gatewaysDir,
+    install: pinnedInstall('codex'),
+  });
   expect(await provider.listGateways()).toEqual(['plain']);
   const models = await provider.listModels(null);
   // Small models keep the test cheap.

@@ -124,7 +124,8 @@
       "showMarkdown": "Show as Markdown",
       "copy": "Copy message",
       "copied": "Copied",
-      "notSignedIn": "{{provider}} (not signed in)"
+      "notSignedIn": "{{provider}} (not signed in)",
+      "notInstalled": "{{provider}} (not installed)"
     },
     "tool": {
       "named": "{{kind}}:",
@@ -597,6 +598,7 @@
     "title": "Accounts",
     "signIn": "Sign In",
     "signInPrompt": "{{provider}} is not signed in.",
+    "signInPromptInstall": "{{provider}} is not installed. Sign In downloads it first.",
     "state": {
       "subscription": "Signed in with a subscription",
       "key": "Signed in with an API key",
@@ -605,6 +607,22 @@
       "unknown": "Sign-in not known yet"
     },
     "checking": "Checking…",
+    "install": {
+      "notInstalled": "Not installed",
+      "user": "Runs your CLI, {{version}}",
+      "app": "Runs the app’s copy, {{version}}",
+      "download": "Sign In downloads the app’s copy, {{version}}, first.",
+      "older": "Your CLI at {{path}} is {{version}}, older than {{oldest}}, the oldest the app runs.",
+      "unread": "The app couldn’t read the version of your CLI at {{path}}.",
+      "update": "Updates to {{version}} at the next sign-in or session.",
+      "downloading": "Downloading {{version}}… {{progress}}",
+      "failed": {
+        "network": "The download failed: its address couldn’t be reached. Sign In tries again.",
+        "checksum": "The download didn’t match its checksum, so none of it runs. Sign In tries again.",
+        "unpack": "The download couldn’t be unpacked. Sign In tries again.",
+        "folder": "The app’s data folder wouldn’t take the download. Sign In tries again."
+      }
+    },
     "window": {
       "five-hour": "5-hour limit",
       "day": "Daily limit",

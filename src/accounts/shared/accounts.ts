@@ -1,3 +1,4 @@
+import type { InstallView } from '../../installs/shared/installs';
 import type { ProviderId } from '../../sessions/shared/events';
 
 // How a provider is signed in: with a subscription, with an API key, or through another backend, such
@@ -52,6 +53,9 @@ export interface Usage {
 export interface ProviderAccount {
   provider: ProviderId;
   signIn: SignIn;
+  // Where the provider's processes come from: the user's CLI or the app's own copy, or neither
+  // (ADR-0039); missing until the app has looked.
+  install?: InstallView;
   // A subscription's usage limits, once read, kept from an earlier run until read anew.
   usage?: Usage;
   // Why the last read of a subscription's usage could not give it, until one does.

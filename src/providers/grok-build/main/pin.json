@@ -1,0 +1,8 @@
+{
+  "version": "1.0.92",
+  "url": "https://registry.npmjs.org/@xai-official/grok-darwin-arm64/-/grok-darwin-arm64-1.0.92.tgz",
+  "integrity": "sha512-sWqlpZz9xHMOfRa66iHBDkSG6BjRrEBSqALpVaCvuQZ/s3ZeME3+1YUXi1JLfq9DY5j0po6Yi34cf9791yqygg==",
+  "folder": "package/bin",
+  "binary": "grok.br",
+  "brotli": true
+}

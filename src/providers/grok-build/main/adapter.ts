@@ -51,8 +51,8 @@ import type {
   SessionEvent,
 } from '../../../sessions/shared/events';
 import type { AccountNews, AccountSource } from '../../../accounts/main/source';
+import type { ProviderInstall } from '../../../installs/main/install';
 import { isSignInError, readGrokAccount } from './account';
-import { bundledGrokBinary } from './binary';
 import { spawnGrok, type GrokProcess, type StartGrok } from './process';
 import {
   ASK_USER_QUESTION,
@@ -141,11 +141,11 @@ export type GrokBuildProviderOptions = {
   clientVersion?: string;
 } & (
   | {
-      // The folder the bundled binary is unpacked into, which the app keeps for it.
-      binaryFolder: string;
+      // Where Grok Build's processes come from: the user's CLI or the app's own copy (ADR-0039).
+      install: ProviderInstall;
     }
   | {
-      // Starts a Grok Build process; tests put a fake in place of the bundled one.
+      // Starts a Grok Build process; tests put a fake in place of Grok Build.
       startGrok: StartGrok;
     }
 );
@@ -192,18 +192,28 @@ interface AccountLink {
 export function createGrokBuildProvider(
   options: GrokBuildProviderOptions,
 ): Provider & AccountSource {
-  const startGrok =
-    'startGrok' in options ? options.startGrok : startBundledGrok(options.binaryFolder);
-  const binaryFolder = 'binaryFolder' in options ? options.binaryFolder : undefined;
   const clientVersion = options.clientVersion ?? '0.0.0';
-  const connect: Connect = (cwd, sandbox, handlers, hostTools) =>
-    connectGrok(startGrok, cwd, sandbox, handlers, clientVersion, hostTools);
+  // A session's processes all run the binary it started with, which a session downloads first where
+  // the app has to run its own copy and has none of the pinned version (ADR-0039).
+  const sessionConnect = async (): Promise<Connect> => {
+    const startGrok =
+      'startGrok' in options
+        ? options.startGrok
+        : fromBinary((await options.install.prepare()).path);
+    return (cwd, sandbox, handlers, hostTools) =>
+      connectGrok(startGrok, cwd, sandbox, handlers, clientVersion, hostTools);
+  };
+  // A probe runs the binary that runs now.
+  const probeStart: StartGrok =
+    'startGrok' in options
+      ? options.startGrok
+      : async (cwd, args) => spawnGrok((await options.install.current()).path, cwd, args);
   // The probes' processes, each kept from the moment it starts, before Grok answers it, so that closing
   // ends one still starting.
   const probes = new Probes();
   const probeConnect: Connect = (cwd, sandbox, handlers) =>
     connectGrok(
-      (folder, args) => probes.start(() => startGrok(folder, args)),
+      (folder, args) => probes.start(() => probeStart(folder, args)),
       cwd,
       sandbox,
       handlers,
@@ -218,11 +228,11 @@ export function createGrokBuildProvider(
   };
   return {
     id: 'grok-build',
-    start(options, onEvent) {
-      return GrokSession.open(options, null, connect, link, onEvent);
+    async start(options, onEvent) {
+      return GrokSession.open(options, null, await sessionConnect(), link, onEvent);
     },
-    resume(options, onEvent) {
-      return GrokSession.open(options, options.sessionId, connect, link, onEvent);
+    async resume(options, onEvent) {
+      return GrokSession.open(options, options.sessionId, await sessionConnect(), link, onEvent);
     },
     // Grok replays a session to the process that loads it, so a short-lived process in the read-only
     // profile loads it and ends; nothing is sent to the session. The replay leaves out the title Grok
@@ -317,8 +327,8 @@ export function createGrokBuildProvider(
       }
     },
     async signInCommand() {
-      if (binaryFolder === undefined) throw new Error('This Grok Build has no binary of its own.');
-      return { file: await bundledGrokBinary(binaryFolder), args: ['login'] };
+      if (!('install' in options)) throw new Error('This Grok Build has no binary of its own.');
+      return { file: (await options.install.prepare()).path, args: ['login'] };
     },
     onAccountNews(listener) {
       listeners.add(listener);
@@ -332,8 +342,8 @@ export function createGrokBuildProvider(
   };
 }
 
-function startBundledGrok(folder: string): StartGrok {
-  return async (cwd, args) => spawnGrok(await bundledGrokBinary(folder), cwd, args);
+function fromBinary(binary: string): StartGrok {
+  return (cwd, args) => Promise.resolve(spawnGrok(binary, cwd, args));
 }
 
 async function connectGrok(

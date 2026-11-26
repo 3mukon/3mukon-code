@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ProviderId } from '../../sessions/shared/events';
 import { Gauge } from '../../ui/renderer/icons';
+import { StateLabel, type StateTone } from '../../ui/renderer/state-label';
 import {
   NEARLY_USED,
   type AccountsBridge,
@@ -12,6 +13,7 @@ import {
   type UsageWindow,
 } from '../shared/accounts';
 import { readWhen, resetTime, share, windowName } from './format';
+import { InstallLines, installed, signInOffered } from './install-lines';
 import { useNow } from './use-now';
 
 // How often the panel's times, such as how long ago the usage was read, move on.
@@ -41,7 +43,9 @@ interface AccountsPanelProps {
   onSignIn: (provider: ProviderId) => void;
 }
 
-// The Accounts panel: each provider's sign-in, with Sign In while it is not signed in, and for a
+// The Accounts panel: each provider's sign-in, or that it is not installed, right after its name, as a
+// setting's items say their state, with Sign In while it is not signed in or not installed;
+// what runs for it, the user's CLI or the app's copy, with a download's progress (ADR-0039); and for a
 // subscription its usage limits, each window's use and when it resets, in the window's language and
 // local time, with when they were read; Codex's resets, with Reset Limits, which the main process asks
 // the user to confirm. It shows what the app holds at once, and while it shows the main process reads
@@ -73,15 +77,11 @@ export function AccountsPanel({ bridge, accounts, onSignIn }: AccountsPanelProps
             className="border-b border-dashed border-line py-3.5 first:pt-0 last:border-b-0"
           >
             <div className="flex items-baseline gap-3">
-              <h3 className="min-w-0 flex-1 truncate font-bold">
-                {t(`providers.${account.provider}`)}
-              </h3>
-              <span className="shrink-0 text-[12px] text-muted">
-                {account.reading && account.signIn.state === 'unknown'
-                  ? t('accounts.checking')
-                  : signInText(t, account.signIn)}
-              </span>
-              {account.signIn.state === 'signed-out' && (
+              <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5">
+                <h3 className="min-w-0 truncate font-bold">{t(`providers.${account.provider}`)}</h3>
+                <StateLabel {...accountState(t, account)} />
+              </div>
+              {signInOffered(account) && (
                 <button
                   type="button"
                   onClick={() => {
@@ -93,6 +93,7 @@ export function AccountsPanel({ bridge, accounts, onSignIn }: AccountsPanelProps
                 </button>
               )}
             </div>
+            <InstallLines account={account} />
             <Usage account={account} now={now} />
             {account.resettable && account.usage !== undefined && (
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted">
@@ -230,6 +231,22 @@ function problemText(
 // When the usage was read: just now, within the last minute, or how long ago.
 function readText(t: ReturnType<typeof useTranslation>['t'], when: string | null): string {
   return when === null ? t('accounts.readNow') : t('accounts.readAt', { when });
+}
+
+// What the panel says of a provider right after its name, in the tones a setting's items take: signed
+// in, in the run colour; not installed, not signed in, being checked or not known yet, quietly, since
+// Sign In beside it takes the step, or the app reads it on its own.
+function accountState(
+  t: ReturnType<typeof useTranslation>['t'],
+  account: ProviderAccount,
+): { text: string; tone: StateTone } {
+  if (!installed(account)) return { text: t('accounts.install.notInstalled'), tone: 'muted' };
+  if (account.reading && account.signIn.state === 'unknown')
+    return { text: t('accounts.checking'), tone: 'muted' };
+  return {
+    text: signInText(t, account.signIn),
+    tone: account.signIn.state === 'signed-in' ? 'success' : 'muted',
+  };
 }
 
 function signInText(t: ReturnType<typeof useTranslation>['t'], signIn: SignIn): string {

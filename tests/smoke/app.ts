@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { LOGIN_VARIABLES } from '../login-variables';
+import { providerCopies } from '../provider-copies';
 
 // A throwaway data folder for the app, so that smoke tests never read or change the user's own.
 export function dataFolder(): { path: string; remove: () => void } {
@@ -64,6 +65,9 @@ export interface LaunchOptions {
   args?: readonly string[];
   env?: Readonly<Record<string, string>>;
   colorScheme?: null;
+  // The folder the app looks in for the providers' CLIs, in place of the copies of the pinned
+  // packages' binaries that every other launch gives it.
+  providerPath?: string;
 }
 
 // Launches the built app as `launch` does, with the given options.
@@ -74,6 +78,9 @@ export function launchWith(data: string, options: LaunchOptions): Promise<Electr
       args: [
         ...(options.executablePath ? [] : ['.']),
         `--user-data-dir=${data}`,
+        // The providers' CLIs the app runs: copies of the pinned packages' binaries, never the
+        // developer's on the PATH (ADR-0039, L-0006).
+        `--provider-path=${options.providerPath ?? providerCopies(data)}`,
         ...(options.args ?? []),
       ],
       env: { ...isolatedEnvironment(data), ...options.env },

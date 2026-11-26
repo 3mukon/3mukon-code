@@ -56,8 +56,8 @@ import type {
 } from '../../../sessions/shared/events';
 import type { SendableImageType } from '../../../sessions/shared/images';
 import type { AccountNews, AccountSource } from '../../../accounts/main/source';
+import type { Binary, ProviderInstall } from '../../../installs/main/install';
 import { eventWindows, experimentalWindows, readClaudeSignIn } from './account';
-import { bundledClaudeBinary } from './binary';
 import { defaultGatewaysDir, existingGatewayPath, gatewayPath, listGateways } from './gateways';
 import { approvalResult, questionResult, toRequest, type ClaudeRequest } from './requests';
 import { sandboxFolders, sandboxSettings, type SandboxFolders } from './sandbox';
@@ -98,6 +98,12 @@ process.on('exit', () => {
   for (const folder of probeFolders) rmSync(folder, { recursive: true, force: true });
 });
 
+// The environment that keeps the app's own copy of Claude Code from updating itself, since it follows
+// the version the app pins (ADR-0039); the user's CLI updates as the user has it.
+function updaterOff(binary: Binary): Record<string, string> {
+  return binary.source === 'app' ? { DISABLE_AUTOUPDATER: '1' } : {};
+}
+
 // Claude Code's effort level for the app's choice; throws for a level Claude Code does not have.
 function effortLevel(effort: ReasoningEffort | null): EffortLevel | null {
   if (effort === null || EFFORT_LEVELS.has(effort)) return effort as EffortLevel | null;
@@ -107,6 +113,8 @@ function effortLevel(effort: ReasoningEffort | null): EffortLevel | null {
 export interface ClaudeCodeProviderOptions {
   // The folder of gateway files; Claude Code's own gateways folder when left out.
   gatewaysDir?: string;
+  // Where Claude Code's processes come from: the user's CLI or the app's own copy (ADR-0039).
+  install: ProviderInstall;
 }
 
 // How the sessions take part in Claude Code's account (ADR-0017): those running on Claude Code's own
@@ -121,7 +129,8 @@ interface AccountLink {
 // sign-in's account with its plan's usage limits (ADR-0017).
 export function createClaudeCodeProvider({
   gatewaysDir = defaultGatewaysDir(),
-}: ClaudeCodeProviderOptions = {}): Provider & AccountSource {
+  install,
+}: ClaudeCodeProviderOptions): Provider & AccountSource {
   // The processes it starts outside its sessions: the models' and the usage's probes, and the status
   // command that says how Claude Code is signed in.
   const probes = new Probes();
@@ -135,11 +144,23 @@ export function createClaudeCodeProvider({
   return {
     id: 'claude-code',
     async start(options, onEvent) {
-      const settings = await sessionSettings(options, gatewaysDir, randomUUID(), false);
+      const settings = await sessionSettings(
+        options,
+        gatewaysDir,
+        randomUUID(),
+        false,
+        await install.prepare(),
+      );
       return ClaudeCodeSession.open(settings, onEvent, new Translator(options.cwd), link);
     },
     async resume(options, onEvent) {
-      const settings = await sessionSettings(options, gatewaysDir, options.sessionId, true);
+      const settings = await sessionSettings(
+        options,
+        gatewaysDir,
+        options.sessionId,
+        true,
+        await install.prepare(),
+      );
       const translator = new Translator(options.cwd);
       for (const message of await getSessionMessages(options.sessionId, { dir: options.cwd })) {
         for (const event of translator.history(message)) onEvent(event);
@@ -176,6 +197,7 @@ export function createClaudeCodeProvider({
     async listModels(gateway) {
       return probeModels(
         probes,
+        await install.current(),
         gateway === null ? null : await existingGatewayPath(gatewaysDir, gateway),
       );
     },
@@ -183,12 +205,13 @@ export function createClaudeCodeProvider({
     async writeTitle(request) {
       const gatewayFile =
         request.gateway === null ? null : await existingGatewayPath(gatewaysDir, request.gateway);
-      return probeTitle(probes, gatewayFile, request);
+      return probeTitle(probes, await install.current(), gatewayFile, request);
     },
     // The sign-in from Claude Code's own status; the usage through a running session's query on
     // Claude Code's own sign-in, or else through a probe.
     async readAccount(withUsage) {
-      const signIn = await readClaudeSignIn(bundledClaudeBinary(), probes);
+      const binary = await install.current();
+      const signIn = await readClaudeSignIn(binary.path, probes);
       if (!withUsage || signIn.state !== 'signed-in' || signIn.method !== 'subscription') {
         return { signIn };
       }
@@ -196,7 +219,7 @@ export function createClaudeCodeProvider({
       for (const session of link.sessions) query ??= session.accountQuery();
       let answer: SDKControlGetUsageResponse;
       try {
-        answer = query === null ? await probeUsage(probes) : await usageOf(query);
+        answer = query === null ? await probeUsage(probes, binary) : await usageOf(query);
       } catch (error) {
         console.error('Claude Code could not be asked for its usage:', error);
         return { signIn, usageProblem: 'unreachable' };
@@ -208,8 +231,8 @@ export function createClaudeCodeProvider({
         ? { signIn, usageProblem: 'refused' }
         : { signIn, usage: { windows } };
     },
-    signInCommand() {
-      return Promise.resolve({ file: bundledClaudeBinary(), args: ['auth', 'login'] });
+    async signInCommand() {
+      return { file: (await install.prepare()).path, args: ['auth', 'login'] };
     },
     onAccountNews(listener) {
       listeners.add(listener);
@@ -231,16 +254,16 @@ function usageOf(query: Query): Promise<SDKControlGetUsageResponse> {
 
 // The plan's usage limits from a Claude Code that initializes and is closed before any message, as
 // the models' probe does, on the user's own settings with their hooks off.
-async function probeUsage(probes: Probes): Promise<SDKControlGetUsageResponse> {
+async function probeUsage(probes: Probes, binary: Binary): Promise<SDKControlGetUsageResponse> {
   const cwd = await mkdtemp(join(tmpdir(), 'claude-code-usage-'));
   probeFolders.add(cwd);
   let probe: ClaudeProbe | undefined;
   try {
     probe = await startProbe(probes, {
-      pathToClaudeCodeExecutable: bundledClaudeBinary(),
+      pathToClaudeCodeExecutable: binary.path,
       cwd,
       persistSession: false,
-      env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+      env: { ...process.env, ...updaterOff(binary), CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
       settingSources: ['user'],
       settings: { disableAllHooks: true },
     });
@@ -322,9 +345,11 @@ async function sessionSettings(
   gatewaysDir: string,
   sessionId: string,
   resume: boolean,
+  binary: Binary,
 ): Promise<SessionSettings> {
   if (options.gateway !== undefined) await existingGatewayPath(gatewaysDir, options.gateway);
   return {
+    binary,
     cwd: options.cwd,
     mode: options.mode ?? 'auto',
     sessionId,
@@ -346,16 +371,20 @@ async function sessionSettings(
 // so that the default is the model they set. It never reads a project's settings, whose hooks and
 // servers could run from a folder no one trusted yet. The app opens none of these files itself. A
 // Claude Code that has not started within the probe's time is closed, and the list fails.
-async function probeModels(probes: Probes, gatewayFile: string | null): Promise<ModelOption[]> {
+async function probeModels(
+  probes: Probes,
+  binary: Binary,
+  gatewayFile: string | null,
+): Promise<ModelOption[]> {
   const cwd = await mkdtemp(join(tmpdir(), 'claude-code-models-'));
   probeFolders.add(cwd);
   let probe: ClaudeProbe | undefined;
   try {
     probe = await startProbe(probes, {
-      pathToClaudeCodeExecutable: bundledClaudeBinary(),
+      pathToClaudeCodeExecutable: binary.path,
       cwd,
       persistSession: false,
-      env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+      env: { ...process.env, ...updaterOff(binary), CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
       ...(gatewayFile === null
         ? { settingSources: ['user'], settings: { disableAllHooks: true } }
         : { settingSources: [], settings: gatewayFile }),
@@ -379,6 +408,7 @@ async function probeModels(probes: Probes, gatewayFile: string | null): Promise<
 // file, or else on the user's own settings with their hooks off, as the models' probe reads them.
 async function probeTitle(
   probes: Probes,
+  binary: Binary,
   gatewayFile: string | null,
   { model, effort, prompt }: TitleRequest,
 ): Promise<string> {
@@ -390,10 +420,10 @@ async function probeTitle(
     probe = await startProbe(
       probes,
       {
-        pathToClaudeCodeExecutable: bundledClaudeBinary(),
+        pathToClaudeCodeExecutable: binary.path,
         cwd,
         persistSession: false,
-        env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+        env: { ...process.env, ...updaterOff(binary), CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
         ...(gatewayFile === null
           ? { settingSources: ['user'], settings: { disableAllHooks: true } }
           : { settingSources: [], settings: gatewayFile }),
@@ -496,6 +526,8 @@ function errorMessage(error: unknown): string {
 }
 
 interface SessionSettings {
+  // The binary the session started with, which every process of it runs (ADR-0039).
+  binary: Binary;
   toolset?: Toolset;
   cwd: string;
   mode: PermissionMode;
@@ -775,7 +807,10 @@ class ClaudeCodeSession implements ProviderSession {
       query: query({
         prompt: input,
         options: {
-          pathToClaudeCodeExecutable: bundledClaudeBinary(),
+          pathToClaudeCodeExecutable: settings.binary.path,
+          ...(settings.binary.source === 'app'
+            ? { env: { ...process.env, ...updaterOff(settings.binary) } }
+            : {}),
           cwd: settings.cwd,
           permissionMode: nativeModes[settings.mode],
           // Lets a session switch to yolo later; it starts in, and stays in, the mode chosen.
@@ -803,9 +838,10 @@ class ClaudeCodeSession implements ProviderSession {
                     timeout: settings.toolset.callTimeoutMs,
                   },
                 },
-                // Over Claude Code's standard input as it initializes, which the Claude Code bundled
-                // with the SDK reads, rather than on its command line, where other users of the Mac
-                // could read the credential in the headers.
+                // Over Claude Code's standard input as it initializes, which Claude Code reads from
+                // the SDK's own version on, the oldest the adapter drives (ADR-0039), rather than on
+                // its command line, where other users of the Mac could read the credential in the
+                // headers.
                 mcpServersDelivery: 'initialize',
                 allowedTools: access.tools?.map(
                   (name) => `mcp__${settings.toolset?.name ?? ''}__${name}`,

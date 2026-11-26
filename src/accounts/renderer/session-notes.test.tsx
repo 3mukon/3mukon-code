@@ -63,3 +63,44 @@ describe('SignInPrompt', () => {
     expect(onSignIn).toHaveBeenCalledWith('grok-build');
   });
 });
+
+describe('SignInPrompt and where the provider runs from', () => {
+  const base: ProviderAccount = {
+    provider: 'codex',
+    signIn: { state: 'unknown' },
+    resettable: false,
+    reading: false,
+  };
+
+  it('says the provider is not installed, that Sign In downloads it first, and why a download failed', () => {
+    const onSignIn = vi.fn();
+    render(
+      <SignInPrompt
+        provider="codex"
+        account={{ ...base, install: { runs: null, pinned: '0.171.0', failed: 'network' } }}
+        onSignIn={onSignIn}
+      />,
+    );
+    expect(
+      screen.getByText('Codex CLI is not installed. Sign In downloads it first.'),
+    ).toBeTruthy();
+    expect(screen.getByText(/its address couldn’t be reached/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+    expect(onSignIn).toHaveBeenCalledWith('codex');
+  });
+
+  it('shows the download’s progress while it goes on', () => {
+    render(
+      <SignInPrompt
+        provider="codex"
+        account={{
+          ...base,
+          install: { runs: null, pinned: '0.171.0', downloading: { received: 1, total: 2 } },
+        }}
+        onSignIn={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Sign In' })).toBeNull();
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('50');
+  });
+});

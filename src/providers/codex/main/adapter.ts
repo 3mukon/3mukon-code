@@ -28,8 +28,8 @@ import type {
 } from '../../../sessions/shared/events';
 import { imageUrl } from '../../../sessions/shared/images';
 import type { AccountNews, AccountSource } from '../../../accounts/main/source';
+import type { ProviderInstall } from '../../../installs/main/install';
 import { isSignInError, readCodexAccount, resetCodexLimits, updatedWindows } from './account';
-import { bundledCodexBinary } from './binary';
 import {
   defaultGatewaysDir,
   gatewayLaunchArgs,
@@ -191,7 +191,9 @@ export interface CodexProviderOptions {
   toolset?: Toolset;
   // The folder of gateway files; the gateways folder in Codex's home when left out.
   gatewaysDir?: string;
-  // Starts an app-server; tests put a fake in place of the bundled Codex.
+  // Where Codex's processes come from: the user's CLI or the app's own copy (ADR-0039).
+  install?: ProviderInstall;
+  // Starts an app-server; tests put a fake in place of Codex.
   startRpc?: StartRpc;
   // The app's version, which Codex records as its client's.
   clientVersion?: string;
@@ -207,19 +209,28 @@ interface AccountLink {
   hear(news: AccountNews): void;
 }
 
-const startBundledCodex: StartRpc = (cwd, handlers, launch) =>
-  CodexRpc.start(bundledCodexBinary(), cwd, handlers, launch);
-
 // Codex through its app-server (ADR-0003), on whatever sign-in Codex itself has, and that sign-in's
 // account, with its usage limits and their resets (ADR-0017).
 export function createCodexProvider({
   toolset,
   gatewaysDir = defaultGatewaysDir(),
-  startRpc = startBundledCodex,
+  install,
+  startRpc,
   clientVersion = '0.0.0',
 }: CodexProviderOptions): Provider & AccountSource {
-  const connect: Connect = (cwd, handlers, launch) =>
-    initialize(startRpc(cwd, handlers, launch), clientVersion);
+  const installed = (): ProviderInstall => {
+    if (install === undefined) throw new Error('This Codex has no binary of its own.');
+    return install;
+  };
+  // Starts app-servers from the binary, or the tests' fake ones.
+  const from = (binary: string): StartRpc =>
+    startRpc ?? ((cwd, handlers, launch) => CodexRpc.start(binary, cwd, handlers, launch));
+  // A session's app-servers all run the binary it started with, which a session downloads first where
+  // the app has to run its own copy and has none of the pinned version (ADR-0039).
+  const sessionConnect = async (): Promise<Connect> => {
+    const start = startRpc ?? from((await installed().prepare()).path);
+    return (cwd, handlers, launch) => initialize(start(cwd, handlers, launch), clientVersion);
+  };
   // The probes' app-servers, each kept from the moment it starts, before Codex answers it, so that
   // closing ends one still starting.
   const probes = new Probes();
@@ -228,8 +239,10 @@ export function createCodexProvider({
     const ended = new Promise<void>((resolve) => {
       markEnded = resolve;
     });
-    const { rpc } = await probes.start(() => {
-      const started = startRpc(
+    const { rpc } = await probes.start(async () => {
+      // A probe runs the binary that runs now.
+      const start = startRpc ?? from((await installed().current()).path);
+      const started = start(
         cwd,
         {
           ...handlers,
@@ -269,17 +282,24 @@ export function createCodexProvider({
   };
   return {
     id: 'codex',
-    start(options, onEvent) {
+    async start(options, onEvent) {
       const bound = options.toolset ?? toolset;
-      if (!bound) return Promise.reject(new Error('A session needs its bound toolset.'));
+      if (!bound) throw new Error('A session needs its bound toolset.');
       const settings = sessionSettings(options, gatewaysDir);
-      return CodexSession.open(settings, null, connect, bound, link, onEvent);
+      return CodexSession.open(settings, null, await sessionConnect(), bound, link, onEvent);
     },
-    resume(options, onEvent) {
+    async resume(options, onEvent) {
       const bound = options.toolset ?? toolset;
-      if (!bound) return Promise.reject(new Error('A session needs its bound toolset.'));
+      if (!bound) throw new Error('A session needs its bound toolset.');
       const settings = sessionSettings(options, gatewaysDir);
-      return CodexSession.open(settings, options.sessionId, connect, bound, link, onEvent);
+      return CodexSession.open(
+        settings,
+        options.sessionId,
+        await sessionConnect(),
+        bound,
+        link,
+        onEvent,
+      );
     },
     // Read through a short-lived app-server, which lists the thread's turns and reads its name without
     // loading it, the name being the title Codex keeps for the session, as a running session reports it.
@@ -350,8 +370,8 @@ export function createCodexProvider({
     readAccount(withUsage) {
       return withAccount((rpc) => readCodexAccount(rpc, withUsage));
     },
-    signInCommand() {
-      return Promise.resolve({ file: bundledCodexBinary(), args: ['login'] });
+    async signInCommand() {
+      return { file: (await installed().prepare()).path, args: ['login'] };
     },
     resetLimits() {
       return withAccount(resetCodexLimits);

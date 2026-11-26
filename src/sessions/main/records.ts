@@ -62,7 +62,7 @@ export interface RecordStorage {
   save(records: SessionRecord[]): void;
 }
 
-// sessions.json in the folder, the app's data folder (ADR-0004), readable by the user alone. A file
+// sessions.json in the folder, the app's data folder (ADR-0039), readable by the user alone. A file
 // that is not JSON is cleared, and an entry of another shape is left out.
 export function recordStorage(folder: string): RecordStorage {
   const store = new ElectronStore<Record<string, unknown>>({

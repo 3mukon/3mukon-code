@@ -5,8 +5,8 @@ title: The three providers side by side
 status: current
 visibility: public
 date: 2026-11-04
-summary: Claude Code runs through the Claude Agent SDK in the main process, Codex as an app-server and Grok Build in ACP agent mode, each from a binary that comes with the app and on its own sign-in, and each adapter maps its provider's modes, sandboxes, gateways, models, questions and usage onto the app's one session model, as the table here sets side by side
-scope: ["src/providers/**", "src/sessions/shared/**", "src/accounts/shared/**", "package.json"]
+summary: Claude Code runs through the Claude Agent SDK in the main process, Codex as an app-server and Grok Build in ACP agent mode, each from the user's own CLI or else from a copy the app downloads at sign-in, and on its own sign-in, and each adapter maps its provider's modes, sandboxes, gateways, models, questions and usage onto the app's one session model, as the table here sets side by side
+scope: ["src/providers/**", "src/installs/**", "src/sessions/shared/**", "src/accounts/shared/**", "package.json"]
 tags: []
 supersedes: []
 superseded_by:
@@ -16,7 +16,10 @@ The app drives three providers. Each has an adapter module that implements the s
 
 ## In common
 
-- Each provider runs from a binary that comes with the app, pinned in `package.json` and upgraded deliberately (ADR-0004), never from a CLI the user installed. In the packaged app, the Claude Code and Codex binaries lie beside the app's archive, where macOS can run them; Grok Build's comes compressed, and its adapter unpacks it into the app's data.
+- Each provider runs from the user's own CLI where one at or above the oldest version its adapter drives is on the PATH, and otherwise from the app's own copy (ADR-0039, DOC-mod-installs).
+  - The app's copy is the provider's official build at the version and checksum the app pins, from the provider packages in `package.json`.
+  - The app downloads it into its data folder when the user signs in, or at the next sign-in or session once a build pins a newer version.
+  - The app carries no provider's binary.
 - Each provider keeps its own settings and its own sign-in, in its own home folder. The app never reads, stores, logs or shows a provider's key or token, and passes one only with a Codex gateway file's settings to Codex (invariant 9, ADR-0028). Each provider's own sign-in command runs in a terminal panel.
 - A session's task list is the one its agent keeps, shown where the provider gives one. The app turns on no provider's task tools: Claude Code offers them by default only to its older models, since its newer ones track their work without a written list, as Anthropic's SDK documentation says, and Codex keeps its plan tool off unless its settings turn it on. The user can turn either on in the provider's own settings (ADR-0020; DOC-mod-claude-code, DOC-mod-codex).
 - Every session starts in a folder with a permission mode, auto unless the user chose yolo (ADR-0006), and a sandbox level, workspace-write unless the user chose another. Mode, level, model and reasoning effort can change while the session runs; how soon each takes effect is the provider's.
@@ -29,9 +32,11 @@ The app drives three providers. Each has an adapter module that implements the s
 | | Claude Code | Codex | Grok Build |
 |---|---|---|---|
 | Module | [claude-code](../src/providers/claude-code/README.md) | [codex](../src/providers/codex/README.md) | [grok-build](../src/providers/grok-build/README.md) |
-| Driven through | The Claude Agent SDK in the main process, which runs the Claude Code binary it brings | `codex app-server`, JSON-RPC over standard input and output (ADR-0003) | `grok agent stdio`, ACP over standard input and output (ADR-0003) |
+| Driven through | The Claude Agent SDK in the main process, which runs the `claude` the installs module chooses | `codex app-server`, JSON-RPC over standard input and output (ADR-0003) | `grok agent stdio`, ACP over standard input and output (ADR-0003) |
 | Processes | One Claude Code process per session | One app-server per session | One Grok process per session, at the session's sandbox level |
 | Settings and sign-in | Claude Code's own, in `~/.claude` or `CLAUDE_CONFIG_DIR` | Codex's own, in `~/.codex` or `CODEX_HOME` | Grok's own, in `~/.grok` |
+| CLI, and the oldest version the adapter drives | `claude`, from the SDK's `claudeCodeVersion` | `codex`, from the version its protocol types come from | `grok`, from the version its ACP use was written against |
+| The app's copy | The Claude Agent SDK's package for macOS on Apple silicon, which carries that Claude Code; it runs with Claude Code's updater off | Codex's build for macOS on Apple silicon, with the tools beside its binary | Grok Build's build for macOS on Apple silicon, its binary compressed with brotli |
 | Sign-in command | `claude auth login` | `codex login` | `grok login` |
 | Auto | Claude Code's auto mode, whose classifier asks the user when it cannot decide | On-request approvals, decided by Codex's automatic reviewer | Grok's auto mode, whose classifier asks the user when it will not allow an action |
 | Yolo | `bypassPermissions` | Approvals never asked for | Always approve |
@@ -53,4 +58,5 @@ The app drives three providers. Each has an adapter module that implements the s
 
 - The `Provider` interface: `src/sessions/main/provider.ts`; the session events and the session settings: `src/sessions/shared/` (DOC-mod-sessions).
 - The sign-in and usage contract: `src/accounts/shared/` (DOC-mod-accounts).
-- The pinned versions: `package.json`. The protocol types Codex's adapter uses are generated from the bundled Codex (`corepack pnpm run codex:protocol`).
+- The pinned versions: `package.json`. The pins of the app's copies: each adapter's `pin.json`, which `corepack pnpm run providers:pins` writes from the lockfile and `tests/contracts/provider-pins.test.ts` keeps equal to it. The oldest versions: each adapter's `main/install.ts`. The protocol types Codex's adapter uses are generated from the pinned Codex package (`corepack pnpm run codex:protocol`).
+- Where each provider's processes come from: `src/installs/` (DOC-mod-installs).

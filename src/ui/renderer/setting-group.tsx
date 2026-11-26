@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from 'react';
+import { StateLabel, type StateTone } from './state-label';
 
 // A setting whose items each have a state and a step of their own, such as the browsers agents use:
 // its title and a line of detail, as a choice's have (Segmented), above its items in one outlined
@@ -35,19 +36,10 @@ export function SettingGroup({
   );
 }
 
-// How an item's state reads: set up, as Allowed, in the run colour; one that cannot be set up, in the
-// colour of failure; one that needs something the app cannot do, as a newer browser, in the wait
-// colour; one that waits on something else, quietly.
-const stateColors = {
-  muted: 'text-faint',
-  success: 'text-run',
-  error: 'text-del',
-  attention: 'text-wait',
-} as const;
-
-// One item of such a setting: its name, its state once it is set up in small type right after the
-// name, a line under the name saying what the item is, never its state, and at the row's right only
-// buttons, the one that undoes the item where that can be done, or the one that sets it up.
+// One item of such a setting: its name, its state once it is set up right after the name, in the tone
+// its kind of state takes (StateLabel), a line under the name saying what the item is, never its
+// state, and at the row's right only buttons, the one that undoes the item where that can be done, or
+// the one that sets it up.
 export function SettingItem({
   name,
   state,
@@ -57,7 +49,7 @@ export function SettingItem({
 }: {
   name: string;
   state?: string;
-  stateTone?: keyof typeof stateColors;
+  stateTone?: StateTone;
   line: string;
   children?: ReactNode;
 }) {
@@ -66,9 +58,7 @@ export function SettingItem({
       <div className="flex min-w-0 flex-1 flex-col gap-px">
         <p className="flex min-w-0 items-baseline gap-1.5">
           <span className="text-ink">{name}</span>
-          {state !== undefined && (
-            <span className={`text-[11px] ${stateColors[stateTone]}`}>{state}</span>
-          )}
+          {state !== undefined && <StateLabel text={state} tone={stateTone} />}
         </p>
         <p className="text-[11px] text-faint">{line}</p>
       </div>

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountNews } from '../../../accounts/main/source';
+import type { ProviderInstall } from '../../../installs/main/install';
 import type { Toolset, ToolsetAccess } from '../../../sessions/main/provider';
 import type { SandboxLevel, SessionEvent } from '../../../sessions/shared/events';
 import { createCodexProvider } from './adapter';
@@ -435,10 +436,21 @@ afterEach(() => {
   rmSync(gatewaysDir, { recursive: true, force: true });
 });
 
+// The app's copy of Codex that a sign-in runs; the sessions and probes run the fake app-servers.
+const binary = { path: '/test/codex', version: '0.171.0', source: 'app' } as const;
+const install: ProviderInstall = {
+  provider: 'codex',
+  current: () => Promise.resolve(binary),
+  prepare: () => Promise.resolve(binary),
+  view: () => Promise.resolve({ runs: { source: 'app', version: '0.171.0' }, pinned: '0.171.0' }),
+  onChange: () => () => undefined,
+};
+
 function provider() {
   return createCodexProvider({
     toolset,
     gatewaysDir,
+    install,
     startRpc: (cwd, handlers, launch) => {
       const fake = new FakeCodex(cwd, handlers, launch);
       fakes.push(fake);
@@ -1377,7 +1389,7 @@ describe('Codex’s account through the adapter', () => {
     await session.close();
     await codex.readAccount(false);
     expect(current()).not.toBe(running);
-    expect((await codex.signInCommand()).args).toEqual(['login']);
+    expect(await codex.signInCommand()).toEqual({ file: '/test/codex', args: ['login'] });
   });
 });
 

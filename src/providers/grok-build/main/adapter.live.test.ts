@@ -1,5 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
 import type { ProviderSession } from '../../../sessions/main/provider';
@@ -10,6 +10,7 @@ import {
   type SessionState,
 } from '../../../sessions/shared/session-state';
 import { createGrokBuildProvider } from './adapter';
+import { pinnedInstall } from '../../../../tests/provider-copies';
 
 // Drives a real Grok Build session on the signed-in account, at low effort, in two short turns. Only
 // `corepack pnpm run test:live` runs it, never the check command: it needs Grok signed in, and it uses a
@@ -19,10 +20,8 @@ import { createGrokBuildProvider } from './adapter';
 const cwd = realpathSync(
   mkdtempSync(join(homedir(), 'Library', 'Caches', '3mukon-code-grok-live-')),
 );
-const binaryFolder = realpathSync(mkdtempSync(join(tmpdir(), 'grok-binary-')));
 afterAll(() => {
   rmSync(cwd, { recursive: true, force: true });
-  rmSync(binaryFolder, { recursive: true, force: true });
 });
 
 // Folds a session's events into its state, so that the test can wait for a condition on it.
@@ -71,7 +70,7 @@ const FIRST =
   'First use your ask_user_question tool to ask me exactly one question, "Which color?", with the options Red and Blue. Then run the shell command `printf blocked > blocked.txt` once, and do not try any other way. Then reply with one word: the color I chose.';
 
 it('asks its own question and stays read-only in yolo, switches the level and mode, writes a file, and resumes', async () => {
-  const provider = createGrokBuildProvider({ binaryFolder });
+  const provider = createGrokBuildProvider({ install: pinnedInstall('grok-build') });
   expect(await provider.listGateways()).toEqual([]);
   expect((await provider.listModels(null)).length).toBeGreaterThan(0);
 

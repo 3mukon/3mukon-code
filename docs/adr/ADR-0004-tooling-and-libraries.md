@@ -2,14 +2,14 @@
 id: ADR-0004
 type: adr
 title: Build on Electron 44 and TypeScript 6 with electron-vite, React, Tailwind and i18next
-status: accepted
+status: superseded
 visibility: public
 date: 2026-10-24
 summary: The app uses Electron 44, TypeScript 6, pnpm 12, electron-vite on Vite 8, electron-builder for macOS arm64, React with zustand, Tailwind, i18next, vitest and Playwright, ESLint and Prettier, and dependency-cruiser, with the provider packages pinned and bundled
 scope: ["**"]
 tags: []
 supersedes: []
-superseded_by:
+superseded_by: ADR-0039
 ---
 
 ## Context

@@ -10,6 +10,8 @@ import type {
   UsageProblem,
   UsageWindow,
 } from '../shared/accounts';
+import type { ProviderInstall } from '../../installs/main/install';
+import type { InstallView } from '../../installs/shared/installs';
 import type { AccountNews, AccountRead, AccountSource, Program } from './source';
 
 // How old what the app holds of a provider grows before the Accounts panel, while it shows, reads it
@@ -40,7 +42,7 @@ export interface UsageStorage {
   save(usage: KeptUsage): void;
 }
 
-// accounts.json in the folder, the app's data folder (ADR-0004), readable by the user alone: each
+// accounts.json in the folder, the app's data folder (ADR-0039), readable by the user alone: each
 // provider's usage limits with when they were read, and nothing else of the account (ADR-0017). A file
 // that is not JSON is cleared, and an entry of another shape is left out.
 export function usageStorage(folder: string): UsageStorage {
@@ -90,7 +92,7 @@ export interface Timers {
   every(ms: number, run: () => void): () => void;
 }
 
-const realTimers: Timers = {
+export const realTimers: Timers = {
   now: () => Date.now(),
   every(ms, run) {
     const timer = setInterval(run, ms);
@@ -102,6 +104,9 @@ const realTimers: Timers = {
 
 interface Held {
   source: AccountSource;
+  // Where the provider's processes come from, and what Accounts shows of it, once read (ADR-0039).
+  install?: ProviderInstall;
+  installView?: InstallView;
   signIn: SignIn;
   usage?: Usage;
   // Why the last read of the usage could not give it, until one does.
@@ -133,22 +138,34 @@ export class Accounts {
     sources: readonly AccountSource[],
     private readonly storage: UsageStorage,
     private readonly timers: Timers = realTimers,
+    // Each provider's CLI, by its provider, where the app module gives it.
+    installs: readonly ProviderInstall[] = [],
   ) {
     const kept = storage.load();
     this.held = sources.map((source) => {
       const usage = kept[source.id];
+      const install = installs.find((candidate) => candidate.provider === source.id);
       return {
         source,
+        ...(install === undefined ? {} : { install }),
         signIn: { state: 'unknown' },
         reading: null,
         ...(usage === undefined ? {} : { usage }),
       };
     });
-    this.stopNews = this.held.map((held) =>
+    this.stopNews = this.held.flatMap((held) => [
       held.source.onAccountNews((news) => {
         this.hear(held, news);
       }),
-    );
+      ...(held.install === undefined
+        ? []
+        : [
+            held.install.onChange((view) => {
+              held.installView = view;
+              this.changed();
+            }),
+          ]),
+    ]);
   }
 
   list(): AccountsList {
@@ -156,6 +173,7 @@ export class Accounts {
       accounts: this.held.map((held): ProviderAccount => ({
         provider: held.source.id,
         signIn: held.signIn,
+        ...(held.installView === undefined ? {} : { install: held.installView }),
         ...(held.usage === undefined ? {} : { usage: held.usage }),
         ...(held.usageProblem === undefined ? {} : { usageProblem: held.usageProblem }),
         resettable: held.source.resetLimits !== undefined,
@@ -185,6 +203,7 @@ export class Accounts {
     if (shown) this.viewers.add(viewer);
     else this.viewers.delete(viewer);
     if (before === 0 && this.viewers.size > 0) {
+      void this.readInstalls();
       void this.readAll();
       this.stopTimer = this.timers.every(REFRESH_MS, () => {
         void this.readAll();
@@ -221,6 +240,12 @@ export class Accounts {
     return outcome;
   }
 
+  // Reads anew where each provider's processes come from, which asks no provider: as the Accounts panel
+  // shows, so that a CLI the user installed or updated shows there.
+  async readInstalls(): Promise<void> {
+    await Promise.all(this.held.map((held) => this.readInstall(held)));
+  }
+
   // Stops reading and hearing the providers, as the app quits.
   close(): void {
     this.stopTimer?.();
@@ -238,17 +263,31 @@ export class Accounts {
     return held.askedAt === undefined || this.timers.now() - held.askedAt >= REFRESH_MS - SLACK_MS;
   }
 
-  // Asks the provider, unless a read is under way, which answers instead.
+  private async readInstall(held: Held): Promise<void> {
+    if (held.install === undefined) return;
+    try {
+      held.installView = await held.install.view();
+      this.changed();
+    } catch (error) {
+      console.error(`The app could not tell where ${held.source.id} runs from:`, error);
+    }
+  }
+
+  // Asks the provider, unless a read is under way, which answers instead; a provider that is not
+  // installed is not asked, and its sign-in stays unknown. Such a read does not count as one, so that
+  // the next read asks the provider once the user has installed it.
   private read(held: Held, withUsage: boolean): Promise<void> {
     if (held.reading !== null) return held.reading;
     const reading = (async () => {
       try {
+        await this.readInstall(held);
+        if (held.installView?.runs === null) return;
         this.take(held, await held.source.readAccount(withUsage));
       } catch (error) {
         console.error(`The app could not read ${held.source.id}'s account:`, error);
         if (withUsage) held.usageProblem = 'unreachable';
       } finally {
-        if (withUsage) held.askedAt = this.timers.now();
+        if (withUsage && held.installView?.runs !== null) held.askedAt = this.timers.now();
       }
     })();
     held.reading = reading;

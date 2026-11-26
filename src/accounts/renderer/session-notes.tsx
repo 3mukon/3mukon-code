@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import type { ProviderId } from '../../sessions/shared/events';
 import { mostUsed, type ProviderAccount } from '../shared/accounts';
 import { resetTime, share, windowName } from './format';
+import { Download, installed } from './install-lines';
 import { useNow } from './use-now';
 
 // How often the notice's reset time moves on, which says the time alone today and the weekday after.
@@ -44,28 +45,58 @@ export function UsageNotice({
   );
 }
 
-// Says on a session page that its provider is not signed in, with Sign In, which runs the provider's
-// own sign-in command in a terminal.
+// Says on a session page that its provider is not signed in, or not installed, with Sign In, which
+// runs the provider's own sign-in command in a terminal, downloading the app's copy first where the
+// provider is not installed (ADR-0039); while that download goes on, its progress instead, and once
+// one has failed, why.
 export function SignInPrompt({
   provider,
+  account,
   onSignIn,
 }: {
   provider: ProviderId;
+  account?: ProviderAccount | undefined;
   onSignIn: (provider: ProviderId) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const name = t(`providers.${provider}`);
+  const view = account?.install;
+  if (view?.downloading !== undefined) {
+    return (
+      <div className="my-3 font-sans text-[12px] text-ink">
+        <Download
+          version={view.pinned}
+          received={view.downloading.received}
+          total={view.downloading.total}
+          t={t}
+          language={i18n.language}
+        />
+      </div>
+    );
+  }
   return (
-    <p className="my-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-ink">
-      <span>{t('accounts.signInPrompt', { provider: t(`providers.${provider}`) })}</span>
-      <button
-        type="button"
-        onClick={() => {
-          onSignIn(provider);
-        }}
-        className="rounded-md border border-line px-2 font-sans text-[12px] hover:bg-hover"
-      >
-        {t('accounts.signIn')}
-      </button>
-    </p>
+    <div className="my-3">
+      <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-ink">
+        <span>
+          {installed(account)
+            ? t('accounts.signInPrompt', { provider: name })
+            : t('accounts.signInPromptInstall', { provider: name })}
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            onSignIn(provider);
+          }}
+          className="rounded-md border border-line px-2 font-sans text-[12px] hover:bg-hover"
+        >
+          {t('accounts.signIn')}
+        </button>
+      </p>
+      {view?.failed !== undefined && (
+        <p className="mt-1 font-sans text-[12px] text-del">
+          {t(`accounts.install.failed.${view.failed}`)}
+        </p>
+      )}
+    </div>
   );
 }

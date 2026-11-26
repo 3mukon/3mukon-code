@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ProviderInstall } from '../../installs/main/install';
+import type { InstallView } from '../../installs/shared/installs';
 import type { ProviderId } from '../../sessions/shared/events';
 import type { UsageWindow } from '../shared/accounts';
 import {
@@ -78,6 +80,31 @@ function clock(start = 1_000_000) {
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+// A provider's CLI whose view the test sets, and tells of a change.
+function install(provider: ProviderId, view: InstallView) {
+  let current = view;
+  const listeners = new Set<(view: InstallView) => void>();
+  const fake: ProviderInstall = {
+    provider,
+    current: () => Promise.reject(new Error('not run here')),
+    prepare: () => Promise.reject(new Error('not run here')),
+    view: () => Promise.resolve(current),
+    onChange(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+  return {
+    fake,
+    set(next: InstallView) {
+      current = next;
+      for (const listener of listeners) listener(next);
+    },
+  };
+}
 
 describe('Accounts', () => {
   it('shows the usage kept from an earlier run at once, with the sign-in unknown until read', () => {
@@ -290,5 +317,63 @@ describe('usageStorage', () => {
       }),
     );
     expect(usageStorage(folder).load()).toEqual({ 'grok-build': { windows: [], readAt: 3 } });
+  });
+});
+
+describe('Accounts and where the providers run from', () => {
+  it('shows what runs for each provider, asks none that is not installed, and passes on a download as it goes', async () => {
+    const claude = source('claude-code', () => Promise.resolve(subscribed));
+    const codex = source('codex', () => Promise.resolve(subscribed));
+    const claudeInstall = install('claude-code', {
+      runs: { source: 'user', version: '2.1.340' },
+      pinned: '2.1.330',
+    });
+    const codexInstall = install('codex', { runs: null, pinned: '0.171.0' });
+    const accounts = new Accounts([claude.fake, codex.fake], memoryUsageStorage(), clock().fake, [
+      claudeInstall.fake,
+      codexInstall.fake,
+    ]);
+    await accounts.readAll();
+    expect(claude.asked).toEqual([true]);
+    expect(codex.asked).toEqual([]);
+    const listed = accounts.list().accounts;
+    expect(listed[0]?.install).toEqual({
+      runs: { source: 'user', version: '2.1.340' },
+      pinned: '2.1.330',
+    });
+    expect(listed[1]).toMatchObject({ signIn: { state: 'unknown' }, install: { runs: null } });
+    const heard: (InstallView | undefined)[] = [];
+    accounts.onChange((list) => heard.push(list.accounts[1]?.install));
+    codexInstall.set({ runs: null, pinned: '0.171.0', downloading: { received: 5, total: 10 } });
+    codexInstall.set({ runs: { source: 'app', version: '0.171.0' }, pinned: '0.171.0' });
+    expect(heard).toEqual([
+      { runs: null, pinned: '0.171.0', downloading: { received: 5, total: 10 } },
+      { runs: { source: 'app', version: '0.171.0' }, pinned: '0.171.0' },
+    ]);
+    await accounts.readAgain('codex');
+    expect(codex.asked).toEqual([true]);
+  });
+
+  it('reads anew where each provider runs from as the Accounts panel shows, and asks a provider installed since its last read', async () => {
+    const claude = source('claude-code', () => Promise.resolve(subscribed));
+    const claudeInstall = install('claude-code', { runs: null, pinned: '2.1.330' });
+    const accounts = new Accounts([claude.fake], memoryUsageStorage(), clock().fake, [
+      claudeInstall.fake,
+    ]);
+    // As the window opens, the provider is not installed, so it is not asked.
+    await accounts.readAll();
+    expect(accounts.list().accounts[0]?.install?.runs).toBeNull();
+    expect(claude.asked).toEqual([]);
+    // The user installs their CLI, which the panel shows once it opens, asking of its account at once
+    // rather than five minutes after that read.
+    const view = { runs: { source: 'user' as const, version: '2.1.340' }, pinned: '2.1.330' };
+    claudeInstall.fake.view = () => Promise.resolve(view);
+    accounts.setShown(1, true);
+    await settle();
+    await settle();
+    expect(accounts.list().accounts[0]?.install).toEqual(view);
+    expect(claude.asked).toEqual([true]);
+    expect(accounts.list().accounts[0]?.signIn).toEqual(subscribed.signIn);
+    accounts.close();
   });
 });

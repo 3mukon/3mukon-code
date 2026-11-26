@@ -13,7 +13,7 @@ tags: []
 ## Responsibilities
 
 - `createGrokBuildProvider` (`main/adapter.ts`) implements the sessions module's `Provider` on `grok agent stdio` (ADR-0003), through the stable API of the ACP TypeScript SDK. Each session has a Grok process of its own, started in the session's folder as `grok --no-plan --sandbox <profile> agent --no-leader stdio`, so that no shared leader process serves it:
-  - Binary (`main/binary.ts`): the app depends on the pinned `@xai-official/grok-darwin-arm64` package directly, since the `@xai-official/grok` package around it would copy the binary into the user's Grok home from its install script. The package carries the binary compressed; the adapter unpacks it once per version into a folder of the app's own and runs it from there. A folder that is a link, or that anyone but the user can write to, is refused. Each start marks the copy it runs as run, and removes the copies that no build of the app has run for a week, whether of other versions or left partial by an unpacking that did not finish: builds that share the app's data folder, such as a development build beside a packaged app, may each run another version and keep their own copy, while a version no build runs any more goes a week after its last run. A partial copy being written is new and stays.
+  - The CLI (`main/install.ts`, ADR-0039): `grokBuildInstall` describes Grok Build's CLI to the installs module: `grok` on the PATH, from 1.0.92 on, read from `--version`. The app's copy is the pinned `@xai-official/grok-darwin-arm64` package's build, by `main/pin.json`, whose binary comes compressed with brotli and is unpacked as it is downloaded. The adapter has the platform package as a development dependency, rather than the `@xai-official/grok` package around it, since that one's install script would copy the binary into the user's Grok home. A session takes its binary from `prepare`, which may download the app's copy first, and starts each of its processes from it; a probe takes the one `current` gives.
   - Connection (`main/process.ts`): ACP over standard input and output. Grok's log output is drained and never kept. The app tells Grok that it reads and writes no files and runs no terminals for it, so Grok uses its own tools.
   - Start: `session/new` in the session's folder, with `_meta.askUserQuestion`, which has Grok ask through its own question tool, and the mode's flag; then the model and effort if chosen.
   - Resume: `session/load`, which replays the session's updates before `replay-finished`.
@@ -41,20 +41,21 @@ tags: []
 - Host execution policy: the shared broker authorizes operations independently of Grok's permissions. The adapter passes its bound HTTP toolset on new, load and resume, rotates access on process replacement and forwards registered tool callbacks in both modes. Missing HTTP support is reported without disabling chat. Grok's own question tool remains its own.
 - Grok's plan mode, its extension methods beyond the question tool, the interjection and the notices of its queue, turns and retries (such as fork, rewind and compaction), MCP elicitations, and its own MCP servers, hooks and skills, which run as Grok's settings say.
 - The environment of an app opened from the Finder: Grok runs with the app's environment, so a variable that a custom model reads its key from reaches Grok only when the app has it.
-- Hosting: the main process runs the adapter and gives it the folder for the binary.
+- Hosting: the main process runs the adapter and gives it Grok Build's install. `grok login` is the sign-in command, from the binary `prepare` gives.
 
 ## Interface
 
-- `createGrokBuildProvider(options)` from `main/adapter.ts`, which returns a `Provider` (DOC-mod-sessions) that is also an `AccountSource` (DOC-mod-accounts). `options.binaryFolder` is the app's folder for the unpacked binary; `options.startGrok` replaces the process, for tests.
+- `createGrokBuildProvider(options)` from `main/adapter.ts`, which returns a `Provider` (DOC-mod-sessions) that is also an `AccountSource` (DOC-mod-accounts). `options.install` gives where Grok Build's processes come from (DOC-mod-installs); `options.startGrok` replaces the process, for tests.
+- `grokBuildInstall` from `main/install.ts`, for the app module.
 
 ## Dependencies
 
-- Uses only the sessions module's interface and model (`src/sessions/main/provider.ts` and `src/sessions/shared/`), the accounts module's interface and model (`src/accounts/main/source.ts` and `src/accounts/shared/`), the ACP TypeScript SDK `@agentclientprotocol/sdk`, bundled, the `@xai-official/grok-darwin-arm64` binary at run time, `zod`, `diff` and Node.js built-ins. The rules `providers-only-to-sessions-and-accounts-contracts` and `providers-not-to-each-other` in `.dependency-cruiser.js` enforce this.
+- Uses only the sessions module's interface and model (`src/sessions/main/provider.ts` and `src/sessions/shared/`), the accounts module's interface and model (`src/accounts/main/source.ts` and `src/accounts/shared/`), the installs module's interface and model (`src/installs/main/install.ts` and `src/installs/shared/`), the ACP TypeScript SDK `@agentclientprotocol/sdk`, bundled, Grok Build's binary at run time, `zod`, `diff` and Node.js built-ins. The rules `providers-only-to-sessions-and-accounts-contracts` and `providers-not-to-each-other` in `.dependency-cruiser.js` enforce this.
 - Only the app module, which hosts providers, may import it.
 
 ## Invariants
 
 - Sessions start in `auto` unless the user chose `yolo`; `yolo` is only ever entered by the user's choice.
 - A sandbox level's profile never depends on the mode, and switching one never changes the other; every process runs at an explicit profile, `off` included.
-- The binary runs only from a folder of the app's own that only the user can write to.
+- The app's copy runs only from a folder of the app's own that only the user can write to (DOC-mod-installs).
 - The unit tests put a fake Grok, on the ACP SDK's own agent side, in place of the process (`main/adapter.test.ts`). The live test (`main/adapter.live.test.ts`) drives a real session on the account's usage, in a throwaway folder outside the temporary folders, which Grok's read-only profile can write to, so only `corepack pnpm run test:live` runs it. It checks that Grok's question tool asks in `yolo`, that read-only stops a write, and that the session can write once switched to workspace-write.

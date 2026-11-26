@@ -1,0 +1,7 @@
+{
+  "version": "0.171.0",
+  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.171.0-darwin-arm64.tgz",
+  "integrity": "sha512-hIYTkRUpuYpkVfTq4cpby0PXqhAVcIgE7f6FoyY1lt2RyARj3GXS1Can/dIYUBItVhXzhb98HYHZNzCX74QRlQ==",
+  "folder": "package/vendor/aarch64-apple-darwin",
+  "binary": "bin/codex"
+}

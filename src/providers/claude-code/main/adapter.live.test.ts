@@ -17,6 +17,7 @@ import {
   type SessionState,
 } from '../../../sessions/shared/session-state';
 import { createClaudeCodeProvider } from './adapter';
+import { pinnedInstall } from '../../../../tests/provider-copies';
 
 // Drives a real Claude Code session on the signed-in account, in a throwaway folder. Only
 // `corepack pnpm run test:live` runs it, never the check command: it needs Claude Code signed in, and
@@ -77,7 +78,7 @@ function lastAgentText(state: SessionState): string {
 }
 
 it('streams turns in auto mode, writes, answers a question, switches mode, model, effort, gateway and sandbox, and resumes', async () => {
-  const provider = createClaudeCodeProvider({ gatewaysDir });
+  const provider = createClaudeCodeProvider({ gatewaysDir, install: pinnedInstall('claude-code') });
   expect(await provider.listGateways()).toEqual(['plain']);
   // The models come from a probe that starts no session.
   expect((await provider.listModels(null)).some((model) => model.id === 'haiku')).toBe(true);

@@ -6,7 +6,7 @@ export interface SettingsStorage {
   save(settings: AppSettings): void;
 }
 
-// settings.json in the folder, the app's data folder (ADR-0004), readable by the user alone. A file
+// settings.json in the folder, the app's data folder (ADR-0039), readable by the user alone. A file
 // that is not JSON is cleared, and a value that is not one of the choices gives way to the default.
 export function settingsStorage(folder: string): SettingsStorage {
   const store = new ElectronStore<Record<string, unknown>>({

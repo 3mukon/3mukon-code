@@ -192,11 +192,12 @@ export function App({ bridge }: { bridge: Bridge }) {
     }, reportTerminal);
   };
 
-  // The provider's own sign-in command, in a terminal beside the focused panel.
+  // The provider's own sign-in command, in a terminal beside the focused panel, once the app's copy is
+  // downloaded where the provider is not installed; a failed download shows in the accounts' views.
   const signIn = (provider: ProviderId) => {
     bridge.accounts.signIn(provider).then((terminal) => {
       panels.open([{ kind: 'terminal', id: terminal.id, cwd: terminal.cwd }]);
-    }, reportTerminal);
+    }, reportSignIn);
   };
 
   const openAccounts = () => {
@@ -207,7 +208,11 @@ export function App({ bridge }: { bridge: Bridge }) {
   const accountViews: AccountViews = {
     signedOut: (provider) => accounts.of(provider)?.signIn.state === 'signed-out',
     signedIn: (provider) => accounts.of(provider)?.signIn.state === 'signed-in',
-    signIn: (provider) => <SignInPrompt provider={provider} onSignIn={signIn} />,
+    notInstalled: (provider) => accounts.of(provider)?.install?.runs === null,
+    downloading: (provider) => accounts.of(provider)?.install?.downloading !== undefined,
+    signIn: (provider) => (
+      <SignInPrompt provider={provider} account={accounts.of(provider)} onSignIn={signIn} />
+    ),
     notice: (provider) => {
       const account = accounts.of(provider);
       return mostUsed(account?.usage) === undefined ? null : (
@@ -1051,6 +1056,10 @@ function reportSidebar(error: unknown): void {
 
 function reportTerminal(error: unknown): void {
   console.error('The terminal could not open:', error);
+}
+
+function reportSignIn(error: unknown): void {
+  console.error('The sign-in could not start:', error);
 }
 
 // The application a target belongs to, as the session's automation lists it: the target itself for an

@@ -122,7 +122,8 @@
       "showMarkdown": "以 Markdown 显示",
       "copy": "拷贝消息",
       "copied": "已拷贝",
-      "notSignedIn": "{{provider}}（未登录）"
+      "notSignedIn": "{{provider}}（未登录）",
+      "notInstalled": "{{provider}}（未安装）"
     },
     "tool": {
       "named": "{{kind}}：",
@@ -593,6 +594,7 @@
     "title": "账户",
     "signIn": "登录",
     "signInPrompt": "{{provider}} 尚未登录。",
+    "signInPromptInstall": "{{provider}} 尚未安装。登录时会先下载。",
     "state": {
       "subscription": "已通过订阅登录",
       "key": "已通过 API 密钥登录",
@@ -601,6 +603,22 @@
       "unknown": "尚不知道登录状态"
     },
     "checking": "正在检查…",
+    "install": {
+      "notInstalled": "未安装",
+      "user": "运行你的 CLI，{{version}}",
+      "app": "运行应用自己的副本，{{version}}",
+      "download": "登录时会先下载应用自己的副本，{{version}}。",
+      "older": "你在 {{path}} 的 CLI 版本为 {{version}}，早于应用能运行的最低版本 {{oldest}}。",
+      "unread": "应用无法读取你在 {{path}} 的 CLI 的版本。",
+      "update": "将在下次登录或会话时更新到 {{version}}。",
+      "downloading": "正在下载 {{version}}… {{progress}}",
+      "failed": {
+        "network": "下载失败：无法连接到下载地址。点按“登录”可重试。",
+        "checksum": "下载的内容与校验值不符，因此不会运行。点按“登录”可重试。",
+        "unpack": "下载的内容无法解包。点按“登录”可重试。",
+        "folder": "应用的数据文件夹无法存放下载的内容。点按“登录”可重试。"
+      }
+    },
     "window": {
       "five-hour": "5 小时限额",
       "day": "每日限额",

@@ -169,12 +169,6 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.330
         version: 0.3.330(@anthropic-ai/sdk@1.3.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(supports-color@7.2.0)(zod@4.6.7))(zod@4.6.7)
-      '@openai/codex':
-        specifier: 0.171.0
-        version: 0.171.0
-      '@xai-official/grok-darwin-arm64':
-        specifier: 1.0.92
-        version: 1.0.92
       node-pty:
         specifier: 1.2.0-beta.18
         version: 1.2.0-beta.18
@@ -212,6 +206,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(supports-color@7.2.0)(zod@4.6.7)
+      '@openai/codex':
+        specifier: 0.171.0
+        version: 0.171.0
       '@playwright/test':
         specifier: 1.64.1
         version: 1.64.1
@@ -236,6 +233,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: 6.1.2
         version: 6.1.2(vite@8.3.5(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+      '@xai-official/grok-darwin-arm64':
+        specifier: 1.0.92
+        version: 1.0.92
       '@xterm/addon-fit':
         specifier: 0.11.0
         version: 0.11.0

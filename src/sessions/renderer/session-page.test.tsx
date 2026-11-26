@@ -120,6 +120,8 @@ describe('SessionPage', () => {
     const accounts = {
       signedOut: (provider: string) => provider === 'codex',
       signedIn: (provider: string) => provider === 'claude-code',
+      notInstalled: () => false,
+      downloading: () => false,
       signIn: (provider: string) => <p>Sign in to {provider}</p>,
       notice: (provider: string) =>
         provider === 'claude-code' ? <span>Nearly used up</span> : null,
@@ -455,6 +457,8 @@ describe('SessionPage', () => {
     const views = (signedIn: string[], signedOut: string[] = []) => ({
       signedOut: (provider: string) => signedOut.includes(provider),
       signedIn: (provider: string) => signedIn.includes(provider),
+      notInstalled: () => false,
+      downloading: () => false,
       signIn: () => null,
       notice: () => null,
     });
@@ -504,6 +508,8 @@ describe('SessionPage', () => {
     const accounts = (codex: 'signed-out' | 'unknown') => ({
       signedOut: (provider: string) => provider === 'codex' && codex === 'signed-out',
       signedIn: (provider: string) => provider === 'claude-code',
+      notInstalled: () => false,
+      downloading: () => false,
       signIn: () => null,
       notice: () => null,
     });

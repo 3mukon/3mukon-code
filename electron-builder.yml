@@ -1,17 +1,17 @@
-# macOS arm64 only (invariant 8): an app folder and a disk image, ad-hoc signed for local use (ADR-0004).
+# macOS arm64 only (invariant 8): an app folder and a disk image, ad-hoc signed for local use (ADR-0039).
 appId: io.github.3mukon.3mukon-code
 files:
   - out/**
   - '!out/native/**'
   # node-pty's prebuilt modules for other systems, which the app never loads.
   - '!**/node_modules/node-pty/prebuilds/!(darwin-arm64)/**'
-# What the app runs as programs, which macOS cannot run from inside the app's archive: the Claude Code
-# and Codex binaries of the pinned provider packages, with the tools beside Codex's, and node-pty's
-# module and spawn helper (ADR-0015). Grok Build's binary stays inside, compressed, since its adapter
-# unpacks it into the app's data. The signing below signs the unpacked binaries too.
+  # The Claude Code binaries the Claude Agent SDK's packages for each platform bring: the app runs the
+  # user's CLI or its own downloaded copy, and carries no provider's binary (ADR-0039). The Codex and
+  # Grok Build packages are development dependencies, which the app leaves out anyway.
+  - '!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**'
+# What the app runs as programs, which macOS cannot run from inside the app's archive: node-pty's module
+# and spawn helper (ADR-0015). The signing below signs them too.
 asarUnpack:
-  - '**/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/**'
-  - '**/node_modules/@openai/codex-darwin-arm64/vendor/**'
   - '**/node_modules/node-pty/prebuilds/darwin-arm64/**'
 npmRebuild: false
 afterPack: scripts/stage-native-helper.mjs
