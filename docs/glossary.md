@@ -16,7 +16,7 @@ One name per concept: naming and search follow the Term column, and Avoid lists 
 |---|---|---|
 | desktop app | The macOS application this repository builds | client, frontend |
 | maintainer | The person who owns this repository's hard base and approves changes to it | owner, admin |
-| provider | A coding-agent tool the app drives through its own SDK or CLI: Claude Code, Codex or Grok Build | backend, engine |
+| provider | A coding-agent tool the app drives through its own SDK or CLI: Claude Code, Codex, Grok Build or Antigravity | backend, engine |
 | permission mode | What a session asks the user before acting: auto or yolo (ADR-0006) | approval mode |
 | user's CLI | A provider's command-line tool that the user installed and keeps up to date, which the app runs where it is on the PATH at or above the oldest version the adapter drives (ADR-0039) | local install, system CLI |
 | app's copy | A provider's official build at the version and checksum the app pins, which the app downloads into its data folder and runs where it has no user's CLI to run (ADR-0039) | bundled binary, managed install |

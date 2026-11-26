@@ -1,10 +1,15 @@
-/* global console, process */
+/* global Buffer, console, fetch, process */
 // Writes the pin of each provider's copy that the app downloads where the user has no CLI of theirs
 // (ADR-0039), from the provider packages pinned in package.json and pnpm-lock.yaml: the version of
 // the CLI the copy is, the npm registry's tarball of the package's build for macOS on Apple silicon,
 // that tarball's sha512 integrity as the lockfile records it, and where the binary lies in it. Run it
 // after each upgrade of a provider package: corepack pnpm run providers:pins. With --check it writes
 // nothing and fails when a pin differs from what it would write, as the contract test runs it.
+//
+// Antigravity is published outside npm, so its pin comes from Google's update manifest for macOS on
+// Apple silicon, which names the latest build's version, its versioned address and its SHA-512. Only
+// --antigravity reads the manifest, moving the pin to that build: corepack pnpm run providers:pins
+// --antigravity. Otherwise the pin stays as it is, and --check checks its form, offline.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,7 +82,41 @@ const pins = {
   },
 };
 
+// Google's update manifest for agy on macOS on Apple silicon, which its installer reads, and the form
+// of the versioned addresses it names.
+const ANTIGRAVITY_PIN = 'src/providers/antigravity/main/pin.json';
+const ANTIGRAVITY_MANIFEST =
+  'https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/darwin_arm64.json';
+const ANTIGRAVITY_BUILD =
+  /^https:\/\/storage\.googleapis\.com\/antigravity-public\/antigravity-cli\/(\d+\.\d+\.\d+)-\d+\/darwin-arm\/cli_mac_arm64\.tar\.gz$/;
+
+// The pin of a build the manifest names: its SHA-512, in hexadecimal there, as an integrity. The
+// tarball holds the binary, `antigravity`, at its root.
+function antigravityPin({ version, url, sha512 }) {
+  if (ANTIGRAVITY_BUILD.exec(url ?? '')?.[1] !== version || !/^[0-9a-f]{128}$/.test(sha512 ?? '')) {
+    throw new Error(`Google's manifest names no build of agy in the form this script reads.`);
+  }
+  const integrity = `sha512-${Buffer.from(sha512, 'hex').toString('base64')}`;
+  return { version, url, integrity, folder: '', binary: 'antigravity' };
+}
+
+// Whether a pin of agy has the form antigravityPin writes.
+function wellFormed(pin) {
+  return (
+    ANTIGRAVITY_BUILD.exec(pin.url ?? '')?.[1] === pin.version &&
+    /^sha512-[A-Za-z0-9+/]{86}==$/.test(pin.integrity ?? '') &&
+    pin.folder === '' &&
+    pin.binary === 'antigravity' &&
+    Object.keys(pin).length === 5
+  );
+}
+
 const check = process.argv.includes('--check');
+if (process.argv.includes('--antigravity') && !check) {
+  const response = await fetch(ANTIGRAVITY_MANIFEST);
+  if (!response.ok) throw new Error(`Google's manifest answered ${String(response.status)}.`);
+  pins[ANTIGRAVITY_PIN] = antigravityPin(await response.json());
+}
 let differs = false;
 for (const [path, pin] of Object.entries(pins)) {
   const text = `${JSON.stringify(pin, null, 2)}\n`;
@@ -95,5 +134,17 @@ for (const [path, pin] of Object.entries(pins)) {
     writeFileSync(join(root, path), text);
     console.log(`wrote ${path}`);
   }
+}
+let antigravity = null;
+try {
+  antigravity = JSON.parse(read(ANTIGRAVITY_PIN));
+} catch {
+  // Not written yet.
+}
+if (antigravity === null || !wellFormed(antigravity)) {
+  differs = true;
+  console.error(
+    `${ANTIGRAVITY_PIN} is not a pin of Google's build of agy; run: corepack pnpm run providers:pins --antigravity`,
+  );
 }
 if (differs) process.exit(1);

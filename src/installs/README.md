@@ -13,7 +13,7 @@ tags: []
 ## Responsibilities
 
 - **The adapters' interface** (`main/install.ts`, ADR-0039):
-  - `Pin`: the build the app's copy is made from. It holds the CLI's version, the tarball's address and its sha512 integrity, the tarball's folder the copy is made of, and the binary in it, which may come compressed with brotli. Each adapter's `pin.json` holds one, written by `scripts/provider-pins.mjs` from the lockfile.
+  - `Pin`: the build the app's copy is made from. It holds the CLI's version, the tarball's address and its sha512 integrity, the tarball's folder the copy is made of, or its root, and the binary in it, which may come compressed with brotli. Each adapter's `pin.json` holds one, written by `scripts/provider-pins.mjs` from the lockfile, or for Antigravity, which Google publishes outside npm, from Google's update manifest.
   - `InstallSpec`: what an adapter says of its CLI, namely its name on the PATH, the oldest version it drives, how to read the version from `--version`, and its pin.
   - `Binary`: a path, a version, and whether it is the user's CLI or the app's copy.
   - `ProviderInstall`: what an adapter and the accounts ask for. `current` gives the binary for any process; `prepare` gives the binary for a sign-in or a session, downloading first where needed; `view` and `onChange` give what Accounts shows.
@@ -32,12 +32,12 @@ tags: []
   - Each copy is marked when it runs. Copies no build has run for a week go, as do the partial ones a download left.
 - **Downloads** (`main/download.ts`, `downloadBuild`):
   - The pin's tarball is streamed through the app module's fetch, Electron's `net.fetch`, and hashed as it arrives. A download fails after a minute without a byte.
-  - Only a tarball that matches the pin's integrity is unpacked, with macOS's own `/usr/bin/tar`, taking the pin's folder alone. The binary comes out of brotli where the pin says so, and is left for the user alone to run.
+  - Only a tarball that matches the pin's integrity is unpacked, with macOS's own `/usr/bin/tar`, taking the pin's folder alone, or the whole tarball where the build lies at its root. The binary comes out of brotli where the pin says so, and is left for the user alone to run.
   - Failures are a `DownloadError` naming the `DownloadProblem`: `network`, `checksum`, `unpack` or `folder`.
 - **The model** (`shared/installs.ts`):
   - `InstallView`: what runs, the source and version, or nothing; the CLI the app passed over and why; the pinned version; a download's progress; and the last download's problem.
   - `updatePending`: true where the app runs a copy of its own at a version other than the pinned one.
-- **Test builds** (`main/builds-fake.ts`): a tarball laid out as npm's are, its integrity, and a download server of the tests' own.
+- **Test builds** (`main/builds-fake.ts`): a tarball laid out as npm's are, or with its files at its root as Google's are, its integrity, and a download server of the tests' own.
 
 ## Not responsible for
 
@@ -62,4 +62,4 @@ tags: []
 
 - Nothing runs from a download that was not whole and checked against its pin, and no copy runs from a folder or file that someone else could have changed.
 - Every copy is the build of a pin. The app keeps no credentials and reads nothing of the providers' homes here (invariant 9).
-- The choosing, versions, copies and downloads have unit tests: `main/installs.test.ts`, `main/find.test.ts`, `main/version.test.ts`, `main/copies.test.ts` and `main/download.test.ts`. These run fake CLIs and a local server. `tests/contracts/provider-pins.test.ts` keeps each adapter's pin equal to the lockfile's.
+- The choosing, versions, copies and downloads have unit tests: `main/installs.test.ts`, `main/find.test.ts`, `main/version.test.ts`, `main/copies.test.ts` and `main/download.test.ts`. These run fake CLIs and a local server. `tests/contracts/provider-pins.test.ts` keeps each adapter's pin equal to the lockfile's, and Antigravity's in the form of Google's builds.

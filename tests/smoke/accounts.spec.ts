@@ -17,12 +17,17 @@ test('the Accounts panel opens from the gauge and says which providers are not s
       await expect(accounts).toHaveAttribute('aria-current', 'true');
       // Each provider reads its own settings, which sign it in to nothing here.
       const rows = accounts.getByRole('listitem');
-      await expect(rows).toHaveCount(3);
+      await expect(rows).toHaveCount(4);
       for (const provider of ['Claude Code', 'Codex CLI']) {
         const row = rows.filter({ hasText: provider });
         await expect(row).toContainText('Not signed in', { timeout: 30_000 });
         await expect(row.getByRole('button', { name: 'Sign In' })).toBeVisible();
       }
+      // Antigravity has no package, so the tests have no copy of it: it is not installed, and never
+      // runs here (L-0007), and Sign In would download Google's build.
+      const antigravity = rows.filter({ hasText: 'Antigravity' });
+      await expect(antigravity).toContainText('Not installed');
+      await expect(antigravity.getByRole('button', { name: 'Sign In' })).toBeVisible();
       // Each runs the CLI the app found where it looks for them, here the test's copies of the pinned
       // packages' binaries (ADR-0039).
       await expect(rows.filter({ hasText: 'Claude Code' })).toContainText('Runs your CLI, 2.1.330');

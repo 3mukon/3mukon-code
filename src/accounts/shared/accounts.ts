@@ -28,8 +28,9 @@ export interface UsageWindow {
 }
 
 // Why a subscription's usage could not be read: the provider could not fetch it for the sign-in it
-// holds, the app could not ask the provider, or the provider answered in a shape the app does not read.
-export type UsageProblem = 'refused' | 'unreachable' | 'unreadable';
+// holds, the app could not ask the provider, the provider answered in a shape the app does not read, or
+// the provider offers no program its usage limits at all, as Antigravity does not.
+export type UsageProblem = 'refused' | 'unreachable' | 'unreadable' | 'unoffered';
 
 // What a failed request for the usage says of why: refused when the provider's message speaks of the
 // sign-in or of access, unreachable otherwise.

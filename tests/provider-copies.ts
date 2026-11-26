@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { brotliDecompressSync } from 'node:zlib';
@@ -15,7 +17,13 @@ function pinnedVersion(provider: ProviderId): string {
   const pin = join(process.cwd(), 'src', 'providers', provider, 'main', 'pin.json');
   return (JSON.parse(readFileSync(pin, 'utf8')) as { version: string }).version;
 }
-const COMMANDS = { 'claude-code': 'claude', codex: 'codex', 'grok-build': 'grok' } as const;
+// The providers whose packages carry their binaries, by the command each answers to. Antigravity has
+// no package, so the smoke and packaged tests have no copy of it, and it shows there as not installed.
+const COMMANDS: Partial<Record<ProviderId, string>> = {
+  'claude-code': 'claude',
+  codex: 'codex',
+  'grok-build': 'grok',
+};
 
 // The pinned package's binary for the provider.
 export function pinnedBinary(provider: ProviderId): string {
@@ -35,6 +43,8 @@ export function pinnedBinary(provider: ProviderId): string {
     }
     case 'grok-build':
       return unpackedGrok();
+    case 'antigravity':
+      throw new Error('Antigravity has no package; pinnedInstall downloads its pinned build.');
   }
 }
 
@@ -54,19 +64,49 @@ function unpackedGrok(): string {
   return binary;
 }
 
+// Antigravity's pinned build, which Google serves outside npm: downloaded once for each version into
+// node_modules' cache, checked against its pin, and unpacked there, where it appears only once whole.
+async function downloadedAntigravity(): Promise<string> {
+  const pinFile = join(process.cwd(), 'src', 'providers', 'antigravity', 'main', 'pin.json');
+  const pin = JSON.parse(readFileSync(pinFile, 'utf8')) as {
+    version: string;
+    url: string;
+    integrity: string;
+    binary: string;
+  };
+  const folder = join(process.cwd(), 'node_modules', '.cache', '3mukon-code');
+  const copy = join(folder, `antigravity-${pin.version}`);
+  const binary = join(copy, pin.binary);
+  if (existsSync(binary)) return binary;
+  const response = await fetch(pin.url);
+  if (!response.ok) throw new Error(`${pin.url} answered ${String(response.status)}.`);
+  const build = Buffer.from(await response.arrayBuffer());
+  if (`sha512-${createHash('sha512').update(build).digest('base64')}` !== pin.integrity) {
+    throw new Error(`The build of Antigravity ${pin.version} does not match its pin.`);
+  }
+  const partial = `${copy}.${String(process.pid)}`;
+  rmSync(partial, { recursive: true, force: true });
+  mkdirSync(partial, { recursive: true });
+  writeFileSync(join(partial, 'build.tgz'), build);
+  execFileSync('/usr/bin/tar', ['-xzf', join(partial, 'build.tgz'), '-C', partial]);
+  rmSync(join(partial, 'build.tgz'));
+  renameSync(partial, copy);
+  return binary;
+}
+
 // A provider's CLI that is always its pinned binary, run as the app's own copy, for the live tests.
 export function pinnedInstall(provider: ProviderId): ProviderInstall {
-  const binary = {
-    path: pinnedBinary(provider),
-    version: pinnedVersion(provider),
+  const version = pinnedVersion(provider);
+  const binary = async () => ({
+    path: provider === 'antigravity' ? await downloadedAntigravity() : pinnedBinary(provider),
+    version,
     source: 'app' as const,
-  };
+  });
   return {
     provider,
-    current: () => Promise.resolve(binary),
-    prepare: () => Promise.resolve(binary),
-    view: () =>
-      Promise.resolve({ runs: { source: 'app', version: binary.version }, pinned: binary.version }),
+    current: binary,
+    prepare: binary,
+    view: () => Promise.resolve({ runs: { source: 'app', version }, pinned: version }),
     onChange: () => () => undefined,
   };
 }
@@ -77,14 +117,10 @@ export function pinnedInstall(provider: ProviderId): ProviderInstall {
 export function providerCopies(folder: string): string {
   const copies = join(folder, 'provider-copies');
   mkdirSync(copies, { recursive: true });
-  for (const provider of Object.keys(COMMANDS) as ProviderId[]) {
-    writeFileSync(
-      join(copies, COMMANDS[provider]),
-      `#!/bin/sh\nexec '${pinnedBinary(provider)}' "$@"\n`,
-      {
-        mode: 0o755,
-      },
-    );
+  for (const [provider, command] of Object.entries(COMMANDS) as [ProviderId, string][]) {
+    writeFileSync(join(copies, command), `#!/bin/sh\nexec '${pinnedBinary(provider)}' "$@"\n`, {
+      mode: 0o755,
+    });
   }
   return copies;
 }

@@ -8,17 +8,26 @@ import { basename, join } from 'node:path';
 // Builds and a download server of the tests' own, for the installs module's tests and the smoke tests
 // that download a provider's copy (ADR-0039).
 
-// A build as the npm registry serves one: a gzipped tarball of a `package` folder.
-export function tarball(folder: string, files: Record<string, string | Buffer>): Buffer {
+// A build as the npm registry serves one: a gzipped tarball of a `package` folder; or, with `inside`
+// empty, of the files themselves at the tarball's root, as Google serves its builds of `agy`.
+export function tarball(
+  folder: string,
+  files: Record<string, string | Buffer>,
+  inside = 'package',
+): Buffer {
   const source = mkdtempSync(join(folder, 'source-'));
   for (const [name, contents] of Object.entries(files)) {
-    const path = join(source, 'package', name);
+    const path = join(source, inside, name);
     mkdirSync(join(path, '..'), { recursive: true });
     writeFileSync(path, contents);
     chmodSync(path, 0o755);
   }
   const archive = join(folder, `${basename(source)}.tgz`);
-  execFileSync('/usr/bin/tar', ['-czf', archive, '-C', source, 'package']);
+  const members =
+    inside === ''
+      ? [...new Set(Object.keys(files).map((name) => name.split('/')[0] ?? name))]
+      : [inside];
+  execFileSync('/usr/bin/tar', ['-czf', archive, '-C', source, ...members]);
   return readFileSync(archive);
 }
 

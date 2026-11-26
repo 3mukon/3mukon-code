@@ -7,7 +7,7 @@ import type { McpCall } from './tools';
 // provider (messages, titles, reasons, questions) is shown as data, never as UI copy. Paths are
 // relative to the session's folder when they lie inside it, and absolute otherwise.
 
-export type ProviderId = 'claude-code' | 'codex' | 'grok-build';
+export type ProviderId = 'claude-code' | 'codex' | 'grok-build' | 'antigravity';
 
 // The two permission modes every provider offers (ADR-0006). In auto, the provider's own automatic
 // review approves or denies each action and asks the user only when it cannot decide; in yolo, nothing

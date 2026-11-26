@@ -3,7 +3,8 @@ import type { InstallView } from '../shared/installs';
 
 // Where the app's copy of a provider comes from: the provider's official build for macOS on Apple
 // silicon, at the version the app's build pins, checked against the checksum it pins (ADR-0039). Each
-// adapter's `pin.json` holds one, which `scripts/provider-pins.mjs` writes from the lockfile.
+// adapter's `pin.json` holds one, which `scripts/provider-pins.mjs` writes from the lockfile, or for a
+// provider published outside npm from its maker's manifest.
 export interface Pin {
   // The version of the CLI that the build is, as its `--version` says it.
   version: string;
@@ -12,7 +13,8 @@ export interface Pin {
   // The tarball's checksum in the form the lockfile and the npm registry give: `sha512-` and the
   // digest in base64.
   integrity: string;
-  // The tarball's folder that the copy is made of, and the binary in it, which the app runs.
+  // The tarball's folder that the copy is made of, empty where the build lies at the tarball's root,
+  // and the binary in it, which the app runs.
   folder: string;
   binary: string;
   // The binary is compressed with brotli, and runs unpacked, without its `.br`.

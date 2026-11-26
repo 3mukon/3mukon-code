@@ -45,7 +45,12 @@ const firstChoice: Choice = {
 };
 
 // The providers in the provider menu's order, until the app's own list comes.
-const listedProviders: readonly ProviderId[] = ['claude-code', 'codex', 'grok-build'];
+const listedProviders: readonly ProviderId[] = [
+  'claude-code',
+  'codex',
+  'grok-build',
+  'antigravity',
+];
 
 const modes: PermissionMode[] = ['auto', 'yolo'];
 const sandboxes: SandboxLevel[] = ['read-only', 'workspace-write', 'full-access'];

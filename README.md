@@ -1,12 +1,12 @@
 # 3mukon-code
 
-A macOS desktop app for working with coding agents (Claude Code, Codex and Grok Build): start and follow agent sessions, answer their questions and approvals, and review what they changed, all in one place.
+A macOS desktop app for working with coding agents (Claude Code, Codex, Grok Build and Antigravity): start and follow agent sessions, answer their questions and approvals, and review what they changed, all in one place.
 
 This description is a working version.
 
 ## Status
 
-The first version is built and awaits its acceptance run. It runs sessions with Claude Code, Codex and Grok Build in the folders of the user's workspaces, follows them live with their approvals and questions answered in place, and resumes and searches them after a restart; its main area arranges sessions, files, terminals and its own panels side by side; it shows each provider's sign-in and usage limits; and it comes in English and Simplified Chinese, in light and dark. [docs/ui.md](docs/ui.md) maps the window, and [docs/providers.md](docs/providers.md) sets the providers side by side.
+The first version is built and awaits its acceptance run. It runs sessions with Claude Code, Codex, Grok Build and Antigravity in the folders of the user's workspaces, follows them live with their approvals and questions answered in place, and resumes and searches them after a restart; its main area arranges sessions, files, terminals and its own panels side by side; it shows each provider's sign-in and usage limits; and it comes in English and Simplified Chinese, in light and dark. [docs/ui.md](docs/ui.md) maps the window, and [docs/providers.md](docs/providers.md) sets the providers side by side.
 
 ## Quick start
 

@@ -29,6 +29,7 @@ export function windowWorkspacesUi(
           claudeCode: t('providers.claude-code'),
           codex: t('providers.codex'),
           grokBuild: t('providers.grok-build'),
+          antigravity: t('providers.antigravity'),
         }),
         answers: [
           { id: 'trust', label: t('workspaces.trust.trust') },

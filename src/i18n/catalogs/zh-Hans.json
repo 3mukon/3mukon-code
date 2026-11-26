@@ -17,7 +17,7 @@
     },
     "trust": {
       "message": "你信任“{{name}}”中的文件吗？",
-      "detail": "{{path}}\n\n3mukon-code 会把你的回答与这个工作区一起保存，你之后可以在工作区的菜单中更改。{{claudeCode}}、{{codex}} 和 {{grokBuild}} 仍按各自的信任规则处理。",
+      "detail": "{{path}}\n\n3mukon-code 会把你的回答与这个工作区一起保存，你之后可以在工作区的菜单中更改。{{claudeCode}}、{{codex}}、{{grokBuild}} 和 {{antigravity}} 仍按各自的信任规则处理。",
       "trust": "信任",
       "distrust": "不信任"
     },
@@ -578,7 +578,8 @@
   "providers": {
     "claude-code": "Claude Code",
     "codex": "Codex CLI",
-    "grok-build": "Grok Build"
+    "grok-build": "Grok Build",
+    "antigravity": "Antigravity"
   },
   "terminal": {
     "title": "终端",
@@ -636,7 +637,8 @@
     "problem": {
       "refused": "无法获取此登录的用量，重新登录或许有用。",
       "unreachable": "无法向 {{provider}} 询问用量。",
-      "unreadable": "{{provider}} 的回答格式无法读取。"
+      "unreadable": "{{provider}} 的回答格式无法读取。",
+      "unoffered": "{{provider}} 不向其他程序提供用量限额。"
     },
     "resetsLeft_other": "剩余 {{count}} 次重置",
     "reset": "重置限额",

@@ -17,7 +17,7 @@
     },
     "trust": {
       "message": "Do you trust the files in “{{name}}”?",
-      "detail": "{{path}}\n\n3mukon-code keeps your answer with the workspace, and you can change it later from the workspace’s menu. {{claudeCode}}, {{codex}} and {{grokBuild}} still apply their own trust rules.",
+      "detail": "{{path}}\n\n3mukon-code keeps your answer with the workspace, and you can change it later from the workspace’s menu. {{claudeCode}}, {{codex}}, {{grokBuild}} and {{antigravity}} still apply their own trust rules.",
       "trust": "Trust",
       "distrust": "Don’t Trust"
     },
@@ -582,7 +582,8 @@
   "providers": {
     "claude-code": "Claude Code",
     "codex": "Codex CLI",
-    "grok-build": "Grok Build"
+    "grok-build": "Grok Build",
+    "antigravity": "Antigravity"
   },
   "terminal": {
     "title": "Terminal",
@@ -640,7 +641,8 @@
     "problem": {
       "refused": "Couldn’t fetch the usage for this sign-in. Signing in again may help.",
       "unreachable": "Couldn’t ask {{provider}} for its usage.",
-      "unreadable": "{{provider}} answered in a form this version can’t read."
+      "unreadable": "{{provider}} answered in a form this version can’t read.",
+      "unoffered": "{{provider}} gives no program its usage limits."
     },
     "resetsLeft_one": "{{count}} reset left",
     "resetsLeft_other": "{{count}} resets left",

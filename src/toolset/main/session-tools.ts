@@ -39,7 +39,7 @@ export function sessionTools(): SessionTool[] {
           'The child’s first message, which is its task: a self-contained brief with the goal, the scope, what to leave alone, and what to report back to you, and when.',
         ),
       provider: z
-        .enum(['claude-code', 'codex', 'grok-build'])
+        .enum(['claude-code', 'codex', 'grok-build', 'antigravity'])
         .optional()
         .describe('The child’s provider; yours when left out.'),
       model: z

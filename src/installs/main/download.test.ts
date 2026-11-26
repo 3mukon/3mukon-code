@@ -68,6 +68,21 @@ describe('a download', () => {
     expect(() => statSync(join(copy, 'grok.br'))).toThrow();
   });
 
+  it('unpacks a build whose binary lies at the tarball’s root, as Google serves agy', async () => {
+    const build = tarball(root, { antigravity: '#!/bin/sh\necho 1.5.18\n' }, '');
+    bodies.set('/cli_mac_arm64.tar.gz', build);
+    const pin: Pin = {
+      version: '1.5.18',
+      url: `${url}/cli_mac_arm64.tar.gz`,
+      integrity: integrity(build),
+      folder: '',
+      binary: 'antigravity',
+    };
+    const copy = await downloadBuild(pin, staging(), fetch, () => undefined);
+    expect(readFileSync(join(copy, 'antigravity'), 'utf8')).toBe('#!/bin/sh\necho 1.5.18\n');
+    expect(statSync(join(copy, 'antigravity')).mode & 0o777).toBe(0o700);
+  });
+
   it('says what failed: the address, the checksum, or a build without the binary', async () => {
     const build = tarball(root, { claude: '#!/bin/sh\n' });
     bodies.set('/claude.tgz', build);

@@ -17,7 +17,7 @@ describe('windowWorkspacesUi', () => {
     expect(ask.mock.calls[0]?.[0]).toMatchObject({
       message: 'Do you trust the files in “web”?',
       detail:
-        '/Users/me/web\n\n3mukon-code keeps your answer with the workspace, and you can change it later from the workspace’s menu. Claude Code, Codex CLI and Grok Build still apply their own trust rules.',
+        '/Users/me/web\n\n3mukon-code keeps your answer with the workspace, and you can change it later from the workspace’s menu. Claude Code, Codex CLI, Grok Build and Antigravity still apply their own trust rules.',
       answers: [
         { id: 'trust', label: 'Trust' },
         { id: 'distrust', label: 'Don’t Trust' },
@@ -35,7 +35,7 @@ describe('windowWorkspacesUi', () => {
     await ui.askTrust('web', '/Users/me/web');
     expect(ask.mock.calls[0]?.[0]).toMatchObject({
       detail:
-        '/Users/me/web\n\n3mukon-code 会把你的回答与这个工作区一起保存，你之后可以在工作区的菜单中更改。Claude Code、Codex CLI 和 Grok Build 仍按各自的信任规则处理。',
+        '/Users/me/web\n\n3mukon-code 会把你的回答与这个工作区一起保存，你之后可以在工作区的菜单中更改。Claude Code、Codex CLI、Grok Build 和 Antigravity 仍按各自的信任规则处理。',
     });
   });
 

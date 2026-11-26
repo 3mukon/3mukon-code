@@ -57,7 +57,7 @@ export function usageStorage(folder: string): UsageStorage {
       const kept = store.store.usage;
       if (typeof kept !== 'object' || kept === null) return {};
       const usage: KeptUsage = {};
-      for (const provider of ['claude-code', 'codex', 'grok-build'] as const) {
+      for (const provider of ['claude-code', 'codex', 'grok-build', 'antigravity'] as const) {
         const parsed = storedUsage.safeParse((kept as Record<string, unknown>)[provider]);
         if (parsed.success) usage[provider] = usageOf(parsed.data);
       }

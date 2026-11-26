@@ -37,7 +37,8 @@ export class DownloadError extends Error {
 }
 
 // Downloads the pinned build into the staging folder, hashing it as it arrives, and only where it
-// matches the pin's checksum unpacks the pin's folder from it with macOS's own tar, and the binary from
+// matches the pin's checksum unpacks the pin's folder from it, or all of it where the pin's folder is
+// the tarball's root, with macOS's own tar, and the binary from
 // brotli where the pin says so. Resolves with the unpacked folder, whose binary only the user may change
 // and run; rejects with a DownloadError that says what failed.
 export async function downloadBuild(
@@ -51,7 +52,9 @@ export async function downloadBuild(
   const unpacked = join(staging, 'unpacked');
   await mkdir(unpacked, { mode: 0o700 });
   try {
-    await run('/usr/bin/tar', ['-xzf', archive, '-C', unpacked, '--', pin.folder]);
+    // The pin's folder alone, or the whole tarball where the build lies at its root.
+    const members = pin.folder === '' ? [] : ['--', pin.folder];
+    await run('/usr/bin/tar', ['-xzf', archive, '-C', unpacked, ...members]);
   } catch (error) {
     throw new DownloadError('unpack', `The build of ${pin.version} could not be unpacked.`, {
       cause: error,
