@@ -267,7 +267,12 @@ describe('App', () => {
     const bridge = fakeBridge();
     vi.spyOn(bridge.accounts, 'list').mockResolvedValue({
       accounts: [
-        { provider: 'codex', signIn: { state: 'signed-out' }, resettable: true, reading: false },
+        {
+          provider: 'codex-cli',
+          signIn: { state: 'signed-out' },
+          resettable: true,
+          reading: false,
+        },
       ],
     });
     const signIn = vi.spyOn(bridge.accounts, 'signIn');
@@ -279,7 +284,7 @@ describe('App', () => {
       fireEvent.click(within(accounts).getByRole('button', { name: 'Sign In' }));
       await Promise.resolve();
     });
-    expect(signIn.mock.calls).toEqual([['codex']]);
+    expect(signIn.mock.calls).toEqual([['codex-cli']]);
     expect(within(main).getByRole('region', { name: 'Terminal' })).toBeTruthy();
   });
 
@@ -320,7 +325,7 @@ describe('App', () => {
         [
           {
             id: 's1',
-            provider: 'codex',
+            provider: 'codex-cli',
             sessionId: 'thread-1',
             cwd: '/Users/me/web',
             title: 'Fix the build',
@@ -434,7 +439,7 @@ describe('App', () => {
   it('counts the sessions waiting on the user beside the window buttons, and shows the one that has waited longest', async () => {
     const waiting = (id: string, title: string, waitingSince: number) => ({
       id,
-      provider: 'codex' as const,
+      provider: 'codex-cli' as const,
       sessionId: `thread-${id}`,
       cwd: '/Users/me/web',
       title,
@@ -487,7 +492,7 @@ describe('App', () => {
     const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
       {
         id: 's1',
-        provider: 'codex',
+        provider: 'codex-cli',
         sessionId: 'thread-1',
         cwd: '/Users/me/web',
         title: 'Read my invoices',
@@ -559,7 +564,7 @@ describe('App', () => {
   it('lists archived sessions apart, in a panel the button beside the window buttons opens, which shows one and acts on it', async () => {
     const summary = (id: string, title: string, archived: boolean): SessionSummary => ({
       id,
-      provider: 'codex',
+      provider: 'codex-cli',
       sessionId: `thread-${id}`,
       cwd: '/Users/me/web',
       title,
@@ -602,7 +607,7 @@ describe('App', () => {
     const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
       {
         id: 's1',
-        provider: 'codex',
+        provider: 'codex-cli',
         sessionId: 'thread-1',
         cwd: '/Users/me/web',
         title: 'Reply to invoices',
@@ -720,7 +725,7 @@ describe('App', () => {
     const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
       {
         id: 's1',
-        provider: 'codex',
+        provider: 'codex-cli',
         sessionId: 'thread-1',
         cwd: '/Users/me/web',
         title: 'Read my invoices',
@@ -853,7 +858,7 @@ describe('App', () => {
     const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
       {
         id: 's1',
-        provider: 'codex',
+        provider: 'codex-cli',
         sessionId: 'thread-1',
         cwd: '/Users/me/web',
         title: 'Read my invoices',
@@ -1136,7 +1141,7 @@ describe('App', () => {
     const bridge = fakeBridge();
     const summary: SessionSummary = {
       id: 's1',
-      provider: 'codex',
+      provider: 'codex-cli',
       sessionId: 'thread-1',
       cwd: '/Users/me/web',
       title: 'Fix the build',
@@ -1175,7 +1180,7 @@ describe('App', () => {
   it('closes the removed session’s panels and its child’s while cleanup is still pending', async () => {
     const parent: SessionSummary = {
       id: 's1',
-      provider: 'codex',
+      provider: 'codex-cli',
       sessionId: 'thread-1',
       cwd: '/Users/me/web',
       title: 'Fix the build',
@@ -1226,7 +1231,7 @@ describe('App', () => {
   it('shows the request that has waited longest with ⇧⌘A, with the focus on it, and the next waiting session’s at the next press', async () => {
     const waiting = (id: string, title: string, waitingSince: number): SessionSummary => ({
       id,
-      provider: 'codex',
+      provider: 'codex-cli',
       sessionId: `thread-${id}`,
       cwd: '/Users/me/web',
       title,
@@ -1286,7 +1291,7 @@ describe('App', () => {
     const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
       {
         id: 's1',
-        provider: 'codex',
+        provider: 'codex-cli',
         sessionId: 'thread-1',
         cwd: '/Users/me/web',
         title: 'Fix the build',
@@ -1362,7 +1367,7 @@ describe('App', () => {
       fakeBridge({ workspaces: [], selectedId: null }, [
         {
           id: 's1',
-          provider: 'codex',
+          provider: 'codex-cli',
           sessionId: 'thread-1',
           cwd: '/Users/me/web',
           title: 'Fix the build',
@@ -1389,7 +1394,7 @@ describe('App', () => {
     const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
       {
         id: 's1',
-        provider: 'codex',
+        provider: 'codex-cli',
         sessionId: 'thread-1',
         cwd: '/Users/me/web',
         title: 'Fix the build',
@@ -1473,7 +1478,7 @@ describe('App', () => {
     const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
       {
         id: 's1',
-        provider: 'codex',
+        provider: 'codex-cli',
         sessionId: 'thread-1',
         cwd: '/Users/me/web',
         title: 'Compare pricing pages',
@@ -1606,7 +1611,7 @@ describe('App', () => {
     const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
       {
         id: 's1',
-        provider: 'codex',
+        provider: 'codex-cli',
         sessionId: 'thread-1',
         cwd: '/Users/me/web',
         title: 'Compare pricing pages',
@@ -1753,7 +1758,7 @@ describe('App', () => {
     const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
       {
         id: 's1',
-        provider: 'codex',
+        provider: 'codex-cli',
         sessionId: 'thread-1',
         cwd: '/Users/me/web',
         title: 'Compare pricing pages',
@@ -1926,7 +1931,7 @@ describe('App', () => {
     const bridge = fakeBridge({ workspaces: [], selectedId: null }, [
       {
         id: 's1',
-        provider: 'codex',
+        provider: 'codex-cli',
         sessionId: 'thread-1',
         cwd: '/Users/me/notes',
         title: 'Reply to invoices',

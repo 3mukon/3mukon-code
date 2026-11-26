@@ -261,9 +261,9 @@ describe('SessionHost', () => {
   });
 
   it('reports a session when its title or status changes, not for every event', async () => {
-    const codex = fakeProvider('codex');
+    const codex = fakeProvider('codex-cli');
     const host = new SessionHost([codex.provider], memoryRecords().records);
-    await host.start('codex', { cwd: folder('api') });
+    await host.start('codex-cli', { cwd: folder('api') });
     const changes: SessionList[] = [];
     host.onChange((list) => changes.push(list));
     const emit = codex.listeners[0];
@@ -283,9 +283,9 @@ describe('SessionHost', () => {
   });
 
   it('passes answers to the provider’s session, and reports since when a session waits on the user', async () => {
-    const codex = fakeProvider('codex');
+    const codex = fakeProvider('codex-cli');
     const host = new SessionHost([codex.provider], memoryRecords().records);
-    const id = await host.start('codex', { cwd: folder('api') });
+    const id = await host.start('codex-cli', { cwd: folder('api') });
     const changes: SessionList[] = [];
     host.onChange((list) => changes.push(list));
     const emit = codex.listeners[0];
@@ -429,10 +429,10 @@ describe('SessionHost', () => {
     const models: ModelOption[] = [{ id: 'opus', label: 'Opus', efforts: ['high'] }];
     claude.listModels.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(models);
     const host = new SessionHost(
-      [claude.provider, fakeProvider('codex').provider],
+      [claude.provider, fakeProvider('codex-cli').provider],
       memoryRecords().records,
     );
-    expect(host.providerIds()).toEqual(['claude-code', 'codex']);
+    expect(host.providerIds()).toEqual(['claude-code', 'codex-cli']);
     expect(await host.gateways('claude-code')).toEqual(['work']);
     // A failed search is tried again; a found list is kept for a page that does not choose.
     await expect(host.models('claude-code', null)).rejects.toThrow('offline');
@@ -445,7 +445,7 @@ describe('SessionHost', () => {
   it('lists models anew in its folder for a new page, once at a time, unless found within 15 seconds', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(1_000);
-    const codex = fakeProvider('codex');
+    const codex = fakeProvider('codex-cli');
     const first: ModelOption[] = [{ id: 'gpt-a', label: 'A', efforts: [], default: true }];
     const second: ModelOption[] = [{ id: 'gpt-b', label: 'B', efforts: [], default: true }];
     codex.listModels
@@ -456,19 +456,19 @@ describe('SessionHost', () => {
     // Pages opening together share one listing for their folder.
     expect(
       await Promise.all([
-        host.models('codex', null, '/work', true),
-        host.models('codex', null, '/work', true),
+        host.models('codex-cli', null, '/work', true),
+        host.models('codex-cli', null, '/work', true),
       ]),
     ).toEqual([first, first]);
     vi.setSystemTime(15_999);
-    expect(await host.models('codex', null, '/work', true)).toEqual(first);
+    expect(await host.models('codex-cli', null, '/work', true)).toEqual(first);
     // Older than 15 seconds, the list is found again, since the provider's settings may have changed.
     vi.setSystemTime(16_000);
-    expect(await host.models('codex', null, '/work', true)).toEqual(second);
+    expect(await host.models('codex-cli', null, '/work', true)).toEqual(second);
     // A listing that fails leaves the list kept as it was.
     vi.setSystemTime(40_000);
-    await expect(host.models('codex', null, '/work', true)).rejects.toThrow('offline');
-    expect(await host.models('codex', null, '/work', false)).toEqual(second);
+    await expect(host.models('codex-cli', null, '/work', true)).rejects.toThrow('offline');
+    expect(await host.models('codex-cli', null, '/work', false)).toEqual(second);
     expect(codex.listModels.mock.calls).toEqual([
       [null, '/work'],
       [null, '/work'],
@@ -525,13 +525,13 @@ describe('SessionHost', () => {
 
   it('starts no session outside a folder, lists or keeps none that failed, and refuses a provider it does not have', async () => {
     const { records, saved } = memoryRecords();
-    const host = new SessionHost([fakeProvider('codex', true).provider], records);
+    const host = new SessionHost([fakeProvider('codex-cli', true).provider], records);
     const listener = vi.fn();
     host.onChange(listener);
     writeFileSync(folder('notes.txt'), '');
-    await expect(host.start('codex', { cwd: folder('notes.txt') })).rejects.toThrow('folder');
-    await expect(host.start('codex', { cwd: folder('missing') })).rejects.toThrow();
-    await expect(host.start('codex', { cwd: folder('a') })).rejects.toThrow('Not signed in.');
+    await expect(host.start('codex-cli', { cwd: folder('notes.txt') })).rejects.toThrow('folder');
+    await expect(host.start('codex-cli', { cwd: folder('missing') })).rejects.toThrow();
+    await expect(host.start('codex-cli', { cwd: folder('a') })).rejects.toThrow('Not signed in.');
     await expect(host.start('claude-code', { cwd: folder('a') })).rejects.toThrow('not available');
     expect(host.list()).toEqual({ sessions: [], archived: 0, shown: [] });
     expect(saved).toEqual([]);
@@ -763,7 +763,7 @@ describe('SessionHost coordination', () => {
   // A parent session running Claude Code in the web folder, in workspace-write, with Opus at high.
   const withParent = async (inboxes = new SessionInboxes(memoryInboxStorage())) => {
     const claude = fakeProvider('claude-code', false, true);
-    const codex = fakeProvider('codex', false, true);
+    const codex = fakeProvider('codex-cli', false, true);
     const { records, saved } = memoryRecords();
     const host = new SessionHost(
       [claude.provider, codex.provider],
@@ -825,11 +825,11 @@ describe('SessionHost coordination', () => {
     const { host, codex, coordinator, parent } = await withParent();
     const child = await coordinator.start(parent, {
       prompt: 'Review the change',
-      provider: 'codex',
+      provider: 'codex-cli',
       sandbox: 'read-only',
       title: 'Reviewer',
     });
-    expect(child).toMatchObject({ provider: 'codex', title: 'Reviewer' });
+    expect(child).toMatchObject({ provider: 'codex-cli', title: 'Reviewer' });
     expect(codex.sessions[0]?.setTitle).toHaveBeenCalledWith('Reviewer');
     const kept = host.list().sessions.find((one) => one.id === child.id);
     expect(kept?.title).toBe('Reviewer');
@@ -1549,7 +1549,7 @@ describe('SessionHost search', () => {
 
   it('catches up on the sessions without a text, the most recently active first, one at a time and once', async () => {
     const claude = fakeProvider('claude-code');
-    const failing = fakeProvider('codex');
+    const failing = fakeProvider('codex-cli');
     failing.history.mockRejectedValue(new Error('offline'));
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const texts = new Map([
@@ -1562,7 +1562,7 @@ describe('SessionHost search', () => {
         kept(),
         kept({ id: 'older', sessionId: 'claude-8', activeAt: 500 }),
         kept({ id: 'newer', sessionId: 'claude-7', activeAt: 2_000, archived: true }),
-        kept({ id: 'offline', provider: 'codex', sessionId: 'thread-1', activeAt: 100 }),
+        kept({ id: 'offline', provider: 'codex-cli', sessionId: 'thread-1', activeAt: 100 }),
       ]).records,
       memoryTextStorage(texts),
     );
@@ -1648,7 +1648,7 @@ function automationFixture() {
 
 describe('session automation lifecycle', () => {
   it('lists a session as waiting while an operation approval waits for the user, since the oldest request', async () => {
-    const fake = fakeProvider('codex');
+    const fake = fakeProvider('codex-cli');
     const automation = automationFixture();
     const host = new SessionHost(
       [fake.provider],
@@ -1658,7 +1658,7 @@ describe('session automation lifecycle', () => {
     );
     const lists: SessionList[] = [];
     host.onChange((list) => lists.push(list));
-    const id = await host.start('codex', { cwd: folder('web') });
+    const id = await host.start('codex-cli', { cwd: folder('web') });
     fake.listeners[0]?.({ type: 'turn-started' });
     const summary = () => lists.at(-1)?.sessions.find((session) => session.id === id);
     expect(summary()?.status).toBe('running');
@@ -1686,7 +1686,7 @@ describe('session automation lifecycle', () => {
   });
 
   it('sends the user message and by-message answer even when supplemental context cannot be prepared', async () => {
-    const fake = fakeProvider('codex');
+    const fake = fakeProvider('codex-cli');
     const automation = automationFixture();
     automation.session.prepareSend.mockImplementation(() => {
       throw Error('access-revoked');
@@ -1697,7 +1697,7 @@ describe('session automation lifecycle', () => {
       memoryTextStorage(),
       automation,
     );
-    const id = await host.start('codex', { cwd: folder('web') });
+    const id = await host.start('codex-cli', { cwd: folder('web') });
     await host.send(id, 'Original message');
     expect(fake.sessions[0]?.send).toHaveBeenCalledExactlyOnceWith('Original message', []);
     fake.listeners[0]?.({
@@ -1710,7 +1710,7 @@ describe('session automation lifecycle', () => {
     await host.closeAll();
   });
   it('offers pending context on question replies that start a message, without consuming a locally queued reply', async () => {
-    const fake = fakeProvider('codex');
+    const fake = fakeProvider('codex-cli');
     const automation = automationFixture();
     const host = new SessionHost(
       [fake.provider],
@@ -1718,7 +1718,7 @@ describe('session automation lifecycle', () => {
       memoryTextStorage(),
       automation,
     );
-    const id = await host.start('codex', { cwd: folder('web') });
+    const id = await host.start('codex-cli', { cwd: folder('web') });
     fake.listeners[0]?.({
       type: 'question-asked',
       request: { id: 'async-question', questions: [], requestedAt: 1, byMessage: true },
@@ -1736,7 +1736,7 @@ describe('session automation lifecycle', () => {
     await host.closeAll();
   });
   it('binds the app owner before startup, preserving it across a different native ID and resume', async () => {
-    const fake = fakeProvider('codex');
+    const fake = fakeProvider('codex-cli');
     const automation = automationFixture();
     const originalStart = fake.provider.start.bind(fake.provider);
     const start = vi.spyOn(fake.provider, 'start').mockImplementation((options, listener) => {
@@ -1750,7 +1750,7 @@ describe('session automation lifecycle', () => {
       memoryTextStorage(),
       automation,
     );
-    const id = await host.start('codex', { cwd: folder('web') });
+    const id = await host.start('codex-cli', { cwd: folder('web') });
     expect(automation.bind.mock.calls[0]?.[0]).toMatchObject({
       id,
       cwd: folder('web'),
@@ -1776,7 +1776,7 @@ describe('session automation lifecycle', () => {
     await host.closeAll();
   });
   it('acknowledges notice delivery only after the provider accepts the send', async () => {
-    const fake = fakeProvider('codex');
+    const fake = fakeProvider('codex-cli');
     const automation = automationFixture();
     const host = new SessionHost(
       [fake.provider],
@@ -1784,7 +1784,7 @@ describe('session automation lifecycle', () => {
       memoryTextStorage(),
       automation,
     );
-    const id = await host.start('codex', { cwd: folder('web') });
+    const id = await host.start('codex-cli', { cwd: folder('web') });
     await host.send(id, 'Hello');
     expect(fake.sessions[0]?.send).toHaveBeenCalledWith(
       'Hello',
@@ -1805,7 +1805,7 @@ describe('session automation lifecycle', () => {
     expect(automation.session.close).toHaveBeenCalledWith(true);
   });
   it('releases a binding after failed startup and restores policy when a provider refuses a change', async () => {
-    const failed = fakeProvider('codex', true);
+    const failed = fakeProvider('codex-cli', true);
     const automation = automationFixture();
     const host = new SessionHost(
       [failed.provider],
@@ -1813,16 +1813,16 @@ describe('session automation lifecycle', () => {
       memoryTextStorage(),
       automation,
     );
-    await expect(host.start('codex', { cwd: folder('web') })).rejects.toThrow('Not signed in.');
+    await expect(host.start('codex-cli', { cwd: folder('web') })).rejects.toThrow('Not signed in.');
     expect(automation.session.close).toHaveBeenCalledWith(true);
-    const fake = fakeProvider('codex');
+    const fake = fakeProvider('codex-cli');
     const active = new SessionHost(
       [fake.provider],
       memoryRecords().records,
       memoryTextStorage(),
       automation,
     );
-    const id = await active.start('codex', { cwd: folder('web') });
+    const id = await active.start('codex-cli', { cwd: folder('web') });
     fake.sessions[0]?.setSandbox.mockRejectedValueOnce(new Error('Refused.'));
     await expect(active.setSandbox(id, 'read-only')).rejects.toThrow('Refused.');
     expect(automation.session.setPolicy).toHaveBeenLastCalledWith({
@@ -1835,7 +1835,7 @@ describe('session automation lifecycle', () => {
 });
 
 it('does not retire host notices when an adapter cannot accept separate turn context', async () => {
-  const fake = fakeProvider('codex');
+  const fake = fakeProvider('codex-cli');
   const automation = automationFixture();
   const original = fake.provider.start.bind(fake.provider);
   vi.spyOn(fake.provider, 'start').mockImplementation(async (options, listener) => ({
@@ -1848,7 +1848,7 @@ it('does not retire host notices when an adapter cannot accept separate turn con
     memoryTextStorage(),
     automation,
   );
-  const id = await host.start('codex', { cwd: folder('web') });
+  const id = await host.start('codex-cli', { cwd: folder('web') });
   await host.send(id, 'User text');
   expect(fake.sessions[0]?.send).toHaveBeenCalledWith('User text', []);
   expect(automation.accepted).not.toHaveBeenCalled();

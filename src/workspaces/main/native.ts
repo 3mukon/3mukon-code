@@ -27,7 +27,7 @@ export function windowWorkspacesUi(
         detail: t('workspaces.trust.detail', {
           path,
           claudeCode: t('providers.claude-code'),
-          codex: t('providers.codex'),
+          codexCli: t('providers.codex-cli'),
           grokBuild: t('providers.grok-build'),
           antigravity: t('providers.antigravity'),
         }),

@@ -139,17 +139,17 @@ describe('createBridge', () => {
     };
     await bridge.sessions.resume('s1', resumed);
     await bridge.sessions.showMenu('s1');
-    await bridge.sessions.models('codex', null, '/Users/me/web', true);
+    await bridge.sessions.models('codex-cli', null, '/Users/me/web', true);
     await bridge.sessions.choices();
     await bridge.sessions.rememberChoice('/Users/me/web', {
-      provider: 'codex',
+      provider: 'codex-cli',
       gateway: null,
       model: 'gpt-6-astra',
       effort: 'medium',
       sandbox: 'read-only',
     });
     await bridge.sessions.start({
-      provider: 'codex',
+      provider: 'codex-cli',
       cwd: '/Users/me/web',
       mode: 'auto',
       gateway: null,
@@ -188,13 +188,13 @@ describe('createBridge', () => {
       ['settings:set', { appearance: 'light' }],
       ['sessions:resume', 's1', resumed],
       ['sessions:show-menu', 's1'],
-      ['sessions:models', 'codex', null, '/Users/me/web', true],
+      ['sessions:models', 'codex-cli', null, '/Users/me/web', true],
       ['sessions:choices'],
       [
         'sessions:remember-choice',
         '/Users/me/web',
         {
-          provider: 'codex',
+          provider: 'codex-cli',
           gateway: null,
           model: 'gpt-6-astra',
           effort: 'medium',
@@ -204,7 +204,7 @@ describe('createBridge', () => {
       [
         'sessions:start',
         {
-          provider: 'codex',
+          provider: 'codex-cli',
           cwd: '/Users/me/web',
           mode: 'auto',
           gateway: null,

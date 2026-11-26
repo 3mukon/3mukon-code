@@ -15,7 +15,7 @@ afterEach(() => {
 
 const root = '/Users/me/3mukon-code';
 const codex: RememberedChoice = {
-  provider: 'codex',
+  provider: 'codex-cli',
   gateway: null,
   model: 'gpt-6-astra',
   effort: 'medium',
@@ -50,7 +50,7 @@ describe('RememberedChoices', () => {
         ['/a', { ...codex, effort: 'high' }],
       ],
     });
-    expect(choices.all(['claude-code', 'codex'])).toEqual({
+    expect(choices.all(['claude-code', 'codex-cli'])).toEqual({
       folders: { '/a': { ...codex, effort: 'high' }, '/b': claude },
       dayRoot: root,
     });
@@ -69,8 +69,11 @@ describe('RememberedChoices', () => {
       ],
       dayFolders: { ...claude, effort: 'low' },
     });
-    expect(choices.all(['claude-code', 'codex']).dayFolders).toEqual({ ...claude, effort: 'low' });
-    expect(choices.all(['codex'])).toEqual({
+    expect(choices.all(['claude-code', 'codex-cli']).dayFolders).toEqual({
+      ...claude,
+      effort: 'low',
+    });
+    expect(choices.all(['codex-cli'])).toEqual({
       folders: { '/a': codex, [root]: codex },
       dayRoot: root,
     });

@@ -26,7 +26,7 @@ const t = mainTranslator(['en-US']);
 const window = {} as BrowserWindow;
 const session: SessionSummary = {
   id: 's1',
-  provider: 'codex',
+  provider: 'codex-cli',
   sessionId: 'thread-1',
   cwd: '/Users/me/web',
   title: 'Fix the build',

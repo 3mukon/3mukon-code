@@ -177,13 +177,13 @@ describe('useOffers', () => {
   it('gives a folder’s remembered settings, or the day folders’, without a provider or a gateway that is gone', async () => {
     const { bridge, calls } = fakeBridge();
     const codex: RememberedChoice = {
-      provider: 'codex',
+      provider: 'codex-cli',
       gateway: null,
       model: 'gpt-6-astra',
       effort: 'high',
       sandbox: 'read-only',
     };
-    calls.providers.mockResolvedValue(['claude-code', 'codex']);
+    calls.providers.mockResolvedValue(['claude-code', 'codex-cli']);
     calls.choices.mockResolvedValue({
       folders: {
         '/a': codex,

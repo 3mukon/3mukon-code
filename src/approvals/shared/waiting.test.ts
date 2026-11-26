@@ -4,7 +4,7 @@ import { nextWaiting, waitingSessions } from './waiting';
 
 const session = (id: string, fields: Partial<SessionSummary> = {}): SessionSummary => ({
   id,
-  provider: 'codex',
+  provider: 'codex-cli',
   sessionId: `p-${id}`,
   cwd: '/Users/me/web',
   status: 'idle',

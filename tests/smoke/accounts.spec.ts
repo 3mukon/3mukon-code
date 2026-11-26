@@ -66,7 +66,7 @@ test('a sign-in downloads the app’s copy of a provider that is not installed, 
     writeFileSync(
       pins,
       JSON.stringify({
-        codex: {
+        'codex-cli': {
           version: '0.171.0',
           url: `${url}/codex.tgz`,
           integrity: integrity(build),

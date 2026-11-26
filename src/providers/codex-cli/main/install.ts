@@ -5,7 +5,7 @@ import pin from './pin.json';
 // types were generated from, or newer. The app's copy is Codex's build for macOS on Apple silicon, with
 // the tools that lie beside its binary.
 export const codexInstall: InstallSpec = {
-  provider: 'codex',
+  provider: 'codex-cli',
   command: 'codex',
   oldest: '0.171.0',
   // As in `codex-cli 0.171.0`.

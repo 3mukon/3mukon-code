@@ -21,7 +21,7 @@ function pinnedVersion(provider: ProviderId): string {
 // no package, so the smoke and packaged tests have no copy of it, and it shows there as not installed.
 const COMMANDS: Partial<Record<ProviderId, string>> = {
   'claude-code': 'claude',
-  codex: 'codex',
+  'codex-cli': 'codex',
   'grok-build': 'grok',
 };
 
@@ -36,7 +36,7 @@ export function pinnedBinary(provider: ProviderId): string {
       );
       return join(dirname(native), 'claude');
     }
-    case 'codex': {
+    case 'codex-cli': {
       const codex = fromRoot.resolve('@openai/codex/package.json');
       const native = createRequire(codex).resolve('@openai/codex-darwin-arm64/package.json');
       return join(dirname(native), 'vendor', 'aarch64-apple-darwin', 'bin', 'codex');

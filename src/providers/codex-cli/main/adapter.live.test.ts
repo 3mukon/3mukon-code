@@ -93,7 +93,7 @@ it('runs turns in auto, writes a file, asks with Codex’s own question tool, sw
   const provider = createCodexProvider({
     toolset: automation.toolset,
     gatewaysDir,
-    install: pinnedInstall('codex'),
+    install: pinnedInstall('codex-cli'),
   });
   expect(await provider.listGateways()).toEqual(['plain']);
   const models = await provider.listModels(null);

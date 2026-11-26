@@ -31,7 +31,7 @@ const folders: SessionFolder[] = [
 
 const sessions = [
   session('s1', '/Users/me/web', { title: 'Fix the build', status: 'running' }),
-  session('s2', '/Users/me/web/packages/ui', { provider: 'codex', status: 'waiting' }),
+  session('s2', '/Users/me/web/packages/ui', { provider: 'codex-cli', status: 'waiting' }),
   session('s3', '/Users/me/website', { title: 'Landing page', status: 'closed' }),
   session('s4', '/Users/me/api', { provider: 'grok-build', title: '' }),
 ];

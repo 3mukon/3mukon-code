@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 const account = (...windows: UsageWindow[]): ProviderAccount => ({
-  provider: 'codex',
+  provider: 'codex-cli',
   signIn: { state: 'signed-in', method: 'subscription' },
   usage: { windows, readAt: 0 },
   resettable: true,
@@ -66,7 +66,7 @@ describe('SignInPrompt', () => {
 
 describe('SignInPrompt and where the provider runs from', () => {
   const base: ProviderAccount = {
-    provider: 'codex',
+    provider: 'codex-cli',
     signIn: { state: 'unknown' },
     resettable: false,
     reading: false,
@@ -76,7 +76,7 @@ describe('SignInPrompt and where the provider runs from', () => {
     const onSignIn = vi.fn();
     render(
       <SignInPrompt
-        provider="codex"
+        provider="codex-cli"
         account={{ ...base, install: { runs: null, pinned: '0.171.0', failed: 'network' } }}
         onSignIn={onSignIn}
       />,
@@ -86,13 +86,13 @@ describe('SignInPrompt and where the provider runs from', () => {
     ).toBeTruthy();
     expect(screen.getByText(/its address couldn’t be reached/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
-    expect(onSignIn).toHaveBeenCalledWith('codex');
+    expect(onSignIn).toHaveBeenCalledWith('codex-cli');
   });
 
   it('shows the download’s progress while it goes on', () => {
     render(
       <SignInPrompt
-        provider="codex"
+        provider="codex-cli"
         account={{
           ...base,
           install: { runs: null, pinned: '0.171.0', downloading: { received: 1, total: 2 } },

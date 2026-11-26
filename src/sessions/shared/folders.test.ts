@@ -4,7 +4,7 @@ import type { FolderChoices, RememberedChoice } from './sessions';
 
 const root = '/Users/me/3mukon-code';
 const codex: RememberedChoice = {
-  provider: 'codex',
+  provider: 'codex-cli',
   gateway: null,
   model: 'gpt-6-astra',
   effort: 'high',

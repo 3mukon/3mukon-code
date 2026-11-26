@@ -32,7 +32,7 @@ const sessionId = z.string().min(1).max(128);
 // the i18n catalogs'. Every provider needs an entry, or this does not compile.
 const PROVIDERS: Record<ProviderId, { maker: string; family: string }> = {
   'claude-code': { maker: 'Anthropic', family: 'Claude' },
-  codex: { maker: 'OpenAI', family: 'GPT' },
+  'codex-cli': { maker: 'OpenAI', family: 'GPT' },
   'grok-build': { maker: 'xAI', family: 'Grok' },
   antigravity: { maker: 'Google', family: 'Gemini' },
 };

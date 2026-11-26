@@ -41,7 +41,7 @@ const storedContext = z
 
 const storedRecord = z.object({
   id: z.string().min(1),
-  provider: z.enum(['claude-code', 'codex', 'grok-build', 'antigravity']),
+  provider: z.enum(['claude-code', 'codex-cli', 'grok-build', 'antigravity']),
   sessionId: z.string().min(1),
   cwd: z.string().startsWith('/'),
   title: z.string().optional(),

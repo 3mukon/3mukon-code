@@ -34,7 +34,7 @@ function cli(name: string, output: string): string {
 
 function spec(build: Buffer, path = '/tool.tgz'): InstallSpec {
   return {
-    provider: 'codex',
+    provider: 'codex-cli',
     command: 'tool',
     oldest: '1.0.0',
     version: (output) => /tool (\S+)/.exec(output)?.[1] ?? null,
@@ -101,7 +101,7 @@ describe('where a provider’s processes come from', () => {
     expect(requests()).toBe(1);
     expect(first).toEqual(second);
     expect(first).toEqual({
-      path: join(root, 'data', 'providers', 'codex', '1.2.0', 'tool'),
+      path: join(root, 'data', 'providers', 'codex-cli', '1.2.0', 'tool'),
       version: '1.2.0',
       source: 'app',
     });
@@ -159,7 +159,7 @@ describe('where a provider’s processes come from', () => {
       folder: join(root, 'data', 'providers'),
       searchFolders: () => [],
       fetch: (address, init) => fetch(address, init),
-      pins: { codex: { ...spec(build, '/test.tgz').pin, version: '2.0.0' } },
+      pins: { 'codex-cli': { ...spec(build, '/test.tgz').pin, version: '2.0.0' } },
     });
     expect(await installs.for(spec(tarball(root, { tool: 'other' }))).prepare()).toMatchObject({
       version: '2.0.0',

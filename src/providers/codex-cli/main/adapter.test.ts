@@ -439,7 +439,7 @@ afterEach(() => {
 // The app's copy of Codex that a sign-in runs; the sessions and probes run the fake app-servers.
 const binary = { path: '/test/codex', version: '0.171.0', source: 'app' } as const;
 const install: ProviderInstall = {
-  provider: 'codex',
+  provider: 'codex-cli',
   current: () => Promise.resolve(binary),
   prepare: () => Promise.resolve(binary),
   view: () => Promise.resolve({ runs: { source: 'app', version: '0.171.0' }, pinned: '0.171.0' }),

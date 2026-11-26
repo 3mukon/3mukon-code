@@ -72,7 +72,7 @@ interface BridgeServices {
 
 const id = z.string().min(1).max(100);
 const path = z.string().max(4096);
-const provider = z.enum(['claude-code', 'codex', 'grok-build', 'antigravity']);
+const provider = z.enum(['claude-code', 'codex-cli', 'grok-build', 'antigravity']);
 const mode = z.enum(['auto', 'yolo']);
 const sandbox = z.enum(['read-only', 'workspace-write', 'full-access']);
 // A gateway's or a model's name, as the provider gave it.

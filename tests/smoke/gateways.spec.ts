@@ -114,7 +114,7 @@ test('a Codex session through a gateway gets its answers from the gateway’s se
       await answerQuestion(window, 'Trust');
       await window.getByRole('button', { name: 'New session' }).click();
       const main = window.getByRole('main');
-      await main.getByRole('combobox', { name: 'Provider' }).selectOption('codex');
+      await main.getByRole('combobox', { name: 'Provider' }).selectOption('codex-cli');
       // Codex sets its home up as the first app-server starts in it, and of app-servers that started
       // at once in a home not yet set up, Codex 0.166.0 failed some, though Codex 0.171.0 failed none
       // in repeated tries. The models of Codex's own configuration, which the window asks for as it

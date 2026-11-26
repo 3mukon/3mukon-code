@@ -108,20 +108,20 @@ function install(provider: ProviderId, view: InstallView) {
 
 describe('Accounts', () => {
   it('shows the usage kept from an earlier run at once, with the sign-in unknown until read', () => {
-    const kept: KeptUsage = { codex: { windows: [fiveHour(85)], resets: 2, readAt: 5 } };
+    const kept: KeptUsage = { 'codex-cli': { windows: [fiveHour(85)], resets: 2, readAt: 5 } };
     const accounts = new Accounts(
       [
         source('claude-code', () => Promise.resolve(subscribed)).fake,
-        source('codex', () => Promise.resolve(subscribed), true).fake,
+        source('codex-cli', () => Promise.resolve(subscribed), true).fake,
       ],
       memoryUsageStorage(kept),
     );
     expect(accounts.list().accounts).toEqual([
       { provider: 'claude-code', signIn: { state: 'unknown' }, resettable: false, reading: false },
       {
-        provider: 'codex',
+        provider: 'codex-cli',
         signIn: { state: 'unknown' },
-        usage: kept.codex,
+        usage: kept['codex-cli'],
         resettable: true,
         reading: false,
       },
@@ -172,8 +172,8 @@ describe('Accounts', () => {
   it('drops the usage of a provider no longer signed in with a subscription, and keeps it, saying why, when a read fails', async () => {
     let answer: () => Promise<AccountRead> = () =>
       Promise.reject(new Error('Codex did not start.'));
-    const codex = source('codex', () => answer());
-    const storage = memoryUsageStorage({ codex: { windows: [weekly], readAt: 1 } });
+    const codex = source('codex-cli', () => answer());
+    const storage = memoryUsageStorage({ 'codex-cli': { windows: [weekly], readAt: 1 } });
     const time = clock();
     const accounts = new Accounts([codex.fake], storage, time.fake);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -268,18 +268,18 @@ describe('Accounts', () => {
   });
 
   it('spends a reset only once the user confirms, and reads the usage after it', async () => {
-    const codex = source('codex', () => Promise.resolve(subscribed), true);
+    const codex = source('codex-cli', () => Promise.resolve(subscribed), true);
     const accounts = new Accounts(
       [codex.fake],
-      memoryUsageStorage({ codex: { windows: [], resets: 3, readAt: 1 } }),
+      memoryUsageStorage({ 'codex-cli': { windows: [], resets: 3, readAt: 1 } }),
       clock().fake,
     );
     const confirmReset = vi.fn<AccountsUi['confirmReset']>(() => Promise.resolve(false));
-    expect(await accounts.reset('codex', { confirmReset })).toBeNull();
-    expect(confirmReset).toHaveBeenCalledWith('codex', 3);
+    expect(await accounts.reset('codex-cli', { confirmReset })).toBeNull();
+    expect(confirmReset).toHaveBeenCalledWith('codex-cli', 3);
     expect(codex.reset).not.toHaveBeenCalled();
     confirmReset.mockResolvedValue(true);
-    expect(await accounts.reset('codex', { confirmReset })).toBe('reset');
+    expect(await accounts.reset('codex-cli', { confirmReset })).toBe('reset');
     expect(codex.reset).toHaveBeenCalledOnce();
     expect(codex.asked).toEqual([true]);
     await expect(
@@ -302,7 +302,7 @@ describe('usageStorage', () => {
     folder = mkdtempSync(join(tmpdir(), 'accounts-'));
     const storage = usageStorage(folder);
     const usage: KeptUsage = {
-      codex: {
+      'codex-cli': {
         windows: [fiveHour(10), { span: 600, model: 'Opus', used: null, resetsAt: null }],
         resets: 1,
         readAt: 7,
@@ -313,7 +313,7 @@ describe('usageStorage', () => {
     writeFileSync(
       join(folder, 'accounts.json'),
       JSON.stringify({
-        usage: { codex: { windows: 'none' }, 'grok-build': { windows: [], readAt: 3 } },
+        usage: { 'codex-cli': { windows: 'none' }, 'grok-build': { windows: [], readAt: 3 } },
       }),
     );
     expect(usageStorage(folder).load()).toEqual({ 'grok-build': { windows: [], readAt: 3 } });
@@ -323,12 +323,12 @@ describe('usageStorage', () => {
 describe('Accounts and where the providers run from', () => {
   it('shows what runs for each provider, asks none that is not installed, and passes on a download as it goes', async () => {
     const claude = source('claude-code', () => Promise.resolve(subscribed));
-    const codex = source('codex', () => Promise.resolve(subscribed));
+    const codex = source('codex-cli', () => Promise.resolve(subscribed));
     const claudeInstall = install('claude-code', {
       runs: { source: 'user', version: '2.1.340' },
       pinned: '2.1.330',
     });
-    const codexInstall = install('codex', { runs: null, pinned: '0.171.0' });
+    const codexInstall = install('codex-cli', { runs: null, pinned: '0.171.0' });
     const accounts = new Accounts([claude.fake, codex.fake], memoryUsageStorage(), clock().fake, [
       claudeInstall.fake,
       codexInstall.fake,
@@ -350,7 +350,7 @@ describe('Accounts and where the providers run from', () => {
       { runs: null, pinned: '0.171.0', downloading: { received: 5, total: 10 } },
       { runs: { source: 'app', version: '0.171.0' }, pinned: '0.171.0' },
     ]);
-    await accounts.readAgain('codex');
+    await accounts.readAgain('codex-cli');
     expect(codex.asked).toEqual([true]);
   });
 

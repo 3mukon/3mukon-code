@@ -8,7 +8,7 @@ import type { FolderChoices, RememberedChoice } from '../shared/sessions';
 const KEPT_FOLDERS = 200;
 
 const storedChoice = z.object({
-  provider: z.enum(['claude-code', 'codex', 'grok-build', 'antigravity']),
+  provider: z.enum(['claude-code', 'codex-cli', 'grok-build', 'antigravity']),
   gateway: z.string().nullable(),
   model: z.string().nullable(),
   effort: z.string().nullable(),

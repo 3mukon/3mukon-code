@@ -6,7 +6,7 @@ import { pathFolders } from '../../installs/main/find';
 import type { Pin, ProviderInstall } from '../../installs/main/install';
 import { createInstalls } from '../../installs/main/installs';
 import { claudeCodeInstall } from '../../providers/claude-code/main/install';
-import { codexInstall } from '../../providers/codex/main/install';
+import { codexInstall } from '../../providers/codex-cli/main/install';
 import { antigravityInstall } from '../../providers/antigravity/main/install';
 import { grokBuildInstall } from '../../providers/grok-build/main/install';
 import type { ProviderId } from '../../sessions/shared/events';
@@ -31,7 +31,7 @@ export function providerInstalls(data: string): Record<ProviderId, ProviderInsta
   void rm(join(data, 'grok-build'), { recursive: true, force: true });
   return {
     'claude-code': installs.for(claudeCodeInstall),
-    codex: installs.for(codexInstall),
+    'codex-cli': installs.for(codexInstall),
     'grok-build': installs.for(grokBuildInstall),
     antigravity: installs.for(antigravityInstall),
   };

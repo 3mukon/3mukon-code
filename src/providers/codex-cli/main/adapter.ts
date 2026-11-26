@@ -281,7 +281,7 @@ export function createCodexProvider({
     }
   };
   return {
-    id: 'codex',
+    id: 'codex-cli',
     async start(options, onEvent) {
       const bound = options.toolset ?? toolset;
       if (!bound) throw new Error('A session needs its bound toolset.');

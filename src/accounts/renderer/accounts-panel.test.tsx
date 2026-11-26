@@ -27,7 +27,7 @@ const accounts: ProviderAccount[] = [
     reading: false,
   },
   {
-    provider: 'codex',
+    provider: 'codex-cli',
     signIn: { state: 'signed-in', method: 'subscription' },
     usage: { windows: [{ span: 'week', used: 100, resetsAt: null }], resets: 2, readAt: now },
     resettable: true,
@@ -81,7 +81,7 @@ describe('AccountsPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reset Limits' }));
       await Promise.resolve();
     });
-    expect(given.reset).toHaveBeenCalledWith('codex');
+    expect(given.reset).toHaveBeenCalledWith('codex-cli');
     expect(screen.getByRole('status').textContent).toContain('The limits were reset.');
   });
 
@@ -97,7 +97,7 @@ describe('AccountsPanel', () => {
             resettable: false,
             reading: false,
           },
-          { provider: 'codex', signIn: { state: 'unknown' }, resettable: true, reading: true },
+          { provider: 'codex-cli', signIn: { state: 'unknown' }, resettable: true, reading: true },
           {
             provider: 'grok-build',
             signIn: { state: 'signed-in', method: 'subscription' },
@@ -132,7 +132,7 @@ describe('AccountsPanel', () => {
         resettable: false,
         reading: false,
       },
-      { provider: 'codex', signIn: { state: 'signed-out' }, resettable: false, reading: false },
+      { provider: 'codex-cli', signIn: { state: 'signed-out' }, resettable: false, reading: false },
       {
         provider: 'grok-build',
         signIn: { state: 'unknown' },
@@ -187,7 +187,7 @@ describe('AccountsPanel and where the providers run from', () => {
             reading: false,
           },
           {
-            provider: 'codex',
+            provider: 'codex-cli',
             signIn: { state: 'signed-in', method: 'subscription' },
             install: {
               runs: { source: 'app', version: '0.170.0' },
@@ -237,7 +237,7 @@ describe('AccountsPanel and where the providers run from', () => {
             reading: false,
           },
           {
-            provider: 'codex',
+            provider: 'codex-cli',
             signIn: { state: 'unknown' },
             install: {
               runs: null,

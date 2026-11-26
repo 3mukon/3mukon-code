@@ -47,7 +47,7 @@ const firstChoice: Choice = {
 // The providers in the provider menu's order, until the app's own list comes.
 const listedProviders: readonly ProviderId[] = [
   'claude-code',
-  'codex',
+  'codex-cli',
   'grok-build',
   'antigravity',
 ];

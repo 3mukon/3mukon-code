@@ -25,7 +25,7 @@ function archived(
 ) {
   return {
     id,
-    provider: 'codex',
+    provider: 'codex-cli',
     sessionId: `thread-${id}`,
     cwd: '/Users/me/web',
     title,

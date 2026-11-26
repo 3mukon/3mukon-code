@@ -82,7 +82,7 @@ test('presents an artifact without taking focus and shows the result of the acti
                 sessions: [
                   {
                     id: data.owner,
-                    provider: 'codex',
+                    provider: 'codex-cli',
                     sessionId: 'native-session',
                     cwd: '/synthetic',
                     title: 'Synthetic session',

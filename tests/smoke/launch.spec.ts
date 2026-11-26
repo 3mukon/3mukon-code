@@ -188,7 +188,7 @@ test('the page reaches the main process only through the bridge’s functions', 
         dayFolder: await page.bridge.sessions.dayFolder(),
       };
     });
-    expect(answers.providers).toEqual(['claude-code', 'codex', 'grok-build', 'antigravity']);
+    expect(answers.providers).toEqual(['claude-code', 'codex-cli', 'grok-build', 'antigravity']);
     expect(answers.dayFolder).toMatch(
       new RegExp(`^${join(homedir(), '3mukon-code')}/\\d{4}-\\d{2}-\\d{2}$`),
     );

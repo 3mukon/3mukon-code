@@ -43,7 +43,7 @@ function fakeBridge(state: SessionState | null = null) {
     showMenu: vi.fn<SessionsBridge['showMenu']>(() => Promise.resolve(null)),
     act: vi.fn<SessionsBridge['act']>(() => Promise.resolve(null)),
     search: vi.fn<SessionsBridge['search']>(() => Promise.resolve({ matches: [], unread: 0 })),
-    providers: () => Promise.resolve(['claude-code' as const, 'codex' as const]),
+    providers: () => Promise.resolve(['claude-code' as const, 'codex-cli' as const]),
     dayFolder: () => Promise.resolve('/Users/me/3mukon-code/2026-10-28'),
     gateways: vi.fn<SessionsBridge['gateways']>((provider) =>
       Promise.resolve(provider === 'claude-code' ? ['work'] : []),
@@ -118,7 +118,7 @@ describe('SessionPage', () => {
   it('marks a provider not signed in among the choices, offers its sign-in and shows its usage notice beside the context', async () => {
     const { bridge, emit } = fakeBridge({ ...initialSessionState(), mode: 'auto' });
     const accounts = {
-      signedOut: (provider: string) => provider === 'codex',
+      signedOut: (provider: string) => provider === 'codex-cli',
       signedIn: (provider: string) => provider === 'claude-code',
       notInstalled: () => false,
       downloading: () => false,
@@ -139,13 +139,13 @@ describe('SessionPage', () => {
     await settle();
     expect(options('Provider')).toEqual([
       ['claude-code', 'Claude Code'],
-      ['codex', 'Codex CLI (not signed in)'],
+      ['codex-cli', 'Codex CLI (not signed in)'],
     ]);
     expect(screen.queryByText(/Sign in to/)).toBeNull();
     expect(screen.getByText('Nearly used up')).toBeTruthy();
-    choose('Provider', 'codex');
+    choose('Provider', 'codex-cli');
     await settle();
-    expect(screen.getByText('Sign in to codex')).toBeTruthy();
+    expect(screen.getByText('Sign in to codex-cli')).toBeTruthy();
     expect(screen.queryByText('Nearly used up')).toBeNull();
     choose('Provider', 'claude-code');
     await settle();
@@ -184,7 +184,7 @@ describe('SessionPage', () => {
         sessionId="s1"
         summary={{
           id: 's1',
-          provider: 'codex',
+          provider: 'codex-cli',
           sessionId: 'p1',
           cwd: '/Users/me/web',
           status: 'idle',
@@ -430,7 +430,7 @@ describe('SessionPage', () => {
     await settle();
     expect(ahead.models.mock.calls).toEqual([
       ['claude-code', null, null, false],
-      ['codex', null, null, false],
+      ['codex-cli', null, null, false],
     ]);
     // The page asks for its folder's models as they are now, where another model may be the default,
     // and shows those found ahead of time until they come.
@@ -476,16 +476,16 @@ describe('SessionPage', () => {
     const { rerender } = render(shown(views([])));
     await settle();
     expect(chooser('Provider').value).toBe('claude-code');
-    rerender(shown(views(['codex'], ['claude-code'])));
+    rerender(shown(views(['codex-cli'], ['claude-code'])));
     await settle();
-    expect(chooser('Provider').value).toBe('codex');
+    expect(chooser('Provider').value).toBe('codex-cli');
     // Signed in to both, the provider menu's order: Claude Code first.
-    rerender(shown(views(['claude-code', 'codex'])));
+    rerender(shown(views(['claude-code', 'codex-cli'])));
     await settle();
     expect(chooser('Provider').value).toBe('claude-code');
     // Once the user types, a sign-in learnt later changes nothing.
     fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hi' } });
-    rerender(shown(views(['codex'], ['claude-code'])));
+    rerender(shown(views(['codex-cli'], ['claude-code'])));
     await settle();
     expect(chooser('Provider').value).toBe('claude-code');
   });
@@ -496,7 +496,7 @@ describe('SessionPage', () => {
     bridge.choices.mockResolvedValue({
       folders: {
         '/Users/me/web': {
-          provider: 'codex',
+          provider: 'codex-cli',
           gateway: null,
           model: 'luna',
           effort: 'high',
@@ -506,7 +506,7 @@ describe('SessionPage', () => {
       dayRoot: '/Users/me/3mukon-code',
     });
     const accounts = (codex: 'signed-out' | 'unknown') => ({
-      signedOut: (provider: string) => provider === 'codex' && codex === 'signed-out',
+      signedOut: (provider: string) => provider === 'codex-cli' && codex === 'signed-out',
       signedIn: (provider: string) => provider === 'claude-code',
       notInstalled: () => false,
       downloading: () => false,
@@ -536,7 +536,7 @@ describe('SessionPage', () => {
       />,
     );
     await settle();
-    expect(chooser('Provider').value).toBe('codex');
+    expect(chooser('Provider').value).toBe('codex-cli');
     expect(chooser('Model').value).toBe('luna');
   });
 
@@ -546,7 +546,7 @@ describe('SessionPage', () => {
     bridge.choices.mockResolvedValue({
       folders: {
         '/Users/me/web': {
-          provider: 'codex',
+          provider: 'codex-cli',
           gateway: null,
           model: 'luna',
           effort: 'high',
@@ -557,7 +557,7 @@ describe('SessionPage', () => {
     });
     render(page(bridge));
     await settle();
-    expect(chooser('Provider').value).toBe('codex');
+    expect(chooser('Provider').value).toBe('codex-cli');
     expect(chooser('Model').value).toBe('luna');
     expect(chooser('Reasoning effort').value).toBe('high');
     expect(chooser('Permission mode').value).toBe('auto');
@@ -566,7 +566,7 @@ describe('SessionPage', () => {
     fireEvent.change(message, { target: { value: 'Hi' } });
     fireEvent.keyDown(message, { key: 'Enter' });
     expect(bridge.start.mock.calls[0]?.[0]).toMatchObject({
-      provider: 'codex',
+      provider: 'codex-cli',
       model: 'luna',
       effort: 'high',
       mode: 'auto',
@@ -576,7 +576,13 @@ describe('SessionPage', () => {
     expect(bridge.rememberChoice.mock.calls).toEqual([
       [
         '/Users/me/web',
-        { provider: 'codex', gateway: null, model: 'luna', effort: 'high', sandbox: 'read-only' },
+        {
+          provider: 'codex-cli',
+          gateway: null,
+          model: 'luna',
+          effort: 'high',
+          sandbox: 'read-only',
+        },
       ],
     ]);
   });
@@ -844,7 +850,7 @@ describe('SessionPage', () => {
         sessionId="s1"
         summary={{
           id: 's1',
-          provider: 'codex',
+          provider: 'codex-cli',
           sessionId: 'p1',
           cwd: '/Users/me/web',
           status: 'waiting',

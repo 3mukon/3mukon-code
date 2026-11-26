@@ -28,7 +28,7 @@ const claude: SessionRecord = {
 };
 const codex: SessionRecord = {
   id: 'a2',
-  provider: 'codex',
+  provider: 'codex-cli',
   sessionId: 'thread-1',
   cwd: '/Users/me/api',
   activeAt: 2_000,

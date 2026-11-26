@@ -10,7 +10,7 @@ export default defineConfig(
     'test-results/',
     'playwright-report/',
     // Generated from the bundled Codex binary by scripts/codex-protocol.mjs; not edited by hand.
-    'src/providers/codex/main/protocol/',
+    'src/providers/codex-cli/main/protocol/',
   ]),
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,

@@ -17,7 +17,7 @@
     },
     "trust": {
       "message": "Do you trust the files in “{{name}}”?",
-      "detail": "{{path}}\n\n3mukon-code keeps your answer with the workspace, and you can change it later from the workspace’s menu. {{claudeCode}}, {{codex}}, {{grokBuild}} and {{antigravity}} still apply their own trust rules.",
+      "detail": "{{path}}\n\n3mukon-code keeps your answer with the workspace, and you can change it later from the workspace’s menu. {{claudeCode}}, {{codexCli}}, {{grokBuild}} and {{antigravity}} still apply their own trust rules.",
       "trust": "Trust",
       "distrust": "Don’t Trust"
     },
@@ -581,7 +581,7 @@
   },
   "providers": {
     "claude-code": "Claude Code",
-    "codex": "Codex CLI",
+    "codex-cli": "Codex CLI",
     "grok-build": "Grok Build",
     "antigravity": "Antigravity"
   },

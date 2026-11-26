@@ -17,7 +17,7 @@ import { resolveLanguage } from '../../i18n/shared/language';
 import { PresentationHost } from '../../panels/main/presentation-host';
 import { ARTIFACT_LIMITS, PRESENTATION_LIMITS } from '../../panels/shared/presentation';
 import { createClaudeCodeProvider } from '../../providers/claude-code/main/adapter';
-import { createCodexProvider } from '../../providers/codex/main/adapter';
+import { createCodexProvider } from '../../providers/codex-cli/main/adapter';
 import { createAntigravityProvider } from '../../providers/antigravity/main/adapter';
 import { createGrokBuildProvider } from '../../providers/grok-build/main/adapter';
 import { choiceStorage, RememberedChoices } from '../../sessions/main/choices';
@@ -388,7 +388,7 @@ function providers(
     createClaudeCodeProvider({ install: installs['claude-code'] }),
     ...(toolset === undefined
       ? []
-      : [createCodexProvider({ install: installs.codex, clientVersion: version })]),
+      : [createCodexProvider({ install: installs['codex-cli'], clientVersion: version })]),
     createGrokBuildProvider({ install: installs['grok-build'], clientVersion: version }),
     createAntigravityProvider({ install: installs.antigravity, clientVersion: version }),
   ];

@@ -63,7 +63,7 @@ const pins = {
     folder: 'package',
     binary: 'claude',
   },
-  'src/providers/codex/main/pin.json': {
+  'src/providers/codex-cli/main/pin.json': {
     version: codex,
     url: tarball('@openai/codex', `${codex}-darwin-arm64`),
     integrity: integrity('@openai/codex', `${codex}-darwin-arm64`),

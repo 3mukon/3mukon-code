@@ -1,12 +1,12 @@
 ---
-id: DOC-mod-codex
+id: DOC-mod-codex-cli
 type: doc
-title: codex provider module
+title: codex-cli provider module
 status: current
 visibility: public
 date: 2026-10-26
 summary: The Codex adapter, which drives Codex through its app-server on the user's own Codex sign-in and maps it onto the provider-neutral session model
-scope: ["src/providers/codex/**"]
+scope: ["src/providers/codex-cli/**"]
 tags: []
 ---
 

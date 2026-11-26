@@ -339,7 +339,7 @@ describe('the session tools', () => {
     const session = (id: string, parent?: string) => ({
       id,
       title: id === 'lead' ? 'Lead' : 'Helper',
-      provider: 'codex' as const,
+      provider: 'codex-cli' as const,
       folder: '/work',
       status: 'idle' as const,
       ...(parent === undefined ? {} : { parent }),
@@ -450,7 +450,7 @@ describe('the session tools', () => {
     // Every provider alike, so that a provider added without its facts fails here as well.
     const runs = {
       'claude-code': 'Anthropic’s Claude models',
-      codex: 'OpenAI’s GPT models',
+      'codex-cli': 'OpenAI’s GPT models',
       'grok-build': 'xAI’s Grok models',
       antigravity: 'Google’s Gemini models',
     };
@@ -468,8 +468,8 @@ describe('the session tools', () => {
     const sessions = coordinator();
     const { client } = await session('lead', sessions);
     const listed = await client.callTool({ name: 'session_list', arguments: {} });
-    expect(text(listed)).toContain('lead: Lead (codex, idle, in /work) [you]');
-    expect(text(listed)).toContain('helper: Helper (codex, idle, in /work) [your child]');
+    expect(text(listed)).toContain('lead: Lead (codex-cli, idle, in /work) [you]');
+    expect(text(listed)).toContain('helper: Helper (codex-cli, idle, in /work) [your child]');
     const started = await client.callTool({
       name: 'session_start',
       arguments: { prompt: 'Write the tests', provider: 'claude-code', title: 'Tests' },
@@ -491,9 +491,9 @@ describe('the session tools', () => {
     // A child's list marks its parent.
     const helper = await session('helper', sessions);
     const fromChild = await helper.client.callTool({ name: 'session_list', arguments: {} });
-    expect(text(fromChild)).toContain('lead: Lead (codex, idle, in /work) [your parent]');
+    expect(text(fromChild)).toContain('lead: Lead (codex-cli, idle, in /work) [your parent]');
     expect(text(fromChild)).toContain(
-      'helper: Helper (codex, idle, in /work) [you, child of lead]',
+      'helper: Helper (codex-cli, idle, in /work) [you, child of lead]',
     );
   });
 

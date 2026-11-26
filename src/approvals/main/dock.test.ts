@@ -5,7 +5,7 @@ import { dockAttention, type Dock } from './dock';
 const sessions = (statuses: SessionSummary['status'][]): SessionSummary[] =>
   statuses.map((status, index) => ({
     id: `s${String(index)}`,
-    provider: 'codex',
+    provider: 'codex-cli',
     sessionId: `p${String(index)}`,
     cwd: '/Users/me/web',
     status,

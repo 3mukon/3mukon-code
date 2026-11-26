@@ -14,7 +14,7 @@ import { answerQuestion, dataFolder, launch, withApp } from './app';
 // long timeline of messages and tool calls, each with text for VoiceOver alone.
 const summary: SessionSummary = {
   id: 's1',
-  provider: 'codex',
+  provider: 'codex-cli',
   sessionId: 'p1',
   cwd: '/Users/me/web',
   title: 'Long session',

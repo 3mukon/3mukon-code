@@ -1,7 +1,7 @@
 /* global console */
 // Regenerates the Codex app-server protocol types that the codex provider uses, from the bundled Codex
 // binary (ADR-0003). Every type is generated into a temporary folder; the ones named in ROOTS, with
-// everything they import, are copied into src/providers/codex/main/protocol/ and formatted. Run it
+// everything they import, are copied into src/providers/codex-cli/main/protocol/ and formatted. Run it
 // after each upgrade of @openai/codex: corepack pnpm run codex:protocol
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -63,7 +63,7 @@ const ROOTS = [
 ];
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const target = join(root, 'src/providers/codex/main/protocol');
+const target = join(root, 'src/providers/codex-cli/main/protocol');
 const fromRoot = createRequire(join(root, 'package.json'));
 const codexPackage = fromRoot.resolve('@openai/codex/package.json');
 const nativePackage = createRequire(codexPackage).resolve(

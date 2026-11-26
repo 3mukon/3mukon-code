@@ -20,7 +20,7 @@ let root: string;
 let folder: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'installs-copies-'));
-  folder = join(root, 'providers', 'codex');
+  folder = join(root, 'providers', 'codex-cli');
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });

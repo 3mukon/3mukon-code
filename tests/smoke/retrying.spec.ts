@@ -92,7 +92,7 @@ const cases = [
   },
   {
     provider: 'Codex',
-    id: 'codex',
+    id: 'codex-cli',
     // The retry, of the five Codex reports, with Codex's own words for an error 500.
     notice:
       /^Retrying, attempt [1-5] of 5: We’re currently experiencing high demand, which may cause temporary errors\.$/,
