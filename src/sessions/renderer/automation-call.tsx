@@ -196,7 +196,14 @@ function titleOf(
   const site = summary === null ? null : targetName(summary, true);
   const named = { name: appName(summary, t) };
   switch (record.toolName) {
+    // A tab opened at an address reads as the navigation it was (ADR-0045).
     case 'browser_open':
+      return summary?.address === undefined || site === null
+        ? { text: t('sessions.automation.tool.browser_open') }
+        : {
+            text: t('sessions.automation.tool.browser_navigate', { target: OBJECT }),
+            object: site,
+          };
     case 'browser_snapshot':
     case 'browser_screenshot':
     case 'computer_targets':

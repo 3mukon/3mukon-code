@@ -214,7 +214,6 @@ it('records invalid arguments and shares cancellation across separate MCP POST i
   const access = owner.toolset.open();
   const client = await connect(access);
   for (const [arguments_, reason] of [
-    [{ value: 1 }, 'required'],
     [{ value: 1, actionId: 42 }, 'invalid-type'],
     [{ value: 1, actionId: '' }, 'too-short'],
     [{ value: 1, actionId: 'x'.repeat(129) }, 'too-long'],

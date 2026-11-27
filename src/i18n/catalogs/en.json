@@ -176,6 +176,7 @@
         "browser_open": "Opened a tab",
         "browser_navigate": "Opened a page",
         "browser_navigate_subject": "Opened {{subject}}",
+        "browser_open_subject": "Opened {{subject}}",
         "browser_snapshot": "Read the page",
         "browser_screenshot": "Took a screenshot of the page",
         "browser_act": "Acted on the page",

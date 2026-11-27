@@ -155,7 +155,7 @@ export function browserTools(
   return [
     define(
       'browser_open',
-      "Open a browser tab to work on websites in, with no page yet: open the task's address in it with browser_navigate. Prefer the app's own browser: sharing none, the default, for public pages or isolated work, or app for the shared app profile's sign-ins; global uses the connected Chrome profile. Each shared tab has its own operation grant. A shared profile may not be signed in to a site: when a page asks for a sign-in, never enter credentials yourself; present the tab at once with panel_present and ask the user to sign in and hand it back.",
+      "Open a browser tab to work on websites in, at an address where you give one, which it opens as browser_navigate would, approval included, and gives back with the page's title; use browser_navigate for the tab's later pages. Prefer the app's own browser: sharing none, the default, for public pages or isolated work, or app for the shared app profile's sign-ins; global uses the connected Chrome profile. Each shared tab has its own operation grant. A shared profile may not be signed in to a site: when a page asks for a sign-in, never enter credentials yourself; present the tab at once with panel_present and ask the user to sign in and hand it back.",
       z.strictObject({
         sharing: z
           .enum(['none', 'app', 'global'])
@@ -163,12 +163,17 @@ export function browserTools(
           .describe(
             'Whose sign-ins the tab shares: none, a profile of its own, when left out; app, the app profile’s; global, the connected Chrome profile’s.',
           ),
+        url: url
+          .optional()
+          .describe(
+            'An HTTP or HTTPS address to open the tab at, as browser_navigate would; without one, the tab has no page yet.',
+          ),
       }),
       ({ sharing }) => {
         const setup = sharing === 'global' ? chrome?.requirement() : undefined;
         return setup ? { ...metadata, setup } : metadata;
       },
-      async ({ sharing }, { owner, signal }) => {
+      async ({ sharing, url }, { owner, signal }) => {
         // A saved connection that is coming back, as after the app starts, is waited for.
         const connected = sharing === 'global' ? await chrome?.liveTab(signal) : undefined;
         if (signal.aborted)
@@ -184,11 +189,40 @@ export function browserTools(
             },
           };
         const outcome = browser.open(owner, sharing ?? 'none', signal, connected ?? undefined);
+        if (outcome.status !== 'verified') return { outcome };
+        const tab = outcome.value;
+        // An address is the call's second step (ADR-0045): the new tab's navigation, which the broker
+        // checks and approves as browser_navigate's; should it fail, the tab closes again.
         return {
-          outcome:
-            outcome.status === 'verified'
-              ? { status: 'verified', value: { ...outcome.value } }
-              : outcome,
+          outcome: { status: 'verified', value: { ...tab } },
+          ...(url === undefined
+            ? {}
+            : {
+                next: {
+                  plan: {
+                    ...tabPlan(tab, 'navigate', inPanel(owner, tab)),
+                    mayActivate: browser.isExternal(owner, tab),
+                    browserAddress: displayAddress(url) ?? undefined,
+                  },
+                  execute: async (context: ExecutionContext) => {
+                    const navigated = await browser.navigate(
+                      context.owner,
+                      tab,
+                      url,
+                      context.signal,
+                      incidents(context),
+                    );
+                    if (navigated.status !== 'verified') return { outcome: navigated };
+                    const page = browser.pageOf(context.owner, tab);
+                    return {
+                      outcome: { status: 'verified', value: { ...tab, ...(page ?? {}) } },
+                    };
+                  },
+                  undo: async () => {
+                    await browser.closeTab(owner, tab);
+                  },
+                },
+              }),
         };
       },
     ),

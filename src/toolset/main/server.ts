@@ -35,7 +35,7 @@ const instructions = [
   "These are the 3mukon-code app's tools. Where your provider lists tools only after a tool search, search by the names below.",
   'Sessions: to have another agent do part of the work, on any provider and model, such as Claude, GPT, Gemini or Grok, start a child session with session_start; provider_list shows which provider offers a model, and the id to give. Use them rather than a subagent of your own when the work needs another provider’s model, or a session the user can see and steer. A child session starts none of its own. session_list lists the user’s sessions, message_send sends one a message, message_read reads your inbox, and session_end ends a child.',
   'Panels: panel_present shows the user a result, a comparison, a decision or a handoff beside your session; panel_update, panel_arrange, panel_close and panel_list manage what you presented. Keep work in the background by default, and present only what the user needs to inspect, compare, decide on or take over.',
-  "Websites: use the browser tools, from browser_open and browser_navigate to browser_snapshot, browser_act, browser_screenshot, browser_evaluate and browser_close. Prefer the app's own browser. Respect the user's requested browser, and ask if it is unavailable.",
+  "Websites: use the browser tools, from browser_open, which opens a tab at the address you give, and browser_navigate, for its later pages, to browser_snapshot, browser_act, browser_screenshot, browser_evaluate and browser_close. Prefer the app's own browser. Respect the user's requested browser, and ask if it is unavailable.",
   'Native macOS apps: use the computer tools, from computer_targets and computer_select to computer_windows, computer_observe, computer_act and computer_release. automation_capabilities says what browser use and computer use can do in this session.',
   "Shared sign-ins may be missing or expired, so do not assume a site is signed in: check that the page shows the user's account. When a page asks for a sign-in, never enter a password, code or other credential yourself: present the tab at once with panel_present, without asking first, then ask the user to sign in there and hand the tab back, and continue once they say they have. While the user has the tab, its tools refuse with target-paused.",
   'In auto mode the app requests approval once per operation on a shared or native target. Group related actions on that target within the same turn. A session grant applies to later operations on that target until it ends.',
@@ -103,8 +103,9 @@ export async function startToolset({
                 .string()
                 .min(1)
                 .max(128)
+                .optional()
                 .describe(
-                  'A unique ID for this action within the turn. Reuse it only for an immediate retry with the exact same arguments; give each new action a new ID. An ID used in an earlier turn names a new action, except in an exact repeat of a call whose effect was left uncertain, which returns that outcome rather than running again.',
+                  'Leave it out, unless you mean to repeat a change with the same arguments within this turn, which takes a new ID each time: without one, the same call again in a turn returns its first outcome.',
                 ),
             }),
           ),

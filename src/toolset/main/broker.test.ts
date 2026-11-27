@@ -17,7 +17,7 @@ import type {
 import { foldAutomationEvent, liveAutomationState } from '../../sessions/shared/automation-state';
 import { FakeAutomationBridge } from '../shared/automation-fake';
 import { AutomationBroker, type BrokerAccess } from './broker';
-import type { AutomationTool, ExecutionPlan, ExecutionResult } from './execution';
+import type { AutomationTool, ExecutionPlan, ExecutionResult, NextStep } from './execution';
 
 const targetSchema = z.object({
   id: z.string(),
@@ -84,7 +84,6 @@ let serial = 0;
 const policy = { mode: 'auto' as const, sandbox: 'workspace-write' as const };
 
 it.each([
-  { actionId: undefined, reason: 'required' },
   { actionId: null, reason: 'invalid-type' },
   { actionId: 42, reason: 'invalid-type' },
   { actionId: { privateValue: 'must-not-be-returned' }, reason: 'invalid-type' },
@@ -105,13 +104,42 @@ it.each([
   expect(execute).toHaveBeenCalledTimes(1);
 });
 
+// A call without an actionId (ADR-0045): one that changes something is keyed by its tool and
+// arguments within its turn, and one that only reads runs afresh.
+it('takes a change repeated without an actionId in its turn as the same action, and runs it again in a later turn', async () => {
+  const first = await broker.dispatch(a, 'panel_present', {}, {});
+  const again = await broker.dispatch(a, 'panel_present', {}, {});
+  expect(first.outcome.status).toBe('verified');
+  expect(again.outcome).toEqual(first.outcome);
+  expect(execute).toHaveBeenCalledTimes(1);
+  // A new ID repeats it on purpose.
+  await broker.dispatch(a, 'panel_present', {}, { actionId: 'again' });
+  expect(execute).toHaveBeenCalledTimes(2);
+  broker.endTurn('a');
+  broker.beginTurn('a');
+  await broker.dispatch(a, 'panel_present', {}, {});
+  expect(execute).toHaveBeenCalledTimes(3);
+});
+
+it('runs a read repeated without an actionId afresh', async () => {
+  const { ref: target } = tab();
+  const first = await broker.dispatch(a, 'observe', { target }, {});
+  const again = await broker.dispatch(a, 'observe', { target }, {});
+  expect(first.outcome.status).toBe('verified');
+  expect(again.outcome.status).toBe('verified');
+  expect(execute).toHaveBeenCalledTimes(2);
+});
+
 beforeEach(async () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'automation-contract-')));
   for (const name of ['a', 'b', 'temporary', 'outside']) mkdirSync(join(root, name));
   execute.mockReset().mockImplementation(() => Promise.resolve(result()));
   broker = new AutomationBroker([
     tool('change'),
-    tool('observe', { effect: 'observe' }),
+    {
+      ...tool('observe', { effect: 'observe' }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
     tool('navigate', { effect: 'navigate' }),
     tool('coordinate', { requiresObservation: true }),
     tool('capture', { effect: 'observe', requiresImages: true }),
@@ -120,6 +148,7 @@ beforeEach(async () => {
     tool('activation', { mayActivate: true }, 'computer'),
     tool('unknown_destination', { destinationKnown: false }, 'computer'),
     tool('panel_present', {}, 'panel'),
+    tool('open', { operation: null, effect: 'metadata' }),
   ]);
   await broker.bind('a', join(root, 'a'), policy, [join(root, 'temporary')]);
   await broker.bind('b', join(root, 'b'), policy);
@@ -289,6 +318,60 @@ async function approve(
   expect(broker.answer(owner, id, { decision }).status).toBe('verified');
 }
 
+// A call's second step on the target its first made, as browser_open's navigation (ADR-0045).
+describe('a call’s second step', () => {
+  const opening = (target: TargetRef, undo: () => Promise<void>) => {
+    const second = vi.fn<NextStep['execute']>(() =>
+      Promise.resolve({ outcome: { status: 'verified', value: { page: 'example.com' } } }),
+    );
+    execute.mockImplementationOnce(() =>
+      Promise.resolve({
+        outcome: { status: 'verified', value: { opened: true } },
+        next: {
+          plan: {
+            operation: 'browser-tab',
+            effect: 'navigate',
+            delivery: 'background',
+            mayActivate: false,
+            target,
+          },
+          execute: second,
+          undo,
+        },
+      }),
+    );
+    return second;
+  };
+
+  it('is approved as any call on a shared tab, and its outcome is the call’s', async () => {
+    const undo = vi.fn(() => Promise.resolve());
+    const second = opening(tab('a', 'app').ref, undo);
+    const call = broker.dispatch(a, 'open', {}, {});
+    await approve('a', 'allow-once');
+    expect((await call).outcome).toEqual({ status: 'verified', value: { page: 'example.com' } });
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(undo).not.toHaveBeenCalled();
+  });
+
+  it('undoes the first step when the second is denied', async () => {
+    const undo = vi.fn(() => Promise.resolve());
+    const second = opening(tab('a', 'app').ref, undo);
+    const call = broker.dispatch(a, 'open', {}, {});
+    await approve('a', 'deny');
+    expect((await call).outcome).toMatchObject({ status: 'refused', code: 'denied' });
+    expect(second).not.toHaveBeenCalled();
+    expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs on a tab that shares no sign-ins without an approval', async () => {
+    const undo = vi.fn(() => Promise.resolve());
+    const second = opening(tab('a').ref, undo);
+    expect((await broker.dispatch(a, 'open', {}, {})).outcome.status).toBe('verified');
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(broker.snapshot('a').value.pendingApprovals).toEqual([]);
+  });
+});
+
 describe('trusted automation dispatch', () => {
   it('refuses forged callers and cross-owner/stale handles without work', async () => {
     const target = tab();
@@ -328,7 +411,7 @@ describe('trusted automation dispatch', () => {
   });
   it('discovers lazily and refuses unavailable setup or image input before operations', async () => {
     const target = tab();
-    expect(broker.capabilities('a').tools).toHaveLength(10);
+    expect(broker.capabilities('a').tools).toHaveLength(11);
     expect(execute).not.toHaveBeenCalled();
     broker.availability('change', {
       tools: 'unavailable',

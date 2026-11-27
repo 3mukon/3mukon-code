@@ -261,9 +261,10 @@ it('retains a checked browser control label when stopped and withholds it from f
     expect(f.broker.record('b', wrongOwner.automation.callId)).not.toHaveProperty(
       'browserAction.label',
     );
-    const missingId = await f.broker.dispatch(a, 'browser_act', input, {});
-    expect(missingId.outcome).toMatchObject({ code: 'invalid-request' });
-    expect(f.broker.record('a', missingId.automation.callId)).toMatchObject({
+    // An invalid action ID is refused before the click, and the refusal keeps the checked label.
+    const invalidId = await f.broker.dispatch(a, 'browser_act', input, { actionId: '' });
+    expect(invalidId.outcome).toMatchObject({ code: 'invalid-request' });
+    expect(f.broker.record('a', invalidId.automation.callId)).toMatchObject({
       browserAction: { kind: 'click', label: 'Save Draft' },
     });
     f.click.mockImplementationOnce(() => pending.promise);

@@ -149,6 +149,13 @@ export class EmbeddedBrowser implements BrowserTabs {
     return this.find(owner, ref)?.external === true;
   }
 
+  // Where an owned tab's page is now and what it is called, as after a navigation; null for a tab the
+  // owner does not have.
+  pageOf(owner: string, ref: BrowserTabRef): { address: string | null; title: string } | null {
+    const tab = this.find(owner, ref);
+    return tab ? { address: tab.state.address, title: tab.state.title } : null;
+  }
+
   async closeTab(owner: string, ref: TargetRef): Promise<Outcome<null>> {
     const tab = this.find(owner, ref);
     if (!tab) return refused('stale-target');

@@ -38,8 +38,10 @@ import {
   MAX_ARGUMENT_BYTES,
   requestKey,
   type AutomationTool,
+  type ExecutionContext,
   type ExecutionPlan,
   type ExecutionResult,
+  type NextStep,
 } from './execution';
 import { canonicalScope, checkFiles, needsGrant, policyFailure, type FileScope } from './policy';
 import { Resources, type Resource, type ResourceSpec } from './resources';
@@ -719,26 +721,32 @@ export class AutomationBroker {
     }
     if (owner.calls.size >= 32) return finish(refuse('limit-exceeded'));
     if (!owner.turn) return finish(refuse('turn-inactive'));
-    const actionId = options.actionId;
-    if (typeof actionId !== 'string' || actionId.length === 0 || actionId.length > 128) {
+    const given = options.actionId;
+    if (
+      given !== undefined &&
+      (typeof given !== 'string' || given.length === 0 || given.length > 128)
+    ) {
       return finish(
         refuse('invalid-request', {
           kind: 'argument',
           field: 'actionId',
           reason:
-            actionId === undefined
-              ? 'required'
-              : typeof actionId !== 'string'
-                ? 'invalid-type'
-                : actionId.length === 0
-                  ? 'too-short'
-                  : 'too-long',
+            typeof given !== 'string'
+              ? 'invalid-type'
+              : given.length === 0
+                ? 'too-short'
+                : 'too-long',
         }),
       );
     }
     if (!request) return finish(invalidInput);
     const { key, args, plan } = request;
     const hash = createHash('sha256').update(name).update('\0').update(key).digest('hex');
+    // A call without an ID (ADR-0045): one that changes something is keyed by its tool and arguments,
+    // so that a resend within its turn gets the first call's outcome, and one of an unsettled effect
+    // gets that call back; one that only reads has a key of its own, and runs afresh.
+    const actionId =
+      given ?? (tool.annotations.readOnlyHint ? `read:${record.callId}` : `call:${hash}`);
     // Within its turn, an ID answers from its record, and conflicts with other arguments. An earlier
     // turn's ID names a new request, unless it repeats the very call whose effect is unsettled, which
     // it then gets back rather than running again, as after a reconnect.
@@ -814,7 +822,9 @@ export class AutomationBroker {
     try {
       // Policy changes abort in-flight work. Bind the refusal detail to the policy that ran it.
       const sandbox = owner.policy.sandbox;
-      const result = await this.perform(owner, access, tool, args, plan, work);
+      let result = await this.perform(owner, access, tool, args, plan, work);
+      const next = result.outcome.status === 'verified' ? result.next : undefined;
+      if (next) result = await this.second(owner, access, tool, args, next, work);
       const outcome: Outcome =
         result.outcome.status === 'refused' && result.outcome.code === 'sandbox-denied'
           ? { ...result.outcome, detail: { kind: 'sandbox', level: sandbox } }
@@ -833,6 +843,46 @@ export class AutomationBroker {
       this.state(owner);
     }
   }
+  // A call's second step (ADR-0045), on the target its first made: described on the call's record,
+  // then performed as any plan, its approval included, with the call's cancellation and deadline. A
+  // second step that is not verified undoes the first.
+  private async second(
+    owner: Owner,
+    access: BrokerAccess,
+    tool: AutomationTool,
+    args: Record<string, unknown>,
+    next: NextStep,
+    first: Work,
+  ): Promise<ExecutionResult> {
+    const { plan } = next;
+    const resource = plan.target && this.resources.resolve(owner.id, plan.target);
+    owner.activity.describe(
+      first.callId,
+      resource && bound(resource.target, plan.browserAddress),
+      plan.delivery,
+      plan,
+      false,
+    );
+    const work: Work = {
+      callId: first.callId,
+      controller: first.controller,
+      deadline: first.deadline,
+      generation: first.generation,
+      turn: first.turn,
+      ...(plan.target ? { target: { ...plan.target } } : {}),
+      dispatched: false,
+      settled: false,
+    };
+    owner.calls.add(work);
+    const step = {
+      ...tool,
+      execute: (_args: unknown, context: ExecutionContext) => next.execute(context),
+    };
+    const result = await this.perform(owner, access, step, args, plan, work);
+    if (result.outcome.status !== 'verified') await next.undo().catch(() => undefined);
+    return result;
+  }
+
   private async perform(
     owner: Owner,
     access: BrokerAccess,

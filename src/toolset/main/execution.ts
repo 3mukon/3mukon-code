@@ -64,6 +64,18 @@ export interface ExecutionResult {
   outcome: Outcome;
   frames?: readonly Frame[];
   presentations?: readonly PresentationSummary[];
+  // A second step on what this one made, taken once this one is verified.
+  next?: NextStep;
+}
+
+// A second step a call takes on a target its first step made (ADR-0045), as browser_open's navigation
+// of the tab it opened: a plan the broker checks, approves and schedules as any call's, within the same
+// call; the work it runs, whose outcome becomes the call's; and what undoes the first step should the
+// second not be verified.
+export interface NextStep {
+  plan: ExecutionPlan;
+  execute(context: ExecutionContext): Promise<ExecutionResult>;
+  undo(): Promise<void>;
 }
 // What a tool does to its surroundings, as MCP's tool annotations tell the providers, whose own reviews
 // and lists read them: whether it only reads, whether it may change or end what it acts on rather than

@@ -50,6 +50,7 @@ export function appCall(tool: string, input: unknown): McpCall {
     case 'panel_update':
       return withSubject(call, said('title'));
     case 'browser_navigate':
+    case 'browser_open':
       return withSubject(call, said('url'));
     case 'browser_act':
     case 'computer_act':
