@@ -361,7 +361,8 @@
     },
     "inbox": {
       "notices": "来自其他会话的新消息",
-      "from": "消息来自"
+      "from": "消息来自",
+      "report": "应用报告子会话"
     }
   },
   "approvals": {

@@ -44,7 +44,7 @@ import type {
   SessionEventListener,
   StartOptions,
 } from './provider';
-import { CHILD_LIMIT, MESSAGE_LIMITS, type InboxNotice } from '../shared/inbox';
+import { CHILD_LIMIT, MESSAGE_LIMITS, type InboxNotice, type InboxReport } from '../shared/inbox';
 import { memoryInboxStorage, SessionInboxes, type InboxMessage } from './inbox';
 import type { SessionRecord, SessionRecords } from './records';
 import { cleanTitle, ranAWhile, TITLE_ATTEMPTS, titlePrompt, type TurnProgress } from './titles';
@@ -118,6 +118,9 @@ interface Hosted {
   titling?: boolean;
   // The session that started the session, for a child (ADR-0036).
   parent?: string;
+  // Whether the host has closed, or is closing, the session's current run itself, so that neither its
+  // end nor an interruption on the way to it is reported to its parent (ADR-0042).
+  closedByHost?: true;
   // Whether the host is telling the session of its new messages in a turn of its own.
   waking?: boolean;
   // When the user last sent the session a message or a turn of it ended.
@@ -514,17 +517,25 @@ export class SessionHost {
       .sort(byActivity);
   }
 
-  // Moves the session to the archived list, closing it while it is open: one that is working stops.
-  async archive(id: string): Promise<void> {
+  // Moves the session to the archived list, as the user asks, closing it while it is open: one that is
+  // working stops.
+  archive(id: string): Promise<void> {
+    return this.archiveOne(id, false);
+  }
+
+  // Archives the session, and its children with it (ADR-0036). A running child the user archives on
+  // its own is reported to its parent (ADR-0042); those archived with their parent are not.
+  private async archiveOne(id: string, withParent: boolean): Promise<void> {
     const hosted = this.sessions.get(id);
     if (hosted === undefined || hosted.archived) return;
+    if (!withParent && this.running(hosted))
+      this.tellParent(hosted, 'stopped', undefined, 'archived');
     hosted.archived = true;
     this.keep(hosted);
     this.report(hosted);
-    // A parent's children go with it (ADR-0036).
     await Promise.all([
       this.close(hosted),
-      ...this.childrenOf(id).map((child) => this.archive(child.id)),
+      ...this.childrenOf(id).map((child) => this.archiveOne(child.id, true)),
     ]);
   }
 
@@ -538,11 +549,19 @@ export class SessionHost {
     for (const child of this.childrenOf(id)) this.unarchive(child.id);
   }
 
-  // Takes the session off the app's lists and out of its records, closing it while it is open; its
-  // provider's own history keeps it.
-  async remove(id: string): Promise<void> {
+  // Takes the session off the app's lists and out of its records, as the user asks, closing it while it
+  // is open; its provider's own history keeps it.
+  remove(id: string): Promise<void> {
+    return this.removeOne(id, false);
+  }
+
+  // Removes the session, and its children with it (ADR-0036). A running child the user removes on its
+  // own is reported to its parent (ADR-0042); those removed with their parent are not.
+  private async removeOne(id: string, withParent: boolean): Promise<void> {
     const hosted = this.sessions.get(id);
     if (hosted === undefined) return;
+    if (!withParent && this.running(hosted))
+      this.tellParent(hosted, 'stopped', undefined, 'removed');
     const children = this.childrenOf(id);
     this.sessions.delete(id);
     this.records.remove(id);
@@ -552,7 +571,7 @@ export class SessionHost {
     await Promise.all([
       this.close(hosted).then(() => hosted.automation?.close(true)),
       // A parent's children go with it (ADR-0036).
-      ...children.map((child) => this.remove(child.id)),
+      ...children.map((child) => this.removeOne(child.id, true)),
     ]);
   }
 
@@ -704,6 +723,7 @@ export class SessionHost {
   }
 
   private async close(hosted: Hosted): Promise<void> {
+    hosted.closedByHost = true;
     await hosted.automation?.close();
     hosted.stopWaiting?.();
     delete hosted.stopWaiting;
@@ -742,6 +762,7 @@ export class SessionHost {
       : settings;
     const { mode, gateway, model, effort, sandbox } = chosen;
     hosted.runs += 1;
+    delete hosted.closedByHost;
     hosted.automation = await this.automation?.bind({
       id: hosted.id,
       cwd: hosted.cwd,
@@ -875,6 +896,42 @@ export class SessionHost {
       this.ending.get(hosted.id)?.();
       this.ending.delete(hosted.id);
     }
+    // What a child's parent hears of the child's turn's end or its close (ADR-0042), unless the host
+    // closes the child itself.
+    if (hosted.closedByHost !== true) {
+      if (event.type === 'turn-ended' && event.outcome !== 'completed') {
+        this.tellParent(hosted, event.outcome, event.error);
+      }
+      if (event.type === 'closed') this.tellParent(hosted, 'stopped', event.error);
+    }
+  }
+
+  // Puts the app's report on a child into its parent's inbox and tells the parent of it as of a message
+  // (ADR-0042): a turn that ended in an error or that the user interrupted, or the child stopping on
+  // its own or as the user archived or removed it. Nothing for a session that is not a child, for a
+  // parent the app no longer has, or as the app quits.
+  private tellParent(
+    child: Hosted,
+    report: InboxReport,
+    reason: string | undefined,
+    byUser?: 'archived' | 'removed',
+  ): void {
+    if (child.parent === undefined || this.closing) return;
+    const parent = this.sessions.get(child.parent);
+    if (parent === undefined) return;
+    const title = this.titleOf(child) ?? child.provider;
+    const full = reason?.trim() ?? '';
+    const summary = reportSummary(report, title, full.replace(/\s+/g, ' '), byUser);
+    this.inboxes.send({
+      from: child.id,
+      fromTitle: title,
+      to: parent.id,
+      summary: clipped(summary, MESSAGE_LIMITS.summary),
+      body: clippedBytes(full === '' ? summary : full, MESSAGE_LIMITS.bodyBytes),
+      sentAt: Date.now(),
+      report,
+    });
+    this.wake(parent);
   }
 
   private isClosing(): boolean {
@@ -1386,6 +1443,11 @@ export class SessionHost {
   private listed(hosted: Hosted): boolean {
     if (hosted.archived) return false;
     if (this.records.get(hosted.id) !== undefined) return true;
+    return this.running(hosted);
+  }
+
+  // Whether the session's provider runs it now.
+  private running(hosted: Hosted): boolean {
     return hosted.session !== undefined && !hosted.state.closed;
   }
 
@@ -1537,8 +1599,47 @@ function problemOf(error: unknown): string {
     : 'It could not list its models.';
 }
 
-function noticeOf({ id, from, fromTitle, summary, sentAt }: InboxMessage): InboxNotice {
-  return { id, from, fromTitle, summary, sentAt };
+// A report's summary (ADR-0042): which child, what happened and, where the provider gave one, why.
+function reportSummary(
+  report: InboxReport,
+  title: string,
+  reason: string,
+  byUser?: 'archived' | 'removed',
+): string {
+  const why = reason === '' ? '.' : `: ${reason}`;
+  switch (report) {
+    case 'failed':
+      return `A turn of your child session “${title}” ended in an error${why}`;
+    case 'interrupted':
+      return `The user interrupted a turn of your child session “${title}”, which waits until you or the user write to it.`;
+    case 'stopped':
+      return byUser === undefined
+        ? `Your child session “${title}” stopped: its provider’s process ended${why}`
+        : `The user ${byUser} your child session “${title}”, which stopped it.`;
+  }
+}
+
+// The text cut to a length in characters, an ellipsis ending it where it is cut.
+function clipped(text: string, length: number): string {
+  return text.length <= length ? text : `${text.slice(0, length - 1).trimEnd()}…`;
+}
+
+// The text cut to a size in UTF-8 bytes, between characters, an ellipsis ending it where it is cut.
+function clippedBytes(text: string, bytes: number): string {
+  if (Buffer.byteLength(text, 'utf8') <= bytes) return text;
+  const ellipsis = '…';
+  let size = Buffer.byteLength(ellipsis, 'utf8');
+  let kept = '';
+  for (const character of text) {
+    size += Buffer.byteLength(character, 'utf8');
+    if (size > bytes) break;
+    kept += character;
+  }
+  return kept + ellipsis;
+}
+
+function noticeOf({ id, from, fromTitle, summary, sentAt, report }: InboxMessage): InboxNotice {
+  return { id, from, fromTitle, summary, sentAt, ...(report === undefined ? {} : { report }) };
 }
 
 function entryOf(message: InboxMessage): InboxEntry {

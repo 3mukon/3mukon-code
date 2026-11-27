@@ -228,10 +228,41 @@ describe('ToolCall’s MCP calls', () => {
     expect(named()).toBe('Computer use:');
     rerender(call('computer_act', true));
     expect(icon()).toContain('lucide-mouse-pointer-2');
-    // The app's other tools, and other servers' tools, keep the icon of their kind.
+    // The app's other tools have icons of their own, and are still named as tools.
     rerender(call('message_send'));
-    expect(icon()).toContain('lucide-wrench');
+    expect(icon()).toContain('lucide-send');
     expect(named()).toBe('Tool:');
+  });
+
+  it('gives the app’s other tools icons of what they do, another server’s tools a plug, and other calls their kind’s', () => {
+    const icon = () => document.querySelector('svg')?.getAttribute('class') ?? '';
+    const call = (mcp?: ToolItem['mcp']) => (
+      <ToolCall item={tool({ title: 'a call', ...(mcp === undefined ? {} : { mcp }) })} />
+    );
+    const app = (name: string, action?: string) =>
+      call({
+        server: '3mukon-code',
+        tool: name,
+        app: true,
+        ...(action === undefined ? {} : { action }),
+      });
+    const { rerender } = render(app('provider_list'));
+    expect(icon()).toContain('lucide-cpu');
+    rerender(app('session_start'));
+    expect(icon()).toContain('lucide-git-branch-plus');
+    rerender(app('message_read'));
+    expect(icon()).toContain('lucide-mail-open');
+    rerender(app('message_read', 'message_read_inbox'));
+    expect(icon()).toContain('lucide-inbox');
+    rerender(app('panel_present'));
+    expect(icon()).toContain('lucide-panel-right-open');
+    // A tool of the app's that has none yet keeps its kind's.
+    rerender(app('a_tool_to_come'));
+    expect(icon()).toContain('lucide-wrench');
+    rerender(call({ server: 'github', tool: 'create_issue' }));
+    expect(icon()).toContain('lucide-plug');
+    rerender(call());
+    expect(icon()).toContain('lucide-wrench');
   });
 
   it('names another server’s tool by the server and the tool’s name in words', () => {

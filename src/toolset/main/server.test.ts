@@ -564,6 +564,28 @@ describe('the session tools', () => {
     expect(text(refused)).toBe('Not yours to end.');
   });
 
+  it('calls a report of the app’s on a child the app’s, in the notices and in the inbox', async () => {
+    const report = {
+      id: 'r1',
+      from: 'helper',
+      fromTitle: 'Helper',
+      summary: 'A turn of your child session “Helper” ended in an error.',
+      sentAt: 0,
+      report: 'failed' as const,
+    };
+    const base = coordinator();
+    const sessions = { ...base, inbox: () => [{ ...report, read: false }] };
+    const { client } = await session('lead', sessions);
+    sessions.untold.push(report);
+    const listed = text(await client.callTool({ name: 'message_read', arguments: {} }));
+    expect(listed).toContain(
+      'r1: the app’s report on your child Helper (helper), 1970-01-01T00:00:00.000Z, unread: A turn of your child session “Helper” ended in an error.',
+    );
+    expect(listed).toContain(
+      '- r1: the app’s report on your child Helper (helper): A turn of your child session “Helper” ended in an error.',
+    );
+  });
+
   it('carries the notices of new messages with the next result, once, by their summaries', async () => {
     const sessions = coordinator();
     const { client } = await session('lead', sessions);

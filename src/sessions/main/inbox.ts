@@ -23,6 +23,7 @@ const storedMessage = z.object({
   sentAt: z.number(),
   toldAt: z.number().optional(),
   readAt: z.number().optional(),
+  report: z.enum(['failed', 'interrupted', 'stopped']).optional(),
 });
 
 export interface InboxStorage {
@@ -47,12 +48,13 @@ export function inboxStorage(folder: string): InboxStorage {
       return entries.flatMap((entry): InboxMessage[] => {
         const parsed = storedMessage.safeParse(entry);
         if (!parsed.success) return [];
-        const { toldAt, readAt, ...message } = parsed.data;
+        const { toldAt, readAt, report, ...message } = parsed.data;
         return [
           {
             ...message,
             ...(toldAt === undefined ? {} : { toldAt }),
             ...(readAt === undefined ? {} : { readAt }),
+            ...(report === undefined ? {} : { report }),
           },
         ];
       });

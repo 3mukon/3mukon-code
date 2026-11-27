@@ -1,0 +1,45 @@
+import { describe, expect, it } from 'vitest';
+import { inboxContext, inboxNoticesOf, senderWords, type InboxNotice } from './inbox';
+
+const message: InboxNotice = {
+  id: 'm1',
+  from: 'c1',
+  fromTitle: 'Write the tests',
+  summary: 'Tests pass',
+  sentAt: 1,
+};
+const report: InboxNotice = {
+  id: 'm2',
+  from: 'c2',
+  fromTitle: 'Review',
+  summary: 'A turn of your child session “Review” ended in an error.',
+  sentAt: 2,
+  report: 'failed',
+};
+
+describe('the inbox block', () => {
+  it('gives the notices back as a history holds them, reports with what they report', () => {
+    const block = inboxContext([message, report]) ?? '';
+    expect(block).toContain('the app’s own report on one of your child sessions');
+    expect(inboxNoticesOf(block)).toEqual([message, report]);
+    expect(inboxContext([])).toBeUndefined();
+    expect(inboxNoticesOf('Fix the build')).toBeUndefined();
+  });
+
+  it('reads a report of an unknown kind as a message', () => {
+    const block = JSON.stringify({
+      source: '3mukon-code:inbox',
+      messages: [{ ...report, report: 'exploded' }],
+    });
+    expect(inboxNoticesOf(block)).toEqual([
+      { id: 'm2', from: 'c2', fromTitle: 'Review', summary: report.summary, sentAt: 2 },
+    ]);
+  });
+});
+
+describe('senderWords', () => {
+  it('names a message’s sender, and the child a report is on', () => {
+    expect(senderWords(message)).toBe('from Write the tests (c1)');
+    expect(senderWords(report)).toBe('the app’s report on your child Review (c2)');
+  });
+});

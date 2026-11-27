@@ -38,6 +38,20 @@ import {
   WholeWord as LucideWholeWord,
   Wrench as LucideWrench,
   X as LucideX,
+  CirclePause as LucideCirclePause,
+  CircleStop as LucideCircleStop,
+  Cpu as LucideCpu,
+  GitBranchPlus as LucideGitBranchPlus,
+  LayoutPanelLeft as LucideLayoutPanelLeft,
+  ListChecks as LucideListChecks,
+  ListTree as LucideListTree,
+  MailOpen as LucideMailOpen,
+  PanelRightClose as LucidePanelRightClose,
+  PanelRightOpen as LucidePanelRightOpen,
+  PanelsTopLeft as LucidePanelsTopLeft,
+  Plug as LucidePlug,
+  RefreshCw as LucideRefreshCw,
+  Send as LucideSend,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react';
@@ -90,3 +104,17 @@ export const Pointer = decorative(LucideMousePointer2);
 export const PanelLeft = decorative(LucidePanelLeft);
 export const PanelRight = decorative(LucidePanelRight);
 export const Inbox = decorative(LucideInbox);
+export const CirclePause = decorative(LucideCirclePause);
+export const CircleStop = decorative(LucideCircleStop);
+export const Cpu = decorative(LucideCpu);
+export const GitBranchPlus = decorative(LucideGitBranchPlus);
+export const LayoutPanelLeft = decorative(LucideLayoutPanelLeft);
+export const ListChecks = decorative(LucideListChecks);
+export const ListTree = decorative(LucideListTree);
+export const MailOpen = decorative(LucideMailOpen);
+export const PanelRightClose = decorative(LucidePanelRightClose);
+export const PanelRightOpen = decorative(LucidePanelRightOpen);
+export const PanelsTopLeft = decorative(LucidePanelsTopLeft);
+export const Plug = decorative(LucidePlug);
+export const RefreshCw = decorative(LucideRefreshCw);
+export const Send = decorative(LucideSend);

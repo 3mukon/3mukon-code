@@ -1003,6 +1003,96 @@ describe('SessionHost coordination', () => {
     expect(() => coordinator.read(child.id, sent.id)).toThrow('no message');
   });
 
+  it('reports a child’s failed or interrupted turn and its provider stopping to its parent, as the app’s, waking it', async () => {
+    const { claude, coordinator, parent, emit } = await withParent();
+    const child = await coordinator.start(parent, { prompt: 'Write the tests' });
+    emit({ type: 'turn-ended', outcome: 'completed' });
+    await tick();
+    const emitChild = claude.listeners[1];
+    if (emitChild === undefined) throw new Error('no child');
+    emitChild({
+      type: 'turn-ended',
+      outcome: 'failed',
+      error: 'Invalid API key\n· Please run /login',
+    });
+    await tick();
+    const failed =
+      'A turn of your child session “Write the tests” ended in an error: Invalid API key · Please run /login';
+    const [context] = claude.sessions[0]?.deliverContext.mock.calls[0] ?? [];
+    expect(context?.inboxNotices).toEqual([
+      expect.objectContaining({
+        from: child.id,
+        fromTitle: 'Write the tests',
+        summary: failed,
+        report: 'failed',
+      }),
+    ]);
+    emitChild({ type: 'turn-ended', outcome: 'interrupted' });
+    emitChild({ type: 'closed', error: 'Claude Code exited with code 1.' });
+    await tick();
+    // Sent within the same millisecond, so in no order of their own.
+    const inbox = coordinator.inbox(parent);
+    expect(inbox).toHaveLength(3);
+    expect(inbox.map(({ report, summary }) => ({ report, summary }))).toEqual(
+      expect.arrayContaining([
+        {
+          report: 'stopped',
+          summary:
+            'Your child session “Write the tests” stopped: its provider’s process ended: Claude Code exited with code 1.',
+        },
+        {
+          report: 'interrupted',
+          summary:
+            'The user interrupted a turn of your child session “Write the tests”, which waits until you or the user write to it.',
+        },
+        { report: 'failed', summary: failed },
+      ]),
+    );
+    // The reason in full as the body.
+    const failure = inbox.find((entry) => entry.report === 'failed');
+    expect(coordinator.read(parent, failure?.id ?? '').body).toBe(
+      'Invalid API key\n· Please run /login',
+    );
+  });
+
+  it('reports the user’s archiving or removing of a running child, and nothing of the closes the host makes itself', async () => {
+    const { claude, host, coordinator, parent } = await withParent();
+    const archived = await coordinator.start(parent, { prompt: 'Archived by the user' });
+    const removed = await coordinator.start(parent, { prompt: 'Removed by the user' });
+    const ended = await coordinator.start(parent, { prompt: 'Ended by its parent' });
+    await host.archive(archived.id);
+    await host.remove(removed.id);
+    await coordinator.end(parent, ended.id);
+    // An interruption on the way to a close the host made gives nothing either.
+    claude.listeners[3]?.({ type: 'turn-ended', outcome: 'interrupted' });
+    expect(coordinator.inbox(parent)).toHaveLength(2);
+    expect(coordinator.inbox(parent).map(({ report, summary }) => ({ report, summary }))).toEqual(
+      expect.arrayContaining([
+        {
+          report: 'stopped',
+          summary: 'The user removed your child session “Removed by the user”, which stopped it.',
+        },
+        {
+          report: 'stopped',
+          summary: 'The user archived your child session “Archived by the user”, which stopped it.',
+        },
+      ]),
+    );
+    // A closed child the user archives stopped already, and children archived with their parent,
+    // or closed as the app quits, are no news to the parent.
+    host.unarchive(archived.id);
+    await host.archive(archived.id);
+    const other = await coordinator.start(parent, { prompt: 'Archived with its parent' });
+    await host.archive(parent);
+    host.unarchive(parent);
+    const last = await withParent();
+    await last.coordinator.start(last.parent, { prompt: 'Closed as the app quits' });
+    await last.host.closeAll();
+    expect(coordinator.inbox(parent)).toHaveLength(2);
+    expect(other.parent).toBe(parent);
+    expect(last.coordinator.inbox(last.parent)).toEqual([]);
+  });
+
   it('tells a session that is working with its next tool result, or beside the user’s next message', async () => {
     const { host, claude, coordinator, parent, emit } = await withParent();
     const child = await coordinator.start(parent, { prompt: 'Write the tests' });

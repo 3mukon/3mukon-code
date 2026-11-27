@@ -3,13 +3,27 @@ import { useTranslation } from 'react-i18next';
 import {
   Brain,
   ChevronRight,
+  CircleStop,
+  Cpu,
   FileText,
   FolderInput,
+  GitBranchPlus,
   Globe,
+  Inbox,
+  LayoutPanelLeft,
+  ListChecks,
+  ListTree,
+  MailOpen,
   Monitor,
+  PanelRightClose,
+  PanelRightOpen,
+  PanelsTopLeft,
   Pencil,
+  Plug,
   Pointer,
+  RefreshCw,
   Search,
+  Send,
   Terminal,
   ToggleRight,
   Trash,
@@ -34,6 +48,39 @@ const kindIcons: Record<ToolKind, typeof Pencil> = {
   switch_mode: ToggleRight,
   other: Wrench,
 };
+
+// The icon of each of the app's own tools beside the browser's and the computer's, by what the tool
+// does, since all their kinds are other; an action of a tool has one of its own where it differs, such
+// as reading the inbox rather than a message.
+const appIcons: Partial<Record<string, typeof Pencil>> = {
+  session_list: ListTree,
+  provider_list: Cpu,
+  session_start: GitBranchPlus,
+  session_end: CircleStop,
+  message_send: Send,
+  message_read: MailOpen,
+  message_read_inbox: Inbox,
+  panel_list: PanelsTopLeft,
+  panel_present: PanelRightOpen,
+  panel_update: RefreshCw,
+  panel_arrange: LayoutPanelLeft,
+  panel_close: PanelRightClose,
+  automation_capabilities: ListChecks,
+};
+
+// The icon a call shows: for the app's browser and computer tools their family's, or a pointer for a
+// click; for the app's other tools their own; for another server's tool a plug; else its kind's.
+function iconOf(item: ToolItem, family: 'browser' | 'computer' | undefined): typeof Pencil {
+  const call = item.mcp;
+  if (family !== undefined) {
+    if (call?.clicks === true) return Pointer;
+    return family === 'browser' ? Globe : Monitor;
+  }
+  if (call?.app === true) {
+    return appIcons[call.action ?? call.tool] ?? appIcons[call.tool] ?? kindIcons[item.kind];
+  }
+  return call === undefined ? kindIcons[item.kind] : Plug;
+}
 
 // The icon's colour tells how far a call has gone.
 const iconLooks: Record<ToolStatus, string> = {
@@ -82,14 +129,7 @@ export function ToolCall({ item }: { item: ToolItem }) {
       </>
     );
   }
-  const icon =
-    family === undefined
-      ? kindIcons[item.kind]
-      : item.mcp?.clicks === true
-        ? Pointer
-        : family === 'browser'
-          ? Globe
-          : Monitor;
+  const icon = iconOf(item, family);
   return (
     <Entry
       icon={icon}

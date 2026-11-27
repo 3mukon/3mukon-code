@@ -249,6 +249,36 @@ describe('Timeline', () => {
     );
   });
 
+  it('shows the app’s report on a child as the app’s, naming the child it reports on', () => {
+    const state: SessionState = {
+      ...initialSessionState(),
+      timeline: [
+        {
+          type: 'inbox',
+          notices: [
+            {
+              id: 'n1',
+              from: 'c',
+              fromTitle: 'Review',
+              summary: 'A turn of your child session “Review” ended in an error.',
+              sentAt: 1,
+              report: 'failed',
+            },
+          ],
+        },
+      ],
+    };
+    render(<Timeline state={state} agent="Claude Code" />);
+    const notices = screen.getByRole('list', { name: 'New messages from other sessions' });
+    expect(notices.textContent).toBe(
+      'The app’s report on Review: A turn of your child session “Review” ended in an error.',
+    );
+    // An icon of what it reports, in the colour of a failed call.
+    const icon = notices.querySelector('svg')?.getAttribute('class') ?? '';
+    expect(icon).toContain('lucide-circle-alert');
+    expect(icon).toContain('text-del');
+  });
+
   it('names a child’s first message as its parent’s, and the user’s later ones as theirs', () => {
     const state: SessionState = {
       ...initialSessionState(),

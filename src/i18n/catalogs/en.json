@@ -364,7 +364,8 @@
     },
     "inbox": {
       "notices": "New messages from other sessions",
-      "from": "Message from"
+      "from": "Message from",
+      "report": "The app’s report on"
     }
   },
   "approvals": {

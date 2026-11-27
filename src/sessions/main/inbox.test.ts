@@ -86,6 +86,17 @@ describe('inboxStorage', () => {
       expect(kept).toMatchObject({ id: sent.id, summary: 'Done', body: 'Body of Done' });
       expect(kept?.toldAt).toEqual(expect.any(Number));
       expect(kept?.readAt).toBeUndefined();
+      expect(kept?.report).toBeUndefined();
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a report of the app’s as a report', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'session-inbox-'));
+    try {
+      new SessionInboxes(inboxStorage(folder)).send({ ...message('a', 1), report: 'failed' });
+      expect(new SessionInboxes(inboxStorage(folder)).list('a')[0]?.report).toBe('failed');
     } finally {
       rmSync(folder, { recursive: true, force: true });
     }

@@ -6,7 +6,7 @@ import type {
   SessionCoordinator,
 } from '../../sessions/main/provider';
 import type { ModelOption, ProviderId } from '../../sessions/shared/events';
-import { CHILD_LIMIT, MESSAGE_LIMITS } from '../../sessions/shared/inbox';
+import { CHILD_LIMIT, MESSAGE_LIMITS, senderWords } from '../../sessions/shared/inbox';
 
 // One of the tools through which sessions coordinate (ADR-0036): served beside the automation
 // tools, outside the broker, since they act on the app's sessions rather than on a browser or
@@ -188,7 +188,7 @@ export function sessionTools(): SessionTool[] {
     {
       name: 'message_read',
       description:
-        'Read your inbox. Without a messageId, list its messages, the newest first, each with its messageId, sender, summary, time and whether you read it. With a messageId, read that message’s body, which marks it read. New messages’ summaries also reach you by themselves.',
+        'Read your inbox. Without a messageId, list its messages, the newest first, each with its messageId, sender, summary, time and whether you read it. With a messageId, read that message’s body, which marks it read. New messages’ summaries also reach you by themselves. The inbox also holds the app’s own reports on your child sessions: a turn of one failed, the user interrupted one, or one stopped without you or itself ending it.',
       inputSchema: read,
       call: (coordinator, owner, args) => {
         const { messageId } = read.parse(args);
@@ -200,8 +200,9 @@ export function sessionTools(): SessionTool[] {
           });
         }
         const message = coordinator.read(owner, messageId);
+        const sender = senderWords(message);
         return Promise.resolve({
-          text: `From ${message.fromTitle} (${message.from}), ${time(message.sentAt)}\nSummary: ${message.summary}\n\n${message.body}`,
+          text: `${sender.charAt(0).toUpperCase()}${sender.slice(1)}, ${time(message.sentAt)}\nSummary: ${message.summary}\n\n${message.body}`,
           structured: { message },
         });
       },
@@ -244,8 +245,10 @@ function describe(session: CoordinatedSession, owner: string, parent?: string): 
   return `${session.id}: ${title} (${session.provider}, ${session.status}, in ${session.folder})${marks.length === 0 ? '' : ` [${marks.join(', ')}]`}`;
 }
 
+// A message of the inbox on one line: its id, its sender or the session the app reports on, when it
+// came, whether it was read, and its summary.
 function line(message: InboxEntry): string {
-  return `${message.id}: from ${message.fromTitle} (${message.from}), ${time(message.sentAt)}, ${message.read ? 'read' : 'unread'}: ${message.summary}`;
+  return `${message.id}: ${senderWords(message)}, ${time(message.sentAt)}, ${message.read ? 'read' : 'unread'}: ${message.summary}`;
 }
 
 function time(at: number): string {

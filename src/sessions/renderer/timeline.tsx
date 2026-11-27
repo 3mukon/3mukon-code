@@ -1,9 +1,9 @@
 import { createContext, memo, useContext, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Inbox } from '../../ui/renderer/icons';
+import { CircleAlert, CirclePause, CircleStop, Inbox } from '../../ui/renderer/icons';
 import { StatusDot, type Status } from '../../ui/renderer/status-dot';
 import type { MessageImage, Task } from '../shared/events';
-import type { InboxNotice } from '../shared/inbox';
+import type { InboxNotice, InboxReport } from '../shared/inbox';
 import {
   openRequests,
   type RequestItem,
@@ -231,22 +231,35 @@ const Item = memo(function Item({ item, agent, from, oldestWaiting, renderReques
   }
 }, rendersAsBefore);
 
+// A report's icon (ADR-0042), by what the app saw of the child, and its colour: a failed turn and a
+// child that stopped in the colour of a failed call.
+const reportIcons: Record<InboxReport, { Icon: typeof Inbox; look: string }> = {
+  failed: { Icon: CircleAlert, look: 'text-del' },
+  interrupted: { Icon: CirclePause, look: '' },
+  stopped: { Icon: CircleStop, look: 'text-del' },
+};
+
 // The new messages from other sessions the agent was told of (ADR-0036), as the app's and never as
 // the user's: each as a line with an inbox icon, its sender in the ink and its summary, in faint
-// type.
+// type; a report of the app's own on a child (ADR-0042) names the child as what it reports on, with
+// an icon of what it reports.
 function InboxNotices({ notices }: { notices: readonly InboxNotice[] }) {
   const { t } = useTranslation();
   return (
     <ul aria-label={t('sessions.inbox.notices')} className="my-3 flex flex-col gap-1 text-faint">
-      {notices.map((notice) => (
-        <li key={notice.id} className="flex items-start gap-2">
-          <Inbox className="mt-1 size-3.5 shrink-0" />
-          <span className="min-w-0 wrap-anywhere">
-            {t('sessions.inbox.from')} <span className="text-ink">{notice.fromTitle}</span>:{' '}
-            {notice.summary}
-          </span>
-        </li>
-      ))}
+      {notices.map((notice) => {
+        const { Icon, look } =
+          notice.report === undefined ? { Icon: Inbox, look: '' } : reportIcons[notice.report];
+        return (
+          <li key={notice.id} className="flex items-start gap-2">
+            <Icon className={`mt-1 size-3.5 shrink-0 ${look}`} />
+            <span className="min-w-0 wrap-anywhere">
+              {t(notice.report === undefined ? 'sessions.inbox.from' : 'sessions.inbox.report')}{' '}
+              <span className="text-ink">{notice.fromTitle}</span>: {notice.summary}
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
