@@ -30,6 +30,7 @@ import type {
   SessionSummary,
 } from '../shared/sessions';
 import type {
+  ChildModels,
   ChildRequest,
   CoordinatedSession,
   HostContextDelivery,
@@ -921,6 +922,7 @@ export class SessionHost {
         this.caller(owner);
         return this.list().sessions.map(coordinated);
       },
+      providers: (owner) => this.childModels(owner),
       start: (owner, request) => this.startChild(owner, request),
       end: (owner, id) => this.endChild(owner, id),
       send: (owner, to, summary, body) => this.sendMessage(owner, to, summary, body),
@@ -962,9 +964,89 @@ export class SessionHost {
     return [...this.sessions.values()].filter((hosted) => hosted.parent === id);
   }
 
+  // The models each provider offers a child of the session (ADR-0041), or why it could not list them.
+  private async childModels(owner: string): Promise<ChildModels[]> {
+    const parent = this.caller(owner);
+    if (parent.parent !== undefined) throw new Error('A child session cannot start sessions.');
+    return Promise.all(
+      this.providerIds().map(async (provider): Promise<ChildModels> => {
+        try {
+          return { provider, models: await this.childList(parent, provider) };
+        } catch (error) {
+          return { provider, problem: problemOf(error) };
+        }
+      }),
+    );
+  }
+
+  // The models a child of the session on the provider could use, for the session's folder: through
+  // the session's gateway on its own provider, and through the provider's own configuration on
+  // another, as the child would start. A list found within the last 15 seconds or a new one, as the
+  // new-session page asks for before its first message.
+  private childList(parent: Hosted, provider: ProviderId): Promise<ModelOption[]> {
+    const gateway = provider === parent.provider ? this.settingsOf(parent).gateway : null;
+    return this.models(provider, gateway, parent.cwd, true);
+  }
+
+  // Refuses a child a model its provider does not list, or an effort the model it will run does not
+  // take (ADR-0041), naming what to use instead: the model the child runs is the one named, otherwise
+  // the parent's where the child has the parent's provider, otherwise the provider's default (null
+  // for those two). A model or effort left out is not checked, and a list that cannot be had, or that
+  // holds no model, leaves the choice to the provider.
+  private async checkChoice(
+    parent: Hosted,
+    provider: ProviderId,
+    request: ChildRequest,
+    model: string | null,
+  ): Promise<void> {
+    if (request.model === undefined && request.effort === undefined) return;
+    const listed = await this.childList(parent, provider).catch(() => []);
+    if (listed.length === 0) return;
+    if (request.model !== undefined && !listed.some((option) => option.id === request.model)) {
+      const holders = await this.holdersOf(parent, provider, request.model);
+      throw new Error(
+        `${provider} offers no model ${request.model}. Its models: ${listed.map((option) => option.id).join(', ')}.${
+          holders.length === 0
+            ? ''
+            : ` ${holders.join(', ')} ${holders.length === 1 ? 'offers' : 'offer'} ${request.model}.`
+        }`,
+      );
+    }
+    if (request.effort === undefined) return;
+    const runs = listed.find((option) =>
+      model === null ? option.default === true : option.id === model,
+    );
+    if (runs === undefined || runs.efforts.includes(request.effort)) return;
+    throw new Error(
+      runs.efforts.length === 0
+        ? `${runs.id} takes no reasoning effort level.`
+        : `${runs.id} takes no reasoning effort ${request.effort}. Its levels: ${runs.efforts.join(', ')}.`,
+    );
+  }
+
+  // The providers other than the one given whose models for a child of the session include the
+  // model, those that cannot list theirs aside.
+  private async holdersOf(
+    parent: Hosted,
+    except: ProviderId,
+    model: string,
+  ): Promise<ProviderId[]> {
+    const others = this.providerIds().filter((provider) => provider !== except);
+    const holds = await Promise.all(
+      others.map((provider) =>
+        this.childList(parent, provider).then(
+          (listed) => listed.some((option) => option.id === model),
+          () => false,
+        ),
+      ),
+    );
+    return others.filter((_, index) => holds[index] === true);
+  }
+
   // Starts a child of a running session that is not a child itself (ADR-0036), in its folder, in
   // auto, at its sandbox level or a narrower one, with its provider, gateway, model and effort
-  // unless the request names others, once fewer than eight of its children run.
+  // unless the request names others, once fewer than eight of its children run, and once its
+  // provider's list allows the model and effort named (ADR-0041).
   private async startChild(owner: string, request: ChildRequest): Promise<CoordinatedSession> {
     const parent = this.caller(owner);
     if (parent.parent !== undefined) throw new Error('A child session cannot start sessions.');
@@ -993,9 +1075,12 @@ export class SessionHost {
     const model = request.model ?? (same ? own.model : null);
     const effort = request.effort ?? (same && model === own.model ? own.effort : null);
     const title = request.title === undefined ? undefined : cleanTitle(request.title);
+    // Counted among the children starting from here on, so that the limit holds while the provider's
+    // list is found.
     this.childStarts.set(owner, starting + 1);
     let id: string;
     try {
+      await this.checkChoice(parent, providerId, request, model);
       id = await this.start(
         providerId,
         {
@@ -1443,6 +1528,13 @@ function coordinated(summary: SessionSummary): CoordinatedSession {
     status: summary.status,
     ...(summary.parent === undefined ? {} : { parent: summary.parent }),
   };
+}
+
+// Why a provider could not list its models, in its own words where it gives them.
+function problemOf(error: unknown): string {
+  return error instanceof Error && error.message !== ''
+    ? error.message
+    : 'It could not list its models.';
 }
 
 function noticeOf({ id, from, fromTitle, summary, sentAt }: InboxMessage): InboxNotice {

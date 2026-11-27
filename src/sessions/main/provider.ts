@@ -161,6 +161,12 @@ export interface ChildRequest {
   title?: string;
 }
 
+// The models a provider offers a child of a session (ADR-0041), as it lists them for the session's
+// folder, through the session's gateway where the child has the session's provider; or why it could
+// not list them.
+export type ChildModels =
+  { provider: ProviderId; models: ModelOption[] } | { provider: ProviderId; problem: string };
+
 // A message in a session's inbox as its agent lists it, without its body, and whether it was read.
 export interface InboxEntry extends InboxNotice {
   read: boolean;
@@ -174,7 +180,10 @@ export interface SessionCoordinator {
   mayStart(owner: string): boolean;
   // The sessions of the Sessions list, archived ones aside.
   list(owner: string): CoordinatedSession[];
-  // Starts a child of the session, once it has taken its first message.
+  // The models each provider offers a child of the session, in the order the app gives the providers.
+  providers(owner: string): Promise<ChildModels[]>;
+  // Starts a child of the session, once it has taken its first message; a model the child's provider
+  // does not list, or an effort the child's model does not take, is refused first (ADR-0041).
   start(owner: string, request: ChildRequest): Promise<CoordinatedSession>;
   // Ends a child of the session, or the session itself where it is a child.
   end(owner: string, id: string): Promise<CoordinatedSession>;

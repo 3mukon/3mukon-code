@@ -149,6 +149,7 @@
       },
       "app": {
         "session_list": "Listed the sessions",
+        "provider_list": "Listed the providers’ models",
         "session_start": "Started a child session",
         "session_start_subject": "Started child session {{subject}}",
         "session_end": "Ended a session",

@@ -838,6 +838,97 @@ describe('SessionHost coordination', () => {
     ).rejects.toThrow('wider sandbox');
   });
 
+  // Models as the fake providers list them.
+  const OPUS: ModelOption = { id: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high'] };
+  const SONNET: ModelOption = { id: 'sonnet', label: 'Sonnet', efforts: ['low', 'high'] };
+  const LUNA: ModelOption = {
+    id: 'gpt-luna',
+    label: 'GPT Luna',
+    efforts: ['low', 'high'],
+    default: true,
+  };
+  const MINI: ModelOption = { id: 'gpt-mini', label: 'GPT Mini', efforts: [] };
+
+  it('lists each provider’s models as a child would get them, and why one cannot, to a parent alone', async () => {
+    const { claude, codex, coordinator, parent } = await withParent();
+    claude.listModels.mockResolvedValue([OPUS, SONNET]);
+    codex.listModels.mockRejectedValue(new Error('Codex CLI is not signed in.'));
+    expect(await coordinator.providers(parent)).toEqual([
+      { provider: 'claude-code', models: [OPUS, SONNET] },
+      { provider: 'codex-cli', problem: 'Codex CLI is not signed in.' },
+    ]);
+    // The parent's own provider through its gateway, another through its own configuration, both
+    // for the parent's folder.
+    expect(claude.listModels).toHaveBeenCalledWith('work', folder('web'));
+    expect(codex.listModels).toHaveBeenCalledWith(null, folder('web'));
+    const child = await coordinator.start(parent, { prompt: 'Write the tests' });
+    await expect(coordinator.providers(child.id)).rejects.toThrow('cannot start sessions');
+    await expect(coordinator.providers('stranger')).rejects.toThrow('does not know');
+  });
+
+  it('refuses a child a model its provider does not list, naming its models and the providers that offer it', async () => {
+    const { claude, codex, coordinator, parent } = await withParent();
+    claude.listModels.mockResolvedValue([OPUS, SONNET]);
+    codex.listModels.mockResolvedValue([LUNA, MINI]);
+    await expect(
+      coordinator.start(parent, { prompt: 'Review', model: 'gpt-luna' }),
+    ).rejects.toThrow(
+      'claude-code offers no model gpt-luna. Its models: opus, sonnet. codex-cli offers gpt-luna.',
+    );
+    await expect(
+      coordinator.start(parent, { prompt: 'Review', provider: 'codex-cli', model: 'gemini-flash' }),
+    ).rejects.toThrow('codex-cli offers no model gemini-flash. Its models: gpt-luna, gpt-mini.');
+    // No child started; the parent's is the only session.
+    expect(claude.sessions).toHaveLength(1);
+    expect(codex.sessions).toHaveLength(0);
+    await expect(
+      coordinator.start(parent, { prompt: 'Review', provider: 'codex-cli', model: 'gpt-luna' }),
+    ).resolves.toMatchObject({ provider: 'codex-cli' });
+  });
+
+  it('refuses a child an effort the model it will run does not take', async () => {
+    const { claude, codex, coordinator, parent } = await withParent();
+    claude.listModels.mockResolvedValue([OPUS, SONNET]);
+    codex.listModels.mockResolvedValue([LUNA, MINI]);
+    // The parent's model, on the parent's provider.
+    await expect(coordinator.start(parent, { prompt: 'x', effort: 'max' })).rejects.toThrow(
+      'opus takes no reasoning effort max. Its levels: low, medium, high.',
+    );
+    // The model named.
+    await expect(
+      coordinator.start(parent, {
+        prompt: 'x',
+        provider: 'codex-cli',
+        model: 'gpt-mini',
+        effort: 'low',
+      }),
+    ).rejects.toThrow('gpt-mini takes no reasoning effort level.');
+    // The provider's default, on another provider with no model named.
+    await expect(
+      coordinator.start(parent, { prompt: 'x', provider: 'codex-cli', effort: 'xhigh' }),
+    ).rejects.toThrow('gpt-luna takes no reasoning effort xhigh. Its levels: low, high.');
+    await expect(
+      coordinator.start(parent, { prompt: 'x', provider: 'codex-cli', effort: 'high' }),
+    ).resolves.toMatchObject({ provider: 'codex-cli' });
+  });
+
+  it('checks nothing left out, and leaves the choice to the provider where its list is missing or empty', async () => {
+    const { claude, codex, coordinator, parent } = await withParent();
+    // The parent's own model is not on its provider's list, and the child takes it unchecked.
+    claude.listModels.mockResolvedValue([SONNET]);
+    await expect(coordinator.start(parent, { prompt: 'x' })).resolves.toMatchObject({
+      provider: 'claude-code',
+    });
+    codex.listModels.mockRejectedValue(new Error('offline'));
+    await expect(
+      coordinator.start(parent, { prompt: 'x', provider: 'codex-cli', model: 'gpt-anything' }),
+    ).resolves.toMatchObject({ provider: 'codex-cli' });
+    const empty = await withParent();
+    await expect(
+      empty.coordinator.start(empty.parent, { prompt: 'x', model: 'gpt-anything', effort: 'max' }),
+    ).resolves.toMatchObject({ provider: 'claude-code' });
+  });
+
   it('starts no child from a child, and at most eight running children at once', async () => {
     const { coordinator, parent } = await withParent();
     const children = [];

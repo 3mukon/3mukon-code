@@ -147,6 +147,7 @@
       },
       "app": {
         "session_list": "列出了会话",
+        "provider_list": "列出了各提供方的模型",
         "session_start": "启动了一个子会话",
         "session_start_subject": "启动了子会话 {{subject}}",
         "session_end": "结束了一个会话",

@@ -352,6 +352,26 @@ describe('the session tools', () => {
         calls.push(['list', owner]);
         return [session('lead'), session('helper', 'lead')];
       },
+      providers: (owner) => {
+        calls.push(['providers', owner]);
+        return Promise.resolve([
+          {
+            provider: 'codex-cli',
+            models: [
+              {
+                id: 'gpt-luna',
+                label: 'GPT Luna',
+                efforts: ['low', 'high'],
+                default: true,
+                defaultEffort: 'low',
+              },
+              { id: 'gpt-mini', label: 'gpt-mini', efforts: [] },
+            ],
+          },
+          { provider: 'antigravity', problem: 'Not signed in.' },
+          { provider: 'grok-build', models: [] },
+        ]);
+      },
       start: (owner, request) => {
         calls.push(['start', owner, request]);
         return Promise.resolve(session('helper', owner));
@@ -416,30 +436,63 @@ describe('the session tools', () => {
   const text = (result: unknown) =>
     (result as { content: { text: string }[] }).content[0]?.text ?? '';
 
-  it('offers a session the five tools, and a child no tool to start sessions, all allowed', async () => {
+  it('offers a session the six tools, and a child none to start sessions or list their models, all allowed', async () => {
     const sessions = coordinator();
     const lead = await session('lead', sessions);
     const names = (await lead.client.listTools()).tools.map((tool) => tool.name);
     expect(names).toEqual(
       expect.arrayContaining([
         'session_list',
+        'provider_list',
         'session_start',
         'session_end',
         'message_send',
         'message_read',
       ]),
     );
-    expect(lead.access.tools).toEqual(expect.arrayContaining(['session_start', 'message_read']));
+    expect(lead.access.tools).toEqual(
+      expect.arrayContaining(['provider_list', 'session_start', 'message_read']),
+    );
     const helper = await session('helper', sessions);
     const offered = (await helper.client.listTools()).tools.map((tool) => tool.name);
     expect(offered).toContain('message_send');
     expect(offered).not.toContain('session_start');
-    const refused = await helper.client.callTool({
-      name: 'session_start',
-      arguments: { prompt: 'x' },
-    });
-    expect(refused.isError).toBe(true);
+    expect(offered).not.toContain('provider_list');
+    for (const name of ['session_start', 'provider_list']) {
+      const refused = await helper.client.callTool({
+        name,
+        arguments: name === 'session_start' ? { prompt: 'x' } : {},
+      });
+      expect(refused.isError).toBe(true);
+    }
     expect(sessions.calls).toEqual([]);
+  });
+
+  it('lists each provider’s models for a child, by the ids session_start takes, and why one cannot', async () => {
+    const sessions = coordinator();
+    const { client } = await session('lead', sessions);
+    const listed = await client.callTool({ name: 'provider_list', arguments: {} });
+    expect(text(listed)).toBe(
+      [
+        'codex-cli, which runs OpenAI’s GPT models:',
+        '- gpt-luna (GPT Luna): the default; reasoning effort low, high (low by default)',
+        '- gpt-mini: no reasoning effort levels',
+        '',
+        'antigravity, which runs Google’s Gemini models, could not list its models: Not signed in.',
+        '',
+        'grok-build, which runs xAI’s Grok models, lists no models.',
+      ].join('\n'),
+    );
+    expect(listed.structuredContent).toMatchObject({
+      providers: [
+        { provider: 'codex-cli', models: [{ id: 'gpt-luna' }, { id: 'gpt-mini' }] },
+        { provider: 'antigravity', problem: 'Not signed in.' },
+        { provider: 'grok-build', models: [] },
+      ],
+    });
+    expect(sessions.calls).toEqual([['providers', 'lead']]);
+    const start = (await client.listTools()).tools.find((tool) => tool.name === 'session_start');
+    expect(start?.description).toContain('provider_list');
   });
 
   it('tells an agent whose models each provider runs, so that it can choose the provider a model needs', async () => {

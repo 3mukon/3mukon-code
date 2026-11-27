@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import type {
+  ChildModels,
   CoordinatedSession,
   InboxEntry,
   SessionCoordinator,
 } from '../../sessions/main/provider';
-import type { ProviderId } from '../../sessions/shared/events';
+import type { ModelOption, ProviderId } from '../../sessions/shared/events';
 import { CHILD_LIMIT, MESSAGE_LIMITS } from '../../sessions/shared/inbox';
 
 // One of the tools through which sessions coordinate (ADR-0036): served beside the automation
@@ -42,8 +43,8 @@ const PROVIDER_LINES = Object.entries(PROVIDERS)
   .map(([id, { maker, family }]) => `${id} runs ${maker}’s ${family} models`)
   .join('; ');
 
-// The session tools: listing sessions, starting and ending child sessions, sending messages and
-// reading the inbox.
+// The session tools: listing sessions and the providers' models, starting and ending child sessions,
+// sending messages and reading the inbox.
 export function sessionTools(): SessionTool[] {
   const start = z
     .object({
@@ -67,7 +68,7 @@ export function sessionTools(): SessionTool[] {
         .max(200)
         .optional()
         .describe(
-          'A model the child’s provider offers, by its name there; yours when the child has your provider, and otherwise that provider’s default, when left out.',
+          'A model the child’s provider offers, by its id exactly as provider_list gives it; one the provider does not list is refused. Yours when the child has your provider, and otherwise that provider’s default, when left out.',
         ),
       effort: z
         .string()
@@ -75,7 +76,7 @@ export function sessionTools(): SessionTool[] {
         .max(32)
         .optional()
         .describe(
-          'A reasoning effort level the child’s model takes, such as low, medium or high; yours when the child has your model, and otherwise the model’s default, when left out.',
+          'A reasoning effort level the child’s model takes, as provider_list gives them, such as low, medium or high; one the model does not take is refused. Yours when the child has your model, and otherwise the model’s default, when left out.',
         ),
       sandbox: z
         .enum(['read-only', 'workspace-write', 'full-access'])
@@ -136,8 +137,19 @@ export function sessionTools(): SessionTool[] {
       },
     },
     {
+      name: 'provider_list',
+      description:
+        'List the providers a child session of yours can run on, each with the models it offers the child: each model’s id, which session_start takes, its name, its reasoning effort levels, and the model and level the provider uses when you choose none. Look here for the provider that offers a model you are asked to use. A provider that cannot list its models says why.',
+      inputSchema: z.object({}).strict(),
+      offered: (coordinator, owner) => coordinator.mayStart(owner),
+      call: async (coordinator, owner) => {
+        const providers = await coordinator.providers(owner);
+        return { text: providers.map(providerText).join('\n\n'), structured: { providers } };
+      },
+    },
+    {
       name: 'session_start',
-      description: `Start a child session that works beside you, in your folder, on the task its first message gives it; it starts once it has taken that message. It runs in auto mode with your sandbox level or a narrower one, its approvals go to the user, and it uses your provider, model and effort unless you choose others. A child can run on any provider, not only yours, and its provider decides which models it can use: to have a particular model do the work, choose the provider that runs it, as the provider field says. It can message you with message_send, and you it. A child starts no sessions of its own, and at most ${String(CHILD_LIMIT)} of your children run at once. End a child with session_end once its work is done.`,
+      description: `Start a child session that works beside you, in your folder, on the task its first message gives it; it starts once it has taken that message. It runs in auto mode with your sandbox level or a narrower one, its approvals go to the user, and it uses your provider, model and effort unless you choose others. A child can run on any provider, not only yours, and its provider decides which models it can use: to have a particular model do the work, choose the provider that offers it, which provider_list shows with the ids to give. It can message you with message_send, and you it. A child starts no sessions of its own, and at most ${String(CHILD_LIMIT)} of your children run at once. End a child with session_end once its work is done.`,
       inputSchema: start,
       offered: (coordinator, owner) => coordinator.mayStart(owner),
       call: async (coordinator, owner, args) => {
@@ -195,6 +207,27 @@ export function sessionTools(): SessionTool[] {
       },
     },
   ];
+}
+
+// A provider as provider_list gives it in text: a line with its id and whose models it runs, then a
+// line for each model it offers, or why it could not list them.
+function providerText(entry: ChildModels): string {
+  const { maker, family } = PROVIDERS[entry.provider];
+  const head = `${entry.provider}, which runs ${maker}’s ${family} models`;
+  if ('problem' in entry) return `${head}, could not list its models: ${entry.problem}`;
+  if (entry.models.length === 0) return `${head}, lists no models.`;
+  return [`${head}:`, ...entry.models.map(modelLine)].join('\n');
+}
+
+// A model on one line: its id, its name where that differs, whether it is the provider's default,
+// and its reasoning effort levels with the default one.
+function modelLine(model: ModelOption): string {
+  const efforts =
+    model.efforts.length === 0
+      ? 'no reasoning effort levels'
+      : `reasoning effort ${model.efforts.join(', ')}${model.defaultEffort === undefined ? '' : ` (${model.defaultEffort} by default)`}`;
+  const name = model.label === model.id ? '' : ` (${model.label})`;
+  return `- ${model.id}${name}: ${model.default === true ? 'the default; ' : ''}${efforts}`;
 }
 
 // A session on one line: its id, title, provider, status, folder, and whether it is the caller, the
