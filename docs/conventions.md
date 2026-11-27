@@ -46,6 +46,16 @@ This file is the convention tier and may be adjusted to the project's needs: wri
 - Branches: `<type>/<kebab-description>`, where type is one of the commit types below; technical words only.
 - Release tags: `v<semver>`, for example `v0.1.0`.
 
+## Built-in tools
+
+The app's own tools reach agents through providers that may list them only after a tool search, which finds a tool by its name and description.
+
+- **The MCP instructions** (`src/toolset/main/server.ts`) are the one text every provider shows whatever it defers. They map every tool group by its tools' names, and say when a group is the one to use rather than a provider's own tools. Details belong in the tools.
+- **A description** starts with what the tool does, in the words a request for it would use, and says when to call it. The details come after.
+- **Every parameter** has a description, since a schema found by a search has to say what to give.
+- **Every tool** declares its effects as MCP annotations (`ToolEffects`): whether it only reads and whether it reaches the web, and, where they apply, whether it may change or end what it acts on and whether a repeat does nothing more.
+- **Tests:** `src/app/main/tool-definitions.test.ts` and `src/toolset/main/server.test.ts` check these.
+
 ## Commits
 
 ```text

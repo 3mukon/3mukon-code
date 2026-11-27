@@ -24,6 +24,7 @@ test('presents an artifact without taking focus and shows the result of the acti
       name: 'panel_present',
       family: 'panel',
       description: 'Synthetic presentation',
+      annotations: { readOnlyHint: false, openWorldHint: false },
       inputSchema: z.object({}),
       availability: { tools: 'ready', images: 'unknown' },
       plan: () => ({

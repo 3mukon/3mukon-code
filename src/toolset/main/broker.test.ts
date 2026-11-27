@@ -52,6 +52,7 @@ function tool(
     name,
     family,
     description: 'Synthetic contract fixture.',
+    annotations: { readOnlyHint: false, openWorldHint: false },
     inputSchema,
     availability: { tools: 'ready', images: 'supported' },
     plan(raw) {

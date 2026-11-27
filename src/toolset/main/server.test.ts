@@ -86,8 +86,19 @@ describe('the toolset', () => {
     expect(client.getServerVersion()).toMatchObject({ name: TOOLSET_NAME, version: '1.2.3' });
     expect(client.getServerCapabilities()?.tools).toBeDefined();
     expect(client.getInstructions()).toContain("Prefer the app's own browser");
-    expect(client.getInstructions()).toContain('Use global for the connected Chrome profile.');
     expect(client.getInstructions()).toContain('once per operation');
+    // Every provider shows the instructions whatever its tool search defers, so they name each group's
+    // tools, which a search then finds by name.
+    for (const name of [
+      'session_start',
+      'provider_list',
+      'panel_present',
+      'browser_open',
+      'computer_targets',
+    ]) {
+      expect(client.getInstructions()).toContain(name);
+    }
+    expect(client.getInstructions()).toContain('rather than a subagent of your own');
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
       'automation_capabilities',
     ]);
@@ -180,6 +191,7 @@ it('records invalid arguments and shares cancellation across separate MCP POST i
         name: 'fixture_wait',
         description: 'Synthetic cancellation fixture.',
         family: 'panel',
+        annotations: { readOnlyHint: false, openWorldHint: false },
         inputSchema: z.object({ value: z.number() }),
         availability: { tools: 'ready', images: 'unknown' },
         plan: () => ({
@@ -281,6 +293,7 @@ it('reports since when a session’s oldest operation approval has waited, and w
         name: 'fixture_change',
         description: 'Synthetic shared-tab fixture.',
         family: 'browser',
+        annotations: { readOnlyHint: false, openWorldHint: false },
         inputSchema: z.object({ target: z.unknown() }),
         availability: { tools: 'ready', images: 'unknown' },
         plan: (raw) => ({
@@ -495,6 +508,22 @@ describe('the session tools', () => {
     expect(start?.description).toContain('provider_list');
   });
 
+  it('lists each session tool with its MCP annotations, which the providers’ reviews and lists read', async () => {
+    const { client } = await session('lead', coordinator());
+    const tools = (await client.listTools()).tools;
+    const annotations = (name: string) => tools.find((tool) => tool.name === name)?.annotations;
+    expect(annotations('session_list')).toEqual({ readOnlyHint: true, openWorldHint: false });
+    expect(annotations('provider_list')).toEqual({ readOnlyHint: true, openWorldHint: false });
+    expect(annotations('session_end')).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+    });
+    expect(annotations('session_start')).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+    });
+  });
+
   it('tells an agent whose models each provider runs, so that it can choose the provider a model needs', async () => {
     const { client } = await session('lead', coordinator());
     const start = (await client.listTools()).tools.find((tool) => tool.name === 'session_start');
@@ -514,7 +543,7 @@ describe('the session tools', () => {
     expect(provider?.description).toContain(
       'Each may also offer other makers’ models that its account or its own settings add.',
     );
-    expect(start?.description).toContain('A child can run on any provider, not only yours');
+    expect(start?.description).toContain('another agent, on any provider and model');
   });
 
   it('calls the sessions as the session whose access calls, never as one its arguments name', async () => {

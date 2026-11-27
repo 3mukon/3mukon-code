@@ -32,6 +32,7 @@ it.each(['sanmukon-code', 'foreign'])(
         {
           name: 'panel_present',
           description: 'Present a synthetic result.',
+          annotations: { readOnlyHint: false, openWorldHint: false },
           family: 'panel',
           inputSchema: z.object({}),
           availability: { tools: 'ready', images: 'unknown' },

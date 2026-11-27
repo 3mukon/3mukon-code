@@ -13,6 +13,7 @@ beforeEach(async () => {
     {
       name: 'panel_fixture',
       family: 'panel',
+      annotations: { readOnlyHint: false, openWorldHint: false },
       description: 'Synthetic',
       inputSchema: z.object({}),
       availability: { tools: 'ready', images: 'unknown' },

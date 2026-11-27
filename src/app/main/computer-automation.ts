@@ -13,12 +13,21 @@ import {
 } from '../../computer/main/native-protocol';
 import type { TargetRef, Outcome } from '../../sessions/shared/automation';
 import type { AutomationBroker } from '../../toolset/main/broker';
-import type { AutomationTool, ExecutionContext, ExecutionPlan } from '../../toolset/main/execution';
+import type {
+  AutomationTool,
+  ExecutionContext,
+  ExecutionPlan,
+  ToolEffects,
+} from '../../toolset/main/execution';
 import type { ComputerCommand } from '../../computer/shared/computer';
 
 const ref = { id: z.uuid(), generation: z.int().positive() };
-const application = z.strictObject({ ...ref, kind: z.literal('application') });
-const window = z.strictObject({ ...ref, kind: z.literal('window') });
+const application = z
+  .strictObject({ ...ref, kind: z.literal('application') })
+  .describe('The application, by the target computer_select gave.');
+const window = z
+  .strictObject({ ...ref, kind: z.literal('window') })
+  .describe('The window, by the target computer_windows gave.');
 const metadata: ExecutionPlan = {
   operation: null,
   effect: 'metadata',
@@ -53,8 +62,24 @@ function act(target: TargetRef, observationId: string, action: NativeAction): Ex
   };
 }
 
+// What each computer tool does to its surroundings: finding and observing applications changes
+// nothing, and acting in one may change what it holds.
+const EFFECTS = {
+  computer_targets: { readOnlyHint: true, openWorldHint: false },
+  computer_select: { readOnlyHint: true, openWorldHint: false },
+  computer_windows: { readOnlyHint: true, openWorldHint: false },
+  computer_observe: { readOnlyHint: true, openWorldHint: false },
+  computer_act: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  computer_release: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+} satisfies Record<string, ToolEffects>;
+
 function tool<S extends z.ZodObject>(
-  name: string,
+  name: keyof typeof EFFECTS,
   description: string,
   inputSchema: S,
   plan: (args: z.output<S>, owner: string) => ExecutionPlan,
@@ -63,6 +88,7 @@ function tool<S extends z.ZodObject>(
   return {
     name,
     description,
+    annotations: EFFECTS[name],
     inputSchema,
     family: 'computer',
     availability: { tools: 'ready', images: 'supported' },
@@ -115,7 +141,7 @@ export function computerAutomation(
     tools: [
       tool(
         'computer_targets',
-        'List a bounded inventory of running macOS applications. Use the returned discovery ID with computer_select.',
+        'List the running macOS applications, native apps you can work in, as a bounded inventory: give an application’s discovery ID to computer_select.',
         z.strictObject({}),
         () => metadata,
         async (_args, { owner, signal }) => ({ outcome: await computer.discover(owner, signal) }),
@@ -123,7 +149,9 @@ export function computerAutomation(
       tool(
         'computer_select',
         'Select a running application from computer_targets. Returns a session-owned application target. Discover again if it has exited or restarted.',
-        z.strictObject({ id: z.uuid() }),
+        z.strictObject({
+          id: z.uuid().describe('An application’s discovery ID, from computer_targets.'),
+        }),
         () => metadata,
         async ({ id }, context) => {
           const outcome = await computer.select(context.owner, id, context.signal);
@@ -144,7 +172,13 @@ export function computerAutomation(
       tool(
         'computer_observe',
         'Read bounded Accessibility controls in one owned window. Set image to true for a window-only screenshot. Request a new observation after a window or control changes.',
-        z.strictObject({ target: window, image: z.boolean().optional() }),
+        z.strictObject({
+          target: window,
+          image: z
+            .boolean()
+            .optional()
+            .describe('Whether to add a screenshot of the window alone.'),
+        }),
         ({ target, image }) => observe(target, image),
         ({ target, image }, context) =>
           computer.observe(context.owner, target, image ?? false, operation(context)),
@@ -152,7 +186,17 @@ export function computerAutomation(
       tool(
         'computer_act',
         'Use a fresh window observation. Click, type and scroll on supported Accessibility controls in the background. Point-click, point-scroll, drag and press require foreground control. Ask the user to focus the target window if needed. At workspace-write, click, point-click, drag and press are refused as file-scope-unverifiable, since the application decides which files they change; only the user can give the session full access, which an Antigravity session has in yolo alone. Point coordinates are screenshot pixels. Window changes must be explicit. An unverified dispatch does not establish the effect.',
-        z.strictObject({ target: window, observationId: z.uuid(), action: nativeAction }),
+        z.strictObject({
+          target: window,
+          observationId: z
+            .uuid()
+            .describe(
+              'The observationId of the window’s latest computer_observe, whose controls the action uses.',
+            ),
+          action: nativeAction.describe(
+            'What to do: act on a control of that observation, or at a point of its screenshot.',
+          ),
+        }),
         ({ target, observationId, action }, owner) => ({
           ...act(target, observationId, action),
           computerAction:

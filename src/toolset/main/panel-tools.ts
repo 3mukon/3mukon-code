@@ -1,7 +1,27 @@
 import { z } from 'zod';
 import type { ARTIFACT_LIMITS, PRESENTATION_LIMITS } from '../../panels/shared/presentation';
 import type { PanelExecutor, PanelRequest } from '../../panels/shared/presentation-host';
-import type { AutomationTool } from './execution';
+import type { AutomationTool, ToolEffects } from './execution';
+
+// What each panel tool does to the user's panels: listing changes nothing, and none ends what a panel
+// shows.
+const EFFECTS = {
+  panel_list: { readOnlyHint: true, openWorldHint: false },
+  panel_present: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  panel_update: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  panel_arrange: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  panel_close: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+} satisfies Record<string, ToolEffects>;
 
 // Feature values arrive through app composition; this module imports only the public panel types.
 export function panelTools(
@@ -72,7 +92,7 @@ export function panelTools(
       `What the presentation’s panels show, one panel each, in order, at most ${String(p.items)}, each shown once: a file by its absolute path; a result you make here, as Markdown, an image in base64 with its size in pixels, or a table of named columns and rows; an artifactId from an earlier result; or a browser tab or computer target by its handle.`,
     );
   function tool(
-    name: string,
+    name: keyof typeof EFFECTS,
     description: string,
     inputSchema: z.ZodObject,
     request: (args: Record<string, unknown>) => PanelRequest,
@@ -80,6 +100,7 @@ export function panelTools(
     return {
       name,
       description,
+      annotations: EFFECTS[name],
       family: 'panel',
       inputSchema,
       maxArgumentBytes: 16 * 1024 * 1024,
@@ -122,7 +143,14 @@ export function panelTools(
       placement,
     })
     .strict();
-  const update = z.object({ presentationId: presentation, version: seen, title, items }).strict();
+  const update = z
+    .object({
+      presentationId: presentation,
+      version: seen,
+      title: title.describe('What the presentation is, as the user will hear it announced.'),
+      items,
+    })
+    .strict();
   const arrange = z.object({ presentationId: presentation, version: seen, placement }).strict();
   const close = z
     .object({

@@ -28,10 +28,15 @@ export { TOOLSET_NAME } from '../../sessions/shared/tools';
 // waiting for the user's answer needs and the backends' own deadlines never come near.
 export const TOOLSET_CALL_TIMEOUT_MS = 24 * 60 * 60_000;
 const PATH = '/mcp';
+// What every provider shows its agent of the toolset whatever it defers behind its tool search, which
+// finds a tool by its name and description: a map of the tools by group and name, with when each group
+// is the one to use, then what holds across several of them.
 const instructions = [
-  'Use browser tools for websites and computer tools for native apps.',
-  "Prefer the app's own browser, with sharing none for public pages or isolated work and app for the shared app profile's sign-ins. Use global for the connected Chrome profile. Respect the user's requested browser and ask if it is unavailable.",
-  'Keep work in the background by default. Use panel tools when the user needs to inspect, compare, decide, or take over.',
+  "These are the 3mukon-code app's tools. Where your provider lists tools only after a tool search, search by the names below.",
+  'Sessions: to have another agent do part of the work, on any provider and model, such as Claude, GPT, Gemini or Grok, start a child session with session_start; provider_list shows which provider offers a model, and the id to give. Use them rather than a subagent of your own when the work needs another provider’s model, or a session the user can see and steer. A child session starts none of its own. session_list lists the user’s sessions, message_send sends one a message, message_read reads your inbox, and session_end ends a child.',
+  'Panels: panel_present shows the user a result, a comparison, a decision or a handoff beside your session; panel_update, panel_arrange, panel_close and panel_list manage what you presented. Keep work in the background by default, and present only what the user needs to inspect, compare, decide on or take over.',
+  "Websites: use the browser tools, from browser_open and browser_navigate to browser_snapshot, browser_act, browser_screenshot, browser_evaluate and browser_close. Prefer the app's own browser. Respect the user's requested browser, and ask if it is unavailable.",
+  'Native macOS apps: use the computer tools, from computer_targets and computer_select to computer_windows, computer_observe, computer_act and computer_release. automation_capabilities says what browser use and computer use can do in this session.',
   "Shared sign-ins may be missing or expired, so do not assume a site is signed in: check that the page shows the user's account. When a page asks for a sign-in, never enter a password, code or other credential yourself: present the tab at once with panel_present, without asking first, then ask the user to sign in there and hand the tab back, and continue once they say they have. While the user has the tab, its tools refuse with target-paused.",
   'In auto mode the app requests approval once per operation on a shared or native target. Group related actions on that target within the same turn. A session grant applies to later operations on that target until it ends.',
   'Respect setup requirements, refusals and stopped operations. Ask before broadening sharing or switching identities after a refusal.',
@@ -70,6 +75,7 @@ export async function startToolset({
       ToolSchema.parse({
         name: tool.name,
         description: tool.description,
+        annotations: tool.annotations,
         inputSchema: { ...z.toJSONSchema(tool.inputSchema), type: 'object' },
       }),
     ]),
@@ -81,13 +87,15 @@ export async function startToolset({
     {
       name: 'automation_capabilities',
       description:
-        'Read this session’s cached automation capabilities and effective policy without starting a browser or native helper.',
+        'Read what browser use and computer use can do in this session and the policy that applies to them, such as its sandbox level and whether each is set up, without starting a browser or the native helper: check it before using them when you are not sure they are available.',
+      annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: { type: 'object', properties: {} },
     },
     ...broker.definitions().map((tool) =>
       ToolSchema.parse({
         name: tool.name,
         description: tool.description,
+        annotations: tool.annotations,
         inputSchema: {
           ...z.toJSONSchema(
             tool.inputSchema.extend({

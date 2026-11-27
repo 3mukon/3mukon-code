@@ -9,31 +9,44 @@ import { displayAddress, webAddress, type EmbeddedEngine } from '../../browser/m
 import { SCRIPT_LIMITS } from '../../browser/main/page-script';
 import type { BrowserTabRef } from '../../browser/shared/browser';
 import type { AutomationBroker } from '../../toolset/main/broker';
-import type { AutomationTool, ExecutionContext, ExecutionPlan } from '../../toolset/main/execution';
+import type {
+  AutomationTool,
+  ExecutionContext,
+  ExecutionPlan,
+  ToolEffects,
+} from '../../toolset/main/execution';
 
-const target = z.strictObject({
-  kind: z.literal('browser-tab'),
-  id: z.uuid(),
-  generation: z.int().positive(),
-});
+const target = z
+  .strictObject({
+    kind: z.literal('browser-tab'),
+    id: z.uuid(),
+    generation: z.int().positive(),
+  })
+  .describe('The tab, by the handle browser_open gave.');
 const url = z
   .string()
   .max(4096)
   .refine((value) => webAddress(value) !== null, {
     message: 'Use an HTTP or HTTPS URL without embedded credentials.',
-  });
+  })
+  .describe('The page’s address: an HTTP or HTTPS URL.');
 const element = z.int().min(1).max(64);
 const script = z
   .string()
   .min(1)
   .refine((value) => Buffer.byteLength(value) <= SCRIPT_LIMITS.sourceBytes, {
     message: 'Keep the script within 32 KiB.',
-  });
-const action = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('click'), element }),
-  z.strictObject({ kind: z.literal('type'), element, text: z.string().max(4096) }),
-  z.strictObject({ kind: z.literal('scroll'), deltaY: z.int().min(-4000).max(4000) }),
-]);
+  })
+  .describe('The JavaScript to run, as you would type it into the developer console.');
+const action = z
+  .discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('click'), element }),
+    z.strictObject({ kind: z.literal('type'), element, text: z.string().max(4096) }),
+    z.strictObject({ kind: z.literal('scroll'), deltaY: z.int().min(-4000).max(4000) }),
+  ])
+  .describe(
+    'What to do: click an element, or replace a text field’s contents, by its reference in that snapshot; or scroll the page by deltaY pixels.',
+  );
 const metadata: ExecutionPlan = {
   operation: null,
   effect: 'metadata',
@@ -54,8 +67,25 @@ function tabPlan(
     ...(inPanel ? { inPanel: true } : {}),
   };
 }
+// What each browser tool does to its surroundings: every one but closing reaches the web; reading a
+// page changes nothing, and acting on it or running a script in it may change what the site holds.
+const EFFECTS = {
+  browser_open: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  browser_navigate: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  browser_snapshot: { readOnlyHint: true, openWorldHint: true },
+  browser_screenshot: { readOnlyHint: true, openWorldHint: true },
+  browser_act: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  browser_evaluate: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  browser_close: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+} satisfies Record<string, ToolEffects>;
+
 function define<S extends z.ZodObject>(
-  name: string,
+  name: keyof typeof EFFECTS,
   description: string,
   inputSchema: S,
   plan: (args: z.output<S>, owner: string) => ExecutionPlan,
@@ -65,6 +95,7 @@ function define<S extends z.ZodObject>(
     name,
     family: 'browser',
     description,
+    annotations: EFFECTS[name],
     inputSchema,
     availability: { tools: 'ready', images: 'supported' },
     plan: (args, owner) => plan(inputSchema.parse(args), owner),
@@ -124,8 +155,15 @@ export function browserTools(
   return [
     define(
       'browser_open',
-      "Reserve a browser tab. Prefer the app's own browser. Use none for isolated work, app for the shared app profile's sign-ins, or global for the connected Chrome profile. Use browser_navigate to open the task URL. Each shared tab has its own operation grant. A shared profile may not be signed in to a site: when a page asks for a sign-in, never enter credentials yourself; present the tab at once with panel_present and ask the user to sign in and hand it back.",
-      z.strictObject({ sharing: z.enum(['none', 'app', 'global']).optional() }),
+      "Open a browser tab to work on websites in, with no page yet: open the task's address in it with browser_navigate. Prefer the app's own browser: sharing none, the default, for public pages or isolated work, or app for the shared app profile's sign-ins; global uses the connected Chrome profile. Each shared tab has its own operation grant. A shared profile may not be signed in to a site: when a page asks for a sign-in, never enter credentials yourself; present the tab at once with panel_present and ask the user to sign in and hand it back.",
+      z.strictObject({
+        sharing: z
+          .enum(['none', 'app', 'global'])
+          .optional()
+          .describe(
+            'Whose sign-ins the tab shares: none, a profile of its own, when left out; app, the app profile’s; global, the connected Chrome profile’s.',
+          ),
+      }),
       ({ sharing }) => {
         const setup = sharing === 'global' ? chrome?.requirement() : undefined;
         return setup ? { ...metadata, setup } : metadata;
@@ -216,7 +254,15 @@ export function browserTools(
     define(
       'browser_act',
       'Click a visible control, replace an editable text field’s contents, or scroll the top-level page. Use an element reference from the latest browser_snapshot. Take a fresh snapshot after each action. A dispatched result does not verify what the site did.',
-      z.strictObject({ target, observationId: z.uuid(), action }),
+      z.strictObject({
+        target,
+        observationId: z
+          .uuid()
+          .describe(
+            'The observationId of the tab’s latest browser_snapshot, whose references the action uses.',
+          ),
+        action,
+      }),
       ({ target, observationId, action }, owner) => ({
         ...tabPlan(target, 'mutate', inPanel(owner, target)),
         mayActivate: browser.isExternal(owner, target),
@@ -247,7 +293,14 @@ export function browserTools(
       z.strictObject({
         target,
         script,
-        timeoutMs: z.int().min(100).max(SCRIPT_LIMITS.maxMs).optional(),
+        timeoutMs: z
+          .int()
+          .min(100)
+          .max(SCRIPT_LIMITS.maxMs)
+          .optional()
+          .describe(
+            'How long the script may run, in milliseconds: 10000 when left out, at most 30000.',
+          ),
       }),
       ({ target, script }, owner) => ({
         ...tabPlan(target, 'mutate', inPanel(owner, target)),

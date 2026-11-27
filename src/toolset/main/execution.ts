@@ -65,9 +65,21 @@ export interface ExecutionResult {
   frames?: readonly Frame[];
   presentations?: readonly PresentationSummary[];
 }
+// What a tool does to its surroundings, as MCP's tool annotations tell the providers, whose own reviews
+// and lists read them: whether it only reads, whether it may change or end what it acts on rather than
+// only add to it, whether a repeat with the same arguments does nothing more, and whether it reaches
+// the open web. Every tool says whether it only reads and whether it reaches the web.
+export interface ToolEffects {
+  readOnlyHint: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint: boolean;
+}
+
 export interface AutomationTool {
   name: string;
   description: string;
+  annotations: ToolEffects;
   family: 'browser' | 'computer' | 'panel';
   inputSchema: z.ZodObject;
   availability: Availability;
