@@ -87,7 +87,9 @@ test('a sign-in downloads the app’s copy of a provider that is not installed, 
       const window = await app.firstWindow();
       await window.getByRole('button', { name: 'Accounts' }).click();
       const accounts = window.getByRole('main').getByRole('region', { name: 'Accounts' });
-      const codex = accounts.getByRole('listitem').filter({ hasText: 'Codex CLI' });
+      const codex = accounts.getByRole('listitem').filter({
+        has: window.getByRole('heading', { name: 'Codex CLI', exact: true }),
+      });
       await expect(codex).toContainText('Not installed');
       await expect(codex).toContainText('Sign In downloads the app’s copy, 0.171.0, first.');
       // A download that does not match its checksum runs nothing, and says so.
