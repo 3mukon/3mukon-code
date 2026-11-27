@@ -228,8 +228,77 @@ export class Translator {
           },
         ];
       }
-      default:
+      // A wait of Codex's clock.sleep tool, by how long it sleeps.
+      case 'sleep':
+        return [
+          {
+            type: 'tool',
+            id: item.id,
+            kind: 'other',
+            title: `clock.sleep ${seconds(item.durationMs)}`,
+            status: completed ? 'completed' : 'running',
+          },
+        ];
+      // Codex's own agents, which it starts and talks to with its collab tools, by the tool and what it
+      // sent; their own work is not shown, as no provider's subagents' is.
+      case 'collabAgentToolCall':
+        return [
+          {
+            type: 'tool',
+            id: item.id,
+            kind: 'other',
+            title: toolWords(item.tool),
+            status: collabStatus(item.status, completed),
+            ...(item.prompt === null || item.prompt === '' ? {} : { output: item.prompt }),
+          },
+        ];
+      case 'subAgentActivity':
+        return [
+          {
+            type: 'tool',
+            id: item.id,
+            kind: 'other',
+            title: `${toolWords(`subagent ${item.kind}`)}${item.model === null ? '' : ` (${item.model})`}`,
+            status: 'completed',
+          },
+        ];
+      case 'functionCallOutput':
+        return [
+          {
+            type: 'tool',
+            id: item.id,
+            kind: 'other',
+            title: [item.namespace, item.name]
+              .filter((part) => part !== null && part !== '')
+              .join('.'),
+            status: 'completed',
+            output: functionOutput(item.output),
+          },
+        ];
+      // Not calls: the user's messages come from the session, and the hooks' prompts, review mode and
+      // compaction are Codex's own bookkeeping.
+      case 'userMessage':
+      case 'hookPrompt':
+      case 'enteredReviewMode':
+      case 'exitedReviewMode':
+      case 'contextCompaction':
         return [];
+      // An item of a kind this version does not know shows as a call by its kind rather than not at
+      // all, so that no call Codex reports goes unseen.
+      default: {
+        const other = item as { type: string; id?: unknown };
+        return typeof other.id === 'string'
+          ? [
+              {
+                type: 'tool',
+                id: other.id,
+                kind: 'other',
+                title: toolWords(other.type),
+                status: completed ? 'completed' : 'running',
+              },
+            ]
+          : [];
+      }
     }
   }
 
@@ -336,6 +405,27 @@ function retrying({ message, additionalDetails }: TurnError): SessionEvent {
 
 function taskStatus(status: 'pending' | 'inProgress' | 'completed'): Task['status'] {
   return status === 'inProgress' ? 'in_progress' : status;
+}
+
+// A collab tool call's status: interrupted counts as failed.
+function collabStatus(
+  status: 'inProgress' | 'completed' | 'failed' | 'interrupted',
+  completed: boolean,
+): ToolStatus {
+  if (status === 'inProgress') return completed ? 'completed' : 'running';
+  return status === 'completed' ? 'completed' : 'failed';
+}
+
+// A duration in words, in seconds below two minutes and in minutes from there.
+function seconds(ms: number): string {
+  const total = Math.round(ms / 1000);
+  return total < 120 ? `${String(total)} s` : `${String(Math.round(total / 60))} min`;
+}
+
+// A function call's output as text: its text items joined.
+function functionOutput(output: string | readonly { type: string; text?: string }[]): string {
+  if (typeof output === 'string') return output;
+  return output.flatMap((part) => (typeof part.text === 'string' ? [part.text] : [])).join('\n');
 }
 
 function itemStatus(status: 'inProgress' | 'completed' | 'failed' | 'declined'): ToolStatus {

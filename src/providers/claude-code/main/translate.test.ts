@@ -194,6 +194,22 @@ describe('Translator.live', () => {
     ]);
   });
 
+  it('shows a tool the API runs within the message, as its web search, as a call already done', () => {
+    const events = new Translator(cwd).live(
+      assistant('u1', [
+        {
+          type: 'server_tool_use',
+          id: 'srv1',
+          name: 'web_search',
+          input: { query: 'acp' },
+        },
+      ]),
+    );
+    expect(events).toMatchObject([
+      { type: 'tool', id: 'srv1', status: 'completed', title: 'web_search' },
+    ]);
+  });
+
   it('names an MCP tool’s call by its server and tool, the app’s own with what it acts on', () => {
     const tool = (name: string, input: Record<string, unknown>) =>
       new Translator(cwd).live(assistant('u1', [{ type: 'tool_use', id: 't1', name, input }]))[0];

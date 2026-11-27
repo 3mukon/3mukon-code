@@ -228,10 +228,37 @@ export class Translator {
             : [{ type: 'message', id, role: 'thinking', text: block.thinking }];
         case 'tool_use':
           return this.toolUse(block.id, block.name, asRecord(block.input));
-        default:
-          return [];
+        // A tool the API runs within the message, such as its web search, or an MCP connector's: any
+        // block with an id and a name shows as a call that is already done, since no result of the
+        // session's follows it, rather than not at all.
+        default: {
+          const tool = asRecord(block);
+          return typeof tool.id === 'string' && typeof tool.name === 'string'
+            ? this.serverTool(tool.id, tool.name, tool.server_name, asRecord(tool.input))
+            : [];
+        }
       }
     });
+  }
+
+  // A call the API ran within the message, done once the message is.
+  private serverTool(
+    id: string,
+    name: string,
+    server: unknown,
+    input: Record<string, unknown>,
+  ): SessionEvent[] {
+    const title = typeof server === 'string' && server !== '' ? `${server}: ${name}` : name;
+    return [
+      {
+        type: 'tool',
+        id,
+        kind: TOOL_KINDS[name] ?? 'other',
+        status: 'completed',
+        ...describeTool(name, input, this.cwd),
+        title,
+      },
+    ];
   }
 
   // The model's raw stream: text and thinking arrive as deltas, under the message's id and the block's

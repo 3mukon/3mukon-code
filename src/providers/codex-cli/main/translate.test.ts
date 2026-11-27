@@ -370,6 +370,32 @@ describe('MCP and dynamic tool calls', () => {
       { type: 'tool', id: 'd1', title: 'view image' },
     ]);
   });
+
+  it('shows clock.sleep’s waits, Codex’s own agent calls and an item of a kind it does not know, rather than none', () => {
+    const live = (item: unknown) =>
+      new Translator(cwd).live('item/completed', { ...turn, item: item as ThreadItem });
+    expect(live({ type: 'sleep', id: 's1', durationMs: 30_000 })).toMatchObject([
+      { type: 'tool', id: 's1', title: 'clock.sleep 30 s', status: 'completed' },
+    ]);
+    expect(
+      live({
+        type: 'collabAgentToolCall',
+        id: 'c1',
+        tool: 'spawnAgent',
+        status: 'completed',
+        senderThreadId: 't1',
+        receiverThreadIds: ['t2'],
+        prompt: 'Review the diff',
+        model: null,
+        reasoningEffort: null,
+        agentsStates: {},
+      }),
+    ).toMatchObject([{ type: 'tool', id: 'c1', status: 'completed', output: 'Review the diff' }]);
+    expect(live({ type: 'futureItem', id: 'f1' })).toMatchObject([
+      { type: 'tool', id: 'f1', kind: 'other' },
+    ]);
+    expect(live({ type: 'contextCompaction', id: 'k1' })).toEqual([]);
+  });
 });
 
 describe('Translator.history', () => {
