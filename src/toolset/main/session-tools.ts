@@ -88,7 +88,9 @@ export function sessionTools(): SessionTool[] {
         .min(1)
         .max(60)
         .optional()
-        .describe('The child’s title in the user’s Sessions list.'),
+        .describe(
+          'The child’s title in the user’s Sessions list. A provider that gives sessions titles of its own and takes none from the app, as antigravity does, replaces it with its own once it gives one.',
+        ),
     })
     .strict();
   const end = z.object({ sessionId: sessionId.describe('The session to end.') }).strict();
