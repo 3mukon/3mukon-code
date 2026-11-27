@@ -553,6 +553,19 @@ type Pending =
   | { kind: 'question'; fields: FormField[]; resolve: (result: CreateElicitationResponse) => void };
 
 // A message of the user's, with its images.
+// The presentation notices a prompt carries, as a delivery accepts them.
+type PresentationNotices = ReturnType<typeof selectPresentationNotices>;
+
+// The session updates that are the agent's output for a turn, the first of which shows that it took
+// the prompt that opened the turn.
+const OUTPUT: ReadonlySet<string> = new Set([
+  'agent_message_chunk',
+  'agent_thought_chunk',
+  'tool_call',
+  'tool_call_update',
+  'plan',
+]);
+
 interface Message {
   text: string;
   images: MessageImage[];
@@ -609,6 +622,10 @@ class AntigravitySession implements ProviderSession {
       : undefined;
   }
   private readonly deliveries = new Set<HostContextDelivery>();
+  // The messages of the prompt that opened the running turn, with the presentation notices it carried,
+  // which Antigravity's first output for the turn accepts, so that the notices they gave show before
+  // what the agent makes of them; a prompt that steers a running turn is accepted as it is answered.
+  private opening: { messages: Message[]; notices: PresentationNotices } | null = null;
   private access?: ToolsetAccess;
   private agent!: Agent;
   private sessionId = '';
@@ -735,21 +752,19 @@ class AntigravitySession implements ProviderSession {
       ...messages.flatMap((message) => message.images).map(imageBlock),
     ];
     const { connection } = this.agent;
+    if (this.prompts === 0) this.opening = { messages, notices };
     this.prompts += 1;
     connection.agent.request('session/prompt', { sessionId: this.sessionId, prompt }).then(
       (response) => {
-        for (const message of messages) {
-          if (message.delivery) {
-            message.delivery.accepted(notices);
-            this.deliveries.delete(message.delivery);
-          }
-        }
+        if (this.opening?.messages === messages) this.opening = null;
+        this.accept(messages, notices);
         this.prompts = Math.max(0, this.prompts - 1);
         if (this.prompts === 0) this.endTurn(turnEndedBy(response.stopReason));
       },
       (error: unknown) => {
+        if (this.opening?.messages === messages) this.opening = null;
         for (const message of messages) {
-          if (message.delivery) {
+          if (message.delivery && this.deliveries.has(message.delivery)) {
             message.delivery.failed();
             this.deliveries.delete(message.delivery);
           }
@@ -764,8 +779,19 @@ class AntigravitySession implements ProviderSession {
     );
   }
 
+  // Accepts the deliveries of the messages that are neither accepted nor failed yet.
+  private accept(messages: Message[], notices: PresentationNotices): void {
+    for (const message of messages) {
+      if (message.delivery && this.deliveries.has(message.delivery)) {
+        message.delivery.accepted(notices);
+        this.deliveries.delete(message.delivery);
+      }
+    }
+  }
+
   // ACP has the client answer what is still open as cancelled once it cancels the turn.
   async interrupt(): Promise<void> {
+    this.opening = null;
     for (const delivery of this.deliveries) delivery.failed();
     this.deliveries.clear();
     if (!this.turnRunning) return;
@@ -1004,6 +1030,11 @@ class AntigravitySession implements ProviderSession {
         if (update.sessionUpdate === 'config_option_update') {
           this.configOptions = update.configOptions;
         }
+        if (this.opening !== null && OUTPUT.has(update.sessionUpdate)) {
+          const { messages, notices } = this.opening;
+          this.opening = null;
+          this.accept(messages, notices);
+        }
         for (const event of this.translator.update(update)) this.onEvent(event);
       },
       permission: (params, signal) =>
@@ -1229,6 +1260,7 @@ class AntigravitySession implements ProviderSession {
     if (this.closed) return;
     this.withdrawAll();
     this.closed = true;
+    this.opening = null;
     for (const delivery of this.deliveries) delivery.failed();
     this.deliveries.clear();
     this.access?.close();

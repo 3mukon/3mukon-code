@@ -483,6 +483,34 @@ describe('a session', () => {
     expect(events.filter((event) => event.type === 'turn-ended')).toHaveLength(1);
   });
 
+  it('delivers new messages’ notices alone in a turn of the app’s, taken once Antigravity’s first output comes, so that they show before it', async () => {
+    const { session, events, until } = await open((onEvent) =>
+      provider.start({ cwd: '/work' }, onEvent),
+    );
+    const notice = { id: 'n1', from: 'child', fromTitle: 'Tests', summary: 'Done', sentAt: 1 };
+    const delivery = { accepted: vi.fn(), failed: vi.fn() };
+    await session.deliverContext?.({ presentationNotices: [], inboxNotices: [notice] }, delivery);
+    await fake().prompted();
+    expect(fake().paramsOf('session/prompt')[0]?.prompt).toEqual([
+      expect.objectContaining({ type: 'resource' }),
+    ]);
+    expect(events.some((event) => event.type === 'message')).toBe(false);
+    // Neither a title nor any other update that is not the agent's output takes it.
+    await fake().update({ sessionUpdate: 'session_info_update', title: 'Tests' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(delivery.accepted).not.toHaveBeenCalled();
+    await fake().update({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Reading it' },
+    });
+    await until(() => delivery.accepted.mock.calls.length === 1);
+    expect(events.some((event) => event.type === 'turn-ended')).toBe(false);
+    fake().endPrompt('end_turn');
+    await until((seen) => seen.some((event) => event.type === 'turn-ended'));
+    expect(delivery.accepted).toHaveBeenCalledOnce();
+    expect(delivery.failed).not.toHaveBeenCalled();
+  });
+
   it('interrupts with session/cancel, and what is still open ends as cancelled', async () => {
     const { session, events, until } = await open((onEvent) =>
       provider.start({ cwd: '/work' }, onEvent),

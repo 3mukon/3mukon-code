@@ -180,6 +180,7 @@ it.each(['auto', 'yolo'] as const)(
     };
     await session.send('Original text', [], { presentationNotices: [notice] }, delivery);
     await fake().prompted();
+    // Taken once Grok's first output for the turn comes, not before.
     expect(delivery.accepted).not.toHaveBeenCalled();
     expect(fake().paramsOf('session/prompt')[0]?.prompt).toEqual([
       expect.objectContaining({ type: 'resource' }),
@@ -198,8 +199,10 @@ it.each(['auto', 'yolo'] as const)(
     });
     await until(() => linked.mock.calls.length === 1);
     expect(linked).toHaveBeenCalledWith('panel_list', 'entry', envelope.automation);
+    expect(delivery.accepted).toHaveBeenCalledOnce();
     fake().endPrompt('end_turn');
-    await until(() => delivery.accepted.mock.calls.length === 1);
+    await until(has('turn-ended'));
+    expect(delivery.accepted).toHaveBeenCalledOnce();
     await session.setSandbox('read-only');
     expect(accesses).toHaveLength(2);
     expect(accesses[0]?.close).toHaveBeenCalled();
@@ -1038,10 +1041,18 @@ describe('turns', () => {
     await fake().prompted();
     expect(fake().paramsOf('session/prompt')[1]?.prompt).toEqual([inboxBlock]);
     expect(events.filter((event) => event.type === 'message')).toHaveLength(messages);
-    fake().endPrompt('end_turn');
+    // Taken once Grok's first output for the turn comes, so that the notices show before it.
+    expect(delivery.accepted).not.toHaveBeenCalled();
+    await fake().update({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Reading it' },
+    });
     await vi.waitFor(() => {
       expect(delivery.accepted).toHaveBeenCalledOnce();
     });
+    fake().endPrompt('end_turn');
+    await until(has('turn-ended'));
+    expect(delivery.accepted).toHaveBeenCalledOnce();
   });
 
   it('adds a message during a turn through Grok’s interjection, with its images, and holds one it refuses', async () => {

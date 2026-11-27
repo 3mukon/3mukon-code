@@ -694,6 +694,19 @@ type Pending =
   | { kind: 'question'; texts: string[]; resolve: (result: AskUserQuestionResult) => void };
 
 // A message of the user's, with its images.
+// The presentation notices a prompt carries, as a delivery accepts them.
+type PresentationNotices = ReturnType<typeof selectPresentationNotices>;
+
+// The session updates that are the agent's output for a turn, the first of which shows that it took
+// the prompt that opened the turn.
+const OUTPUT: ReadonlySet<string> = new Set([
+  'agent_message_chunk',
+  'agent_thought_chunk',
+  'tool_call',
+  'tool_call_update',
+  'plan',
+]);
+
 interface Message {
   text: string;
   images: MessageImage[];
@@ -736,6 +749,10 @@ class GrokSession implements ProviderSession {
       : undefined;
   }
   private readonly deliveries = new Set<HostContextDelivery>();
+  // The messages of the prompt that opened the running turn, with the presentation notices it carried,
+  // which Grok's first output for the turn accepts, so that the notices they gave show before what
+  // the agent makes of them.
+  private opening: { messages: Message[]; notices: PresentationNotices } | null = null;
   private access?: ToolsetAccess;
   private readonly toolNames = new Map<string, string>();
   private readonly resultNames = new Map<string, string>();
@@ -909,14 +926,11 @@ class GrokSession implements ProviderSession {
     // ACP answers a prompt when its turn ends; the turn's progress comes before as session updates. A
     // connection that closes first is the session's end, which closed reports.
     const { connection } = this.agent;
+    this.opening = { messages, notices };
     connection.agent.request('session/prompt', { sessionId: this.sessionId, prompt }).then(
       (response) => {
-        for (const message of messages) {
-          if (message.delivery) {
-            message.delivery.accepted(notices);
-            this.deliveries.delete(message.delivery);
-          }
-        }
+        if (this.opening?.messages === messages) this.opening = null;
+        this.accept(messages, notices);
         const promptId = response._meta?.promptId;
         this.endTurn(
           turnEndedBy(response.stopReason),
@@ -924,8 +938,9 @@ class GrokSession implements ProviderSession {
         );
       },
       (error: unknown) => {
+        if (this.opening?.messages === messages) this.opening = null;
         for (const message of messages) {
-          if (message.delivery) {
+          if (message.delivery && this.deliveries.has(message.delivery)) {
             message.delivery.failed();
             this.deliveries.delete(message.delivery);
           }
@@ -937,8 +952,19 @@ class GrokSession implements ProviderSession {
     );
   }
 
+  // Accepts the deliveries of the messages that are neither accepted nor failed yet.
+  private accept(messages: Message[], notices: PresentationNotices): void {
+    for (const message of messages) {
+      if (message.delivery && this.deliveries.has(message.delivery)) {
+        message.delivery.accepted(notices);
+        this.deliveries.delete(message.delivery);
+      }
+    }
+  }
+
   // ACP has the client answer what is still open as cancelled once it cancels the turn.
   async interrupt(): Promise<void> {
+    this.opening = null;
     for (const delivery of this.deliveries) delivery.failed();
     this.deliveries.clear();
     if (!this.turnRunning) return;
@@ -1211,6 +1237,11 @@ class GrokSession implements ProviderSession {
           }
         }
         if (update.sessionUpdate === 'user_message_chunk' && !this.replaying) return;
+        if (this.opening !== null && OUTPUT.has(update.sessionUpdate)) {
+          const { messages, notices } = this.opening;
+          this.opening = null;
+          this.accept(messages, notices);
+        }
         for (const event of this.translator.update(update)) {
           this.onEvent(
             appTool !== undefined &&
@@ -1550,6 +1581,7 @@ class GrokSession implements ProviderSession {
     if (this.closed) return;
     this.withdrawAll();
     this.closed = true;
+    this.opening = null;
     for (const delivery of this.deliveries) delivery.failed();
     this.deliveries.clear();
     this.access?.close();
