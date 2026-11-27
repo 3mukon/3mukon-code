@@ -56,6 +56,8 @@ export type TimelineItem =
     }
   // Messages from other sessions the agent was told of, by their summaries (ADR-0036).
   | { type: 'inbox'; notices: InboxNotice[] }
+  // A compaction of the conversation by the provider.
+  | { type: 'compaction'; id: string; trigger?: 'auto' | 'manual' }
   // Without a message, the UI says in its own words that the turn failed.
   | { type: 'error'; message?: string };
 
@@ -292,6 +294,15 @@ function fold(state: SessionState, event: SessionEvent): SessionState {
       return event.notices.length === 0
         ? state
         : append(state, { type: 'inbox', notices: event.notices });
+    // Once for each compaction, however often the provider reports it.
+    case 'compaction':
+      return find(state, 'compaction', event.id) >= 0
+        ? state
+        : append(state, {
+            type: 'compaction',
+            id: event.id,
+            ...(event.trigger === undefined ? {} : { trigger: event.trigger }),
+          });
     case 'error':
       return append(state, errorItem(event.message));
     case 'closed': {
@@ -310,6 +321,7 @@ function itemId(item: TimelineItem): string | undefined {
   switch (item.type) {
     case 'message':
     case 'tool':
+    case 'compaction':
       return item.id;
     case 'file-change':
       return item.change.id;

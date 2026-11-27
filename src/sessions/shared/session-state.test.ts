@@ -476,3 +476,13 @@ describe('an MCP tool’s call', () => {
     expect(state.timeline).toMatchObject([{ type: 'tool', id: 't1', status: 'completed', mcp }]);
   });
 });
+
+describe('a compaction', () => {
+  it('stands once in the timeline however often the provider reports it', () => {
+    let state = initialSessionState();
+    for (let pass = 0; pass < 2; pass += 1) {
+      state = applyEvent(state, { type: 'compaction', id: 'c1', trigger: 'auto' });
+    }
+    expect(state.timeline).toEqual([{ type: 'compaction', id: 'c1', trigger: 'auto' }]);
+  });
+});

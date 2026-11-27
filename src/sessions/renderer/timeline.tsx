@@ -1,6 +1,13 @@
 import { createContext, memo, useContext, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CircleAlert, CirclePause, CircleStop, Inbox, Layers } from '../../ui/renderer/icons';
+import {
+  CircleAlert,
+  CirclePause,
+  CircleStop,
+  FoldVertical,
+  Inbox,
+  Layers,
+} from '../../ui/renderer/icons';
 import { StatusDot, type Status } from '../../ui/renderer/status-dot';
 import type { MessageImage, Task } from '../shared/events';
 import type { InboxNotice, InboxReport } from '../shared/inbox';
@@ -334,6 +341,16 @@ const Item = memo(function Item({ item, agent, from, oldestWaiting, renderReques
       return renderRequest?.(item, { oldestWaiting: item.request.id === oldestWaiting }) ?? null;
     case 'inbox':
       return <InboxNotices notices={item.notices} />;
+    // A compaction of the conversation, quiet as the app's notices are.
+    case 'compaction':
+      return (
+        <p className="my-3 flex items-start gap-2 text-faint">
+          <FoldVertical className="mt-1 size-3.5 shrink-0" />
+          <span>
+            {t(item.trigger === 'auto' ? 'sessions.compaction.auto' : 'sessions.compaction.manual')}
+          </span>
+        </p>
+      );
     case 'error':
       return (
         <p className="my-3 whitespace-pre-wrap text-del">
@@ -388,6 +405,8 @@ function keyOf(item: TimelineItem, index: number): string {
       return `${item.type}:${item.request.id}`;
     case 'inbox':
       return `inbox:${item.notices[0]?.id ?? String(index)}`;
+    case 'compaction':
+      return `compaction:${item.id}`;
     case 'error':
       return `error:${String(index)}`;
   }

@@ -146,6 +146,11 @@ export class Translator {
     switch (message.type) {
       case 'system': {
         if (message.subtype === 'api_retry') return [retrying(message)];
+        if (message.subtype === 'compact_boundary') {
+          return [
+            { type: 'compaction', id: message.uuid, trigger: message.compact_metadata.trigger },
+          ];
+        }
         // Each turn starts with an init message, which names the mode. It names the model too, but as
         // Claude Code resolved it, such as claude-opus-5-5 for opus, and the session's model stays the
         // one it chose, which its list knows.

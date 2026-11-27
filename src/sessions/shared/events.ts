@@ -226,6 +226,9 @@ export type SessionEvent =
   // Messages from other sessions that the agent was told of, by their summaries (ADR-0036): a host
   // event as the notices are given, and a provider's as its history gives them back.
   | { type: 'inbox'; notices: InboxNotice[] }
+  // The provider compacted the conversation, summarizing what came before to free its context window:
+  // on its own as the window filled (auto), at a command (manual), or where it does not say.
+  | { type: 'compaction'; id: string; trigger?: 'auto' | 'manual' }
   | { type: 'error'; message: string }
   // The session ended, and its provider process with it.
   | { type: 'closed'; error?: string };

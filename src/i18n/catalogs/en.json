@@ -128,6 +128,10 @@
       "notSignedIn": "{{provider}} (not signed in)",
       "notInstalled": "{{provider}} (not installed)"
     },
+    "compaction": {
+      "manual": "Compacted the conversation",
+      "auto": "Compacted the conversation automatically"
+    },
     "run": {
       "kind": "Tool calls",
       "calls_one": "{{count}} tool call",

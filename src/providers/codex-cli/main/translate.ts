@@ -275,13 +275,15 @@ export class Translator {
             output: functionOutput(item.output),
           },
         ];
-      // Not calls: the user's messages come from the session, and the hooks' prompts, review mode and
-      // compaction are Codex's own bookkeeping.
+      // A compaction of the conversation, once it is done.
+      case 'contextCompaction':
+        return completed ? [{ type: 'compaction', id: item.id }] : [];
+      // Not calls: the user's messages come from the session, and the hooks' prompts and review mode
+      // are Codex's own bookkeeping.
       case 'userMessage':
       case 'hookPrompt':
       case 'enteredReviewMode':
       case 'exitedReviewMode':
-      case 'contextCompaction':
         return [];
       // An item of a kind this version does not know shows as a call by its kind rather than not at
       // all, so that no call Codex reports goes unseen.

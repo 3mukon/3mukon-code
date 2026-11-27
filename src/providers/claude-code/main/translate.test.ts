@@ -194,6 +194,17 @@ describe('Translator.live', () => {
     ]);
   });
 
+  it('shows a compaction of the conversation, and whether Claude Code made it on its own', () => {
+    const events = new Translator(cwd).live({
+      type: 'system',
+      subtype: 'compact_boundary',
+      compact_metadata: { trigger: 'auto', pre_tokens: 180_000 },
+      uuid: 'c1',
+      session_id: 's',
+    } as unknown as SDKMessage);
+    expect(events).toEqual([{ type: 'compaction', id: 'c1', trigger: 'auto' }]);
+  });
+
   it('shows a tool the API runs within the message, as its web search, as a call already done', () => {
     const events = new Translator(cwd).live(
       assistant('u1', [

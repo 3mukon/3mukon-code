@@ -126,6 +126,10 @@
       "notSignedIn": "{{provider}}（未登录）",
       "notInstalled": "{{provider}}（未安装）"
     },
+    "compaction": {
+      "manual": "压缩了对话",
+      "auto": "自动压缩了对话"
+    },
     "run": {
       "kind": "工具调用",
       "calls_other": "{{count}} 次工具调用",

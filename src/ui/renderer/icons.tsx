@@ -44,6 +44,7 @@ import {
   GitBranchPlus as LucideGitBranchPlus,
   LayoutPanelLeft as LucideLayoutPanelLeft,
   ListChecks as LucideListChecks,
+  FoldVertical as LucideFoldVertical,
   Layers as LucideLayers,
   ListTree as LucideListTree,
   MailOpen as LucideMailOpen,
@@ -120,3 +121,4 @@ export const Plug = decorative(LucidePlug);
 export const RefreshCw = decorative(LucideRefreshCw);
 export const Send = decorative(LucideSend);
 export const Layers = decorative(LucideLayers);
+export const FoldVertical = decorative(LucideFoldVertical);

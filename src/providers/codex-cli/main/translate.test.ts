@@ -394,7 +394,15 @@ describe('MCP and dynamic tool calls', () => {
     expect(live({ type: 'futureItem', id: 'f1' })).toMatchObject([
       { type: 'tool', id: 'f1', kind: 'other' },
     ]);
-    expect(live({ type: 'contextCompaction', id: 'k1' })).toEqual([]);
+    expect(live({ type: 'contextCompaction', id: 'k1' })).toEqual([
+      { type: 'compaction', id: 'k1' },
+    ]);
+    expect(
+      new Translator(cwd).live('item/started', {
+        ...turn,
+        item: { type: 'contextCompaction', id: 'k1' } as ThreadItem,
+      }),
+    ).toEqual([]);
   });
 });
 

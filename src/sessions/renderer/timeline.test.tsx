@@ -477,3 +477,22 @@ describe('folded tool calls', () => {
     }
   });
 });
+
+describe('a compaction', () => {
+  it('shows as a quiet line, saying whether the provider made it on its own', () => {
+    render(
+      <Timeline
+        state={{
+          ...initialSessionState(),
+          timeline: [
+            { type: 'compaction', id: 'c1', trigger: 'auto' },
+            { type: 'compaction', id: 'c2' },
+          ],
+        }}
+        agent="Codex"
+      />,
+    );
+    expect(screen.getByText('Compacted the conversation automatically')).toBeDefined();
+    expect(screen.getByText('Compacted the conversation')).toBeDefined();
+  });
+});
