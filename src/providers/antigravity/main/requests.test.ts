@@ -79,6 +79,20 @@ describe('an approval', () => {
     expect(permissionApproval('r2', params, context, undefined, true).request.denyByDefault).toBe(
       true,
     );
+    expect(within.request.title).toBe('echo probe-123');
+    // A command that would leave the sandbox says so, as it otherwise looks like the same command.
+    const leaving: RequestPermissionRequest = {
+      ...params,
+      toolCall: {
+        ...params.toolCall,
+        rawInput: { CommandLine: 'echo probe-123', BypassSandbox: true },
+      },
+    };
+    expect(permissionApproval('r3', leaving, context, undefined, true).request).toMatchObject({
+      title: 'Antigravity asks to run this command outside its sandbox',
+      command: 'echo probe-123',
+      denyByDefault: true,
+    });
     expect(approvalResult(OPTIONS, { decision: 'allow-once' })).toEqual({
       outcome: { outcome: 'selected', optionId: 'allow' },
     });

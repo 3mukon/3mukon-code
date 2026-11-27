@@ -47,7 +47,7 @@ export function beyondLevel(
   known?: ToolCallInfo,
 ): boolean {
   if (sandbox === 'full-access') return false;
-  if (record(call.rawInput)?.BypassSandbox === true) return true;
+  if (leavesSandbox(call)) return true;
   const kind = call.kind ?? known?.kind;
   if (kind !== 'edit' && kind !== 'delete' && kind !== 'move') return false;
   if (sandbox === 'read-only') return true;
@@ -56,6 +56,11 @@ export function beyondLevel(
   return (
     paths.length === 0 || paths.some((path) => !folders.some((folder) => within(path, folder)))
   );
+}
+
+// Whether a call asks to run outside Antigravity's terminal sandbox.
+export function leavesSandbox(call: ToolCallUpdate): boolean {
+  return record(call.rawInput)?.BypassSandbox === true;
 }
 
 function within(path: string, folder: string): boolean {
@@ -99,7 +104,12 @@ export function permissionApproval(
     request: {
       id,
       action,
-      ...(call.title == null || call.title === '' ? {} : { title: call.title }),
+      // A command that would leave the sandbox says so, as the request looks like any other command's.
+      ...(leavesSandbox(call)
+        ? { title: 'Antigravity asks to run this command outside its sandbox' }
+        : call.title == null || call.title === ''
+          ? {}
+          : { title: call.title }),
       ...(command === undefined ? {} : { command }),
       ...(paths.length === 0 ? {} : { paths }),
       ...(diff === '' ? {} : { diff }),
