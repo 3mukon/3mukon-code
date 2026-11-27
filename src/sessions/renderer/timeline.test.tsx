@@ -359,3 +359,98 @@ describe('Timeline', () => {
     expect(screen.getByText('List')).toBeDefined();
   });
 });
+
+describe('folded tool calls', () => {
+  const call = (id: string, status: 'completed' | 'failed' = 'completed'): TimelineItem => ({
+    type: 'tool',
+    id,
+    kind: 'execute',
+    title: `npm run ${id}`,
+    status,
+    output: '',
+    changes: [],
+  });
+  const message = (
+    id: string,
+    role: 'user' | 'agent' | 'thinking',
+    text: string,
+  ): TimelineItem => ({
+    type: 'message',
+    id,
+    role,
+    text,
+  });
+  const state = (timeline: TimelineItem[]): SessionState => ({
+    ...initialSessionState(),
+    timeline,
+  });
+
+  it('folds two or more calls, with the thinking between them, once the agent’s next message follows, and opens to show them', () => {
+    const asked = message('u', 'user', 'Check it');
+    const run = [
+      call('lint'),
+      message('t', 'thinking', 'Checking the tests'),
+      call('test', 'failed'),
+      call('build'),
+    ];
+    const { rerender } = render(<Timeline state={state([asked, ...run])} agent="Codex" />);
+    // While the work goes on, the calls show as they are.
+    expect(screen.getByText('npm run lint')).toBeDefined();
+    expect(screen.queryByRole('button', { name: /tool calls/ })).toBeNull();
+
+    rerender(
+      <Timeline state={state([asked, ...run, message('a', 'agent', 'All done')])} agent="Codex" />,
+    );
+    const group = screen.getByRole('button', { name: /3 tool calls · 1 failed/ });
+    expect(group.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('npm run lint')).toBeNull();
+    expect(screen.queryByText('Checking the tests')).toBeNull();
+    expect(screen.getByText('All done')).toBeDefined();
+
+    act(() => {
+      group.click();
+    });
+    expect(group.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByText('npm run lint')).toBeDefined();
+    expect(screen.getByText('npm run build')).toBeDefined();
+    expect(screen.getByText('Checking the tests')).toBeDefined();
+
+    // The group the user opened stays open as the activity grows.
+    rerender(
+      <Timeline
+        state={state([
+          asked,
+          ...run,
+          message('a', 'agent', 'All done'),
+          message('u2', 'user', 'Thanks'),
+        ])}
+        agent="Codex"
+      />,
+    );
+    expect(screen.getByRole('button', { name: /3 tool calls/ }).getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+  });
+
+  it('leaves a single call, a run that something else ends, and a run that nothing follows yet as they are', () => {
+    render(
+      <Timeline
+        state={state([
+          call('one'),
+          message('a1', 'agent', 'First'),
+          call('two'),
+          call('three'),
+          { type: 'error', message: 'It broke' },
+          message('a2', 'agent', 'Second'),
+          call('four'),
+          call('five'),
+        ])}
+        agent="Codex"
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /tool calls/ })).toBeNull();
+    for (const id of ['one', 'two', 'three', 'four', 'five']) {
+      expect(screen.getByText(`npm run ${id}`)).toBeDefined();
+    }
+  });
+});

@@ -125,6 +125,11 @@
       "notSignedIn": "{{provider}}（未登录）",
       "notInstalled": "{{provider}}（未安装）"
     },
+    "run": {
+      "kind": "工具调用",
+      "calls_other": "{{count}} 次工具调用",
+      "failed_other": "{{count}} 次失败"
+    },
     "tool": {
       "named": "{{kind}}：",
       "kind": {

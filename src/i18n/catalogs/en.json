@@ -127,6 +127,13 @@
       "notSignedIn": "{{provider}} (not signed in)",
       "notInstalled": "{{provider}} (not installed)"
     },
+    "run": {
+      "kind": "Tool calls",
+      "calls_one": "{{count}} tool call",
+      "calls_other": "{{count}} tool calls",
+      "failed_one": "{{count}} failed",
+      "failed_other": "{{count}} failed"
+    },
     "tool": {
       "named": "{{kind}}:",
       "kind": {

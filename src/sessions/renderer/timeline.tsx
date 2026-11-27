@@ -1,6 +1,6 @@
 import { createContext, memo, useContext, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CircleAlert, CirclePause, CircleStop, Inbox } from '../../ui/renderer/icons';
+import { CircleAlert, CirclePause, CircleStop, Inbox, Layers } from '../../ui/renderer/icons';
 import { StatusDot, type Status } from '../../ui/renderer/status-dot';
 import type { MessageImage, Task } from '../shared/events';
 import type { InboxNotice, InboxReport } from '../shared/inbox';
@@ -14,7 +14,7 @@ import {
   type ToolItem,
 } from '../shared/session-state';
 import { Message } from './message';
-import { FileChangeEntry, ToolCall } from './tool-call';
+import { Entry, FileChangeEntry, ToolCall } from './tool-call';
 
 // Shows an approval or a question where it stands in the activity, as whoever composes the page
 // decides, and tells whether it is the session's oldest waiting request; the approvals module shows
@@ -82,7 +82,8 @@ interface TimelineProps {
 
 // A session's activity, oldest first, as the reference's panes show it: the messages (Message), the
 // user's at the right and the agent's at the left, so that the two never read alike, and the agent's
-// thinking quieter; each tool call as one entry, with the files it changed and their diffs; the
+// thinking quieter; each tool call as one entry, with the files it changed and their diffs, and a run of
+// them that the agent's next message follows folded into one line (foldRuns); the
 // approvals and questions, as the page's composer renders them, and under a tool call, or in place of
 // its entry, what whoever composes the page gives it; errors, then the agent's task list
 // with finished rows struck through and the current one bright, and Working while a turn runs, with
@@ -108,16 +109,25 @@ export function Timeline({
   return (
     <ToolExtras.Provider value={renderToolExtra}>
       <ToolCalls.Provider value={renderToolCall}>
-        {state?.timeline.slice(from).map((item, index) => (
-          <Item
-            key={keyOf(item, from + index)}
-            item={item}
-            agent={agent}
-            oldestWaiting={oldestWaiting}
-            {...(item === first && firstFrom !== undefined ? { from: firstFrom } : {})}
-            {...(renderRequest === undefined ? {} : { renderRequest })}
-          />
-        ))}
+        {foldRuns(state?.timeline.slice(from) ?? [], from).map((row) => {
+          const item = ({ item: entry, index }: Placed) => (
+            <Item
+              key={keyOf(entry, index)}
+              item={entry}
+              agent={agent}
+              oldestWaiting={oldestWaiting}
+              {...(entry === first && firstFrom !== undefined ? { from: firstFrom } : {})}
+              {...(renderRequest === undefined ? {} : { renderRequest })}
+            />
+          );
+          return row.type === 'item' ? (
+            item(row)
+          ) : (
+            <ToolRun key={runKey(row)} calls={row.calls} failed={row.failed}>
+              {row.items.map(item)}
+            </ToolRun>
+          );
+        })}
         {pending !== undefined && (
           <Message role="user" text={pending.text} images={pending.images} agent={agent} />
         )}
@@ -145,6 +155,97 @@ export function Timeline({
         {working && state?.retrying !== undefined && <RetryNotice retrying={state.retrying} />}
       </ToolCalls.Provider>
     </ToolExtras.Provider>
+  );
+}
+
+// An item of the activity with its place in the whole timeline, by which it keeps its key.
+interface Placed {
+  item: TimelineItem;
+  index: number;
+}
+
+// What the activity shows in order: an item, or a run of tool calls folded into one line.
+type Row =
+  ({ type: 'item' } & Placed) | { type: 'run'; items: Placed[]; calls: number; failed: number };
+
+// Whether an item belongs in a run of tool calls: a call, a file change no call made, or the agent's
+// thinking, which would otherwise split a run into small ones.
+function inRun(item: TimelineItem): boolean {
+  return (
+    item.type === 'tool' ||
+    item.type === 'file-change' ||
+    (item.type === 'message' && item.role === 'thinking')
+  );
+}
+
+// The activity's rows, from its items as they stand from the index given: two or more tool calls in a
+// row fold into one line once the agent's next message follows them, which says the work they did is
+// done. A run that nothing follows yet shows as its items, so that the work shows as it happens, and so
+// does one that anything else ends: the user's message, an approval or a question, the app's notices or
+// an error, each of which stays where it stands.
+export function foldRuns(items: readonly TimelineItem[], from = 0): Row[] {
+  const rows: Row[] = [];
+  let run: Placed[] = [];
+  const end = (folds: boolean) => {
+    const calls = run.filter(({ item }) => item.type === 'tool');
+    if (folds && calls.length >= 2) {
+      const failed = calls.filter(({ item }) => item.type === 'tool' && item.status === 'failed');
+      rows.push({ type: 'run', items: run, calls: calls.length, failed: failed.length });
+    } else {
+      rows.push(...run.map((placed) => ({ type: 'item' as const, ...placed })));
+    }
+    run = [];
+  };
+  items.forEach((item, offset) => {
+    const placed = { item, index: from + offset };
+    if (inRun(item)) {
+      run.push(placed);
+      return;
+    }
+    end(item.type === 'message' && item.role === 'agent');
+    rows.push({ type: 'item', ...placed });
+  });
+  end(false);
+  return rows;
+}
+
+// A run's key, by its first item, so that a run the user opened stays open as the activity grows.
+function runKey(row: Extract<Row, { type: 'run' }>): string {
+  const first = row.items[0];
+  return first === undefined ? 'run' : `run:${keyOf(first.item, first.index)}`;
+}
+
+// A run of tool calls as one line, which says how many calls it holds and how many of them failed, in
+// the colour of a failed call, and opens, as an entry does, to show them as they show unfolded.
+function ToolRun({
+  calls,
+  failed,
+  children,
+}: {
+  calls: number;
+  failed: number;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Entry
+      icon={Layers}
+      kind={t('sessions.run.kind')}
+      status="completed"
+      bright={false}
+      title={
+        <>
+          {t('sessions.run.calls', { count: calls })}
+          {failed > 0 && (
+            <span className="text-del">
+              {' · '}
+              {t('sessions.run.failed', { count: failed })}
+            </span>
+          )}
+        </>
+      }
+      body={<div className="min-w-0">{children}</div>}
+    />
   );
 }
 
