@@ -1,5 +1,4 @@
 import { readFileSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { app, net } from 'electron';
 import { pathFolders } from '../../installs/main/find';
@@ -27,8 +26,6 @@ export function providerInstalls(data: string): Record<ProviderId, ProviderInsta
       ? {}
       : { pins: JSON.parse(readFileSync(pins, 'utf8')) as Partial<Record<ProviderId, Pin>> }),
   });
-  // Where earlier builds unpacked Grok Build's binary, which the app's copies replace.
-  void rm(join(data, 'grok-build'), { recursive: true, force: true });
   return {
     'claude-code': installs.for(claudeCodeInstall),
     'codex-cli': installs.for(codexInstall),
