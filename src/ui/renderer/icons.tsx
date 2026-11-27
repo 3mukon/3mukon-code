@@ -46,6 +46,7 @@ import {
   ListChecks as LucideListChecks,
   FoldVertical as LucideFoldVertical,
   Layers as LucideLayers,
+  PackageSearch as LucidePackageSearch,
   ListTree as LucideListTree,
   MailOpen as LucideMailOpen,
   PanelRightClose as LucidePanelRightClose,
@@ -122,3 +123,4 @@ export const RefreshCw = decorative(LucideRefreshCw);
 export const Send = decorative(LucideSend);
 export const Layers = decorative(LucideLayers);
 export const FoldVertical = decorative(LucideFoldVertical);
+export const PackageSearch = decorative(LucidePackageSearch);

@@ -1,6 +1,6 @@
 import type { SDKMessage, SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import { inboxNoticesOf } from '../../../sessions/shared/inbox';
-import { mcpCall, toolWords, type McpCall } from '../../../sessions/shared/tools';
+import { isToolSearch, mcpCall, toolWords, type McpCall } from '../../../sessions/shared/tools';
 import type {
   FileChange,
   MessageImage,
@@ -299,6 +299,7 @@ export class Translator {
         kind: TOOL_KINDS[name] ?? 'other',
         status: 'running',
         ...(mcp === undefined ? describeTool(name, input, this.cwd) : { title: name, mcp }),
+        ...(isToolSearch(name) ? { toolSearch: true as const } : {}),
       },
     ];
   }

@@ -185,6 +185,8 @@ export type SessionEvent =
       // For a call of an MCP tool, its server and tool in the terms every provider shares, which the
       // activity names the call by in place of the provider's title.
       mcp?: McpCall;
+      // A search of the agent's own tools for one to call (isToolSearch in tools.ts).
+      toolSearch?: true;
     }
   // Adds streamed output to the end of a tool call's output.
   | { type: 'tool-output'; id: string; text: string }

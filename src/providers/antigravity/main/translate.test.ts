@@ -188,3 +188,16 @@ describe('the fields Antigravity adds', () => {
     expect(currentChoices([])).toEqual({});
   });
 });
+
+describe('a search of Antigravity’s own tools', () => {
+  it('is marked by the name Antigravity gives the call', () => {
+    const events = new Translator('/work').update({
+      sessionUpdate: 'tool_call',
+      toolCallId: 's1',
+      title: 'Search tools',
+      kind: 'search',
+      ...{ name: 'search_tools' },
+    });
+    expect(events).toMatchObject([{ type: 'tool', id: 's1', toolSearch: true }]);
+  });
+});

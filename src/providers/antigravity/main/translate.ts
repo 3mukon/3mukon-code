@@ -18,7 +18,7 @@ import type {
   ToolStatus,
 } from '../../../sessions/shared/events';
 import { INBOX_CONTEXT_URI, inboxNoticesOf } from '../../../sessions/shared/inbox';
-import { mcpCall, TOOLSET_NAME, type McpCall } from '../../../sessions/shared/tools';
+import { isToolSearch, mcpCall, TOOLSET_NAME, type McpCall } from '../../../sessions/shared/tools';
 import { displayPath, fileChange } from './patch';
 
 // Tool output is kept to this many characters, so that long command output stays cheap to hold.
@@ -152,6 +152,7 @@ export class Translator {
         id,
         ...(update.kind == null ? {} : { kind: update.kind }),
         ...(update.title == null || update.title === '' ? {} : { title: update.title }),
+        ...(isToolSearch(toolNameOf(update)) ? { toolSearch: true as const } : {}),
         ...(status === undefined ? {} : { status }),
         ...(command === undefined ? {} : { command }),
         ...(paths.length === 0 ? {} : { paths: call.paths }),

@@ -34,6 +34,8 @@ export interface ToolItem {
   images?: MessageImage[];
   // For a call of an MCP tool, its server and tool, by which the activity names it.
   mcp?: McpCall;
+  // A search of the agent's own tools for one to call.
+  toolSearch?: true;
 }
 
 export type TimelineItem =
@@ -186,6 +188,7 @@ function fold(state: SessionState, event: SessionEvent): SessionState {
       const paths = event.paths ?? base.paths;
       const images = event.images ?? base.images;
       const mcp = event.mcp ?? base.mcp;
+      const toolSearch = event.toolSearch ?? base.toolSearch;
       return put(state, index, {
         type: 'tool',
         id: event.id,
@@ -198,6 +201,7 @@ function fold(state: SessionState, event: SessionEvent): SessionState {
         ...(paths === undefined ? {} : { paths }),
         ...withImages(images),
         ...(mcp === undefined ? {} : { mcp }),
+        ...(toolSearch === undefined ? {} : { toolSearch }),
       });
     }
     case 'tool-output': {

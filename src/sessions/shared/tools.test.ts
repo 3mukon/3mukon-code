@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appCall, mcpCall, toolWords, TOOLSET_NAME } from './tools';
+import { appCall, isToolSearch, mcpCall, toolWords, TOOLSET_NAME } from './tools';
 
 describe('mcpCall', () => {
   it('marks a call of the app’s own toolset as the app’s, and any other server’s as its own', () => {
@@ -72,5 +72,16 @@ describe('toolWords', () => {
     expect(toolWords('read-mcp-resource')).toBe('read mcp resource');
     expect(toolWords('ListMCPResources')).toBe('List MCP resources');
     expect(toolWords('Bash')).toBe('Bash');
+  });
+});
+
+describe('isToolSearch', () => {
+  it('knows a search of the agent’s own tools by the tool’s name, apart from searches of files or the web', () => {
+    for (const name of ['ToolSearch', 'tool_search', 'Tool search', 'search_tools']) {
+      expect(isToolSearch(name)).toBe(true);
+    }
+    for (const name of ['Grep', 'WebSearch', 'search', undefined]) {
+      expect(isToolSearch(name)).toBe(false);
+    }
   });
 });

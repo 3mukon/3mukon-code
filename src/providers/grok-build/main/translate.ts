@@ -19,7 +19,7 @@ import type {
   ToolStatus,
 } from '../../../sessions/shared/events';
 import { INBOX_CONTEXT_URI, inboxNoticesOf } from '../../../sessions/shared/inbox';
-import { mcpCall, TOOLSET_NAME, type McpCall } from '../../../sessions/shared/tools';
+import { isToolSearch, mcpCall, TOOLSET_NAME, type McpCall } from '../../../sessions/shared/tools';
 import { displayPath, fileChange } from './patch';
 
 // Tool output is kept to this many characters, so that long command output stays cheap to hold.
@@ -146,6 +146,13 @@ export class Translator {
     this.calls.set(id, call);
     const status = toolStatus(update.status) ?? (started ? 'running' : undefined);
     const mcp = update.title == null ? undefined : mcpOfTitle(update.title, update.rawInput);
+    // Grok's metadata names its own tool, and otherwise the title does.
+    const tool = (update._meta as { 'x.ai/tool'?: { name?: unknown } } | null | undefined)?.[
+      'x.ai/tool'
+    ];
+    const toolSearch = isToolSearch(
+      typeof tool?.name === 'string' ? tool.name : (update.title ?? undefined),
+    );
     const command = commandOf(update.rawInput);
     const output = outputOf(content);
     const images = imagesOf(content);
@@ -155,6 +162,7 @@ export class Translator {
         id,
         ...(update.kind == null ? {} : { kind: update.kind }),
         ...(update.title == null || update.title === '' ? {} : { title: update.title }),
+        ...(toolSearch ? { toolSearch: true as const } : {}),
         ...(status === undefined ? {} : { status }),
         ...(command === undefined ? {} : { command }),
         ...(paths.length === 0 ? {} : { paths: call.paths }),

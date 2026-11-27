@@ -70,6 +70,12 @@ function clicking(action: unknown): boolean {
 // A tool's name in words, for a tool the activity has no words of its own for: snake_case,
 // kebab-case and camelCase split, the first word as it is and the others in lower case where they are
 // not all capitals, such as Enter plan mode for EnterPlanMode or create issue for create_issue.
+// Whether a provider's tool, by its own name, searches the agent's tools for one to call, as Claude
+// Code's ToolSearch does: such a call shows with an icon of its own.
+export function isToolSearch(name: string | undefined): boolean {
+  return name !== undefined && /^(tools?[_\s-]?search|search[_\s-]?tools?)$/i.test(name.trim());
+}
+
 export function toolWords(name: string): string {
   const words = name
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')

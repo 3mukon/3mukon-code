@@ -347,3 +347,16 @@ describe('images', () => {
     });
   });
 });
+
+describe('a search of Grok’s own tools', () => {
+  it('is marked by the name Grok’s metadata gives the tool', () => {
+    const events = new Translator('/work').update({
+      sessionUpdate: 'tool_call',
+      toolCallId: 's1',
+      title: 'Search tools',
+      kind: 'search',
+      _meta: { 'x.ai/tool': { version: 1, namespace: 'grok_build', name: 'tool_search' } },
+    });
+    expect(events).toMatchObject([{ type: 'tool', id: 's1', toolSearch: true }]);
+  });
+});

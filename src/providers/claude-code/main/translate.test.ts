@@ -194,6 +194,15 @@ describe('Translator.live', () => {
     ]);
   });
 
+  it('marks a search of Claude Code’s own tools, which shows with an icon of its own', () => {
+    const events = new Translator(cwd).live(
+      assistant('u1', [
+        { type: 'tool_use', id: 't1', name: 'ToolSearch', input: { query: 'select:Monitor' } },
+      ]),
+    );
+    expect(events).toMatchObject([{ type: 'tool', id: 't1', toolSearch: true }]);
+  });
+
   it('shows a compaction of the conversation, and whether Claude Code made it on its own', () => {
     const events = new Translator(cwd).live({
       type: 'system',

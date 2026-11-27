@@ -15,6 +15,7 @@ import {
   ListTree,
   MailOpen,
   Monitor,
+  PackageSearch,
   PanelRightClose,
   PanelRightOpen,
   PanelsTopLeft,
@@ -69,9 +70,11 @@ const appIcons: Partial<Record<string, typeof Pencil>> = {
   automation_capabilities: ListChecks,
 };
 
-// The icon a call shows: for the app's browser and computer tools their family's, or a pointer for a
-// click; for the app's other tools their own; for another server's tool a plug; else its kind's.
+// The icon a call shows: for a search of the agent's tools its own; for the app's browser and computer
+// tools their family's, or a pointer for a click; for the app's other tools their own; for another server's tool a plug; else its kind's.
 function iconOf(item: ToolItem, family: 'browser' | 'computer' | undefined): typeof Pencil {
+  // A search of the agent's own tools, apart from a search of files or the web.
+  if (item.toolSearch === true) return PackageSearch;
   const call = item.mcp;
   if (family !== undefined) {
     if (call?.clicks === true) return Pointer;

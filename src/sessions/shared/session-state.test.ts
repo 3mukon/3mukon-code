@@ -486,3 +486,18 @@ describe('a compaction', () => {
     expect(state.timeline).toEqual([{ type: 'compaction', id: 'c1', trigger: 'auto' }]);
   });
 });
+
+describe('a search of the agent’s tools', () => {
+  it('keeps its mark through the call’s later updates', () => {
+    let state = applyEvent(initialSessionState(), {
+      type: 'tool',
+      id: 't1',
+      kind: 'search',
+      title: 'select:Monitor',
+      status: 'running',
+      toolSearch: true,
+    });
+    state = applyEvent(state, { type: 'tool', id: 't1', status: 'completed' });
+    expect(state.timeline).toMatchObject([{ type: 'tool', id: 't1', toolSearch: true }]);
+  });
+});

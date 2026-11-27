@@ -132,7 +132,7 @@ export function sessionTools(): SessionTool[] {
       name: 'session_list',
       annotations: { readOnlyHint: true, openWorldHint: false },
       description:
-        'List the sessions of the user’s Sessions list, each an agent you can message: each one’s sessionId, title, provider, folder and status, and its parent’s sessionId for a child. Your own session, your parent and your children are marked. A child’s messages and the app’s reports on it reach you by themselves, so there is no need to list the sessions to follow one.',
+        'List the sessions of the user’s Sessions list, each an agent you can message: each one’s sessionId, title, provider, folder and status, and its parent’s sessionId for a child. Your own session, your parent and your children are marked.',
       inputSchema: z.object({}).strict(),
       call: (coordinator, owner) => {
         const sessions = coordinator.list(owner);
