@@ -123,7 +123,7 @@ let autoOffered: boolean;
 let signedIn: boolean;
 let tier: Params | undefined;
 // Processes without the terminal sandbox cannot resume a session.
-let failResumeUnsandboxed: boolean;
+let failResumeInYolo: boolean;
 let fakes: FakeAgy[];
 
 beforeEach(() => {
@@ -132,7 +132,7 @@ beforeEach(() => {
   autoOffered = false;
   signedIn = true;
   tier = { name: 'Antigravity Starter Quota', id: 'free-tier' };
-  failResumeUnsandboxed = false;
+  failResumeInYolo = false;
   fakes = [];
 });
 
@@ -202,7 +202,7 @@ class FakeAgy {
       })
       .onRequest('session/resume', ({ params }) => {
         record('session/resume', params);
-        if (failResumeUnsandboxed && !this.args.includes('--sandbox')) {
+        if (failResumeInYolo && this.args.includes('--dangerously-skip-permissions')) {
           throw new RequestError(-32000, 'Antigravity could not resume the session.');
         }
         return { configOptions: options(), modes: modes() };
@@ -414,21 +414,22 @@ describe('a session', () => {
   });
 
   it.each([
-    ['workspace-write', 'auto', ['auto']],
-    ['full-access', 'auto', ['auto']],
-    ['read-only', 'auto', []],
-    ['workspace-write', 'yolo', []],
+    ['auto', ['acp', '--process-per-session', '--sandbox'], ['auto'], 'workspace-write'],
+    ['yolo', ['acp', '--process-per-session', '--dangerously-skip-permissions'], [], 'full-access'],
   ] as const)(
-    'at %s in %s, runs Antigravity’s auto mode only where offered and not at read-only (ADR-0040)',
-    async (sandbox, mode, switched) => {
+    'in %s, runs a process of its own with Antigravity’s mode behind it, at the level the mode counts as, whatever level was asked for (ADR-0043)',
+    async (mode, args, switched, level) => {
       autoOffered = true;
-      await open((onEvent) => provider.start({ cwd: '/work', sandbox, mode }, onEvent));
+      const { events } = await open((onEvent) =>
+        provider.start({ cwd: '/work', sandbox: 'read-only', mode }, onEvent),
+      );
+      expect(fake().args).toEqual(args);
       expect(
         fake()
           .paramsOf('session/set_mode')
           .map((params) => params.modeId),
       ).toEqual(switched);
-      expect(fake().args.includes('--sandbox')).toBe(sandbox !== 'full-access');
+      expect(events).toContainEqual(expect.objectContaining({ type: 'settings', sandbox: level }));
     },
   );
 
@@ -576,44 +577,49 @@ describe('approvals and questions', () => {
     });
   });
 
-  it('in yolo allows a request within the level and denies one beyond it, a command outside the sandbox', async () => {
+  it('in yolo allows any request that still comes, a command outside the sandbox and an edit too (ADR-0043)', async () => {
     const { events } = await open((onEvent) =>
       provider.start({ cwd: '/work', mode: 'yolo' }, onEvent),
     );
-    await expect(fake().request(permission({ CommandLine: 'npm test' }))).resolves.toEqual({
-      outcome: { outcome: 'selected', optionId: 'allow' },
-    });
     await expect(
       fake().request(permission({ CommandLine: 'npm install', BypassSandbox: true })),
-    ).resolves.toEqual({ outcome: { outcome: 'selected', optionId: 'deny' } });
+    ).resolves.toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
+    await expect(fake().request(permission({}, 'edit'))).resolves.toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow' },
+    });
     expect(events.some((event) => event.type === 'approval-requested')).toBe(false);
   });
 
-  it('at read-only denies an edit in yolo, and asks one in auto with denial preselected', async () => {
-    await open((onEvent) =>
-      provider.start({ cwd: '/work', mode: 'yolo', sandbox: 'read-only' }, onEvent),
-    );
-    await expect(fake().request(permission({}, 'edit'))).resolves.toEqual({
-      outcome: { outcome: 'selected', optionId: 'deny' },
-    });
+  it('in auto asks an edit, and a command outside the sandbox with denial preselected', async () => {
     const { events, until } = await open((onEvent) =>
       provider.start({ cwd: '/work', sandbox: 'read-only' }, onEvent),
     );
-    void fake(1).request(permission({}, 'edit'));
-    await until((seen) => seen.some((event) => event.type === 'approval-requested'));
-    expect(events.find((event) => event.type === 'approval-requested')).toMatchObject({
-      request: { action: 'edit', denyByDefault: true },
+    void fake().request(permission({}, 'edit'));
+    void fake().request(permission({ CommandLine: 'npm i', BypassSandbox: true }));
+    await until((seen) => seen.filter((event) => event.type === 'approval-requested').length === 2);
+    const asked = events.filter((event) => event.type === 'approval-requested');
+    expect(asked[0]).toMatchObject({ request: { action: 'edit', denyByDefault: false } });
+    expect(asked[1]).toMatchObject({
+      request: { action: 'command', command: 'npm i', denyByDefault: true },
     });
   });
 
-  it('answers approvals waiting as the session enters yolo, as yolo answers them', async () => {
-    const { session, until } = await open((onEvent) => provider.start({ cwd: '/work' }, onEvent));
-    const within = fake().request(permission({ CommandLine: 'npm test' }));
-    const beyond = fake().request(permission({ CommandLine: 'npm i', BypassSandbox: true }));
-    await until((seen) => seen.filter((event) => event.type === 'approval-requested').length === 2);
+  it('allows the approvals waiting as the session enters yolo, and those that come before its process moves', async () => {
+    const { session, events, until } = await open((onEvent) =>
+      provider.start({ cwd: '/work' }, onEvent),
+    );
+    await session.send('Install it', []);
+    await fake().prompted();
+    const waiting = fake().request(permission({ CommandLine: 'npm i', BypassSandbox: true }));
+    await until((seen) => seen.some((event) => event.type === 'approval-requested'));
     await session.setMode('yolo');
-    await expect(within).resolves.toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
-    await expect(beyond).resolves.toEqual({ outcome: { outcome: 'selected', optionId: 'deny' } });
+    await expect(waiting).resolves.toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
+    await expect(fake().request(permission({ CommandLine: 'npm test' }))).resolves.toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow' },
+    });
+    // The turn still runs in the process it started in; the move waits for its end.
+    expect(fakes).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'approval-requested')).toHaveLength(1);
   });
 
   it('allows a call of the app’s own tools without asking, since the broker authorizes it', async () => {
@@ -664,42 +670,63 @@ describe('approvals and questions', () => {
   });
 });
 
-describe('sandbox switches', () => {
-  it('moves to a new process to switch to or from full access, which resumes the session, and switches between read-only and workspace-write in place', async () => {
+describe('mode switches', () => {
+  it('moves to a new process to switch between auto and yolo, which resumes the session, and takes no sandbox level (ADR-0043)', async () => {
     autoOffered = true;
-    const { session } = await open((onEvent) => provider.start({ cwd: '/work' }, onEvent));
-    await session.setSandbox('full-access');
+    const { session, events } = await open((onEvent) => provider.start({ cwd: '/work' }, onEvent));
+    await session.setMode('yolo');
     expect(fakes).toHaveLength(2);
     expect(fake(0).stopped).toBe(true);
-    expect(fake(1).args).toEqual(['acp', '--process-per-session']);
+    expect(fake(1).args).toEqual([
+      'acp',
+      '--process-per-session',
+      '--dangerously-skip-permissions',
+    ]);
     expect(fake(1).paramsOf('session/resume')[0]).toMatchObject({ sessionId: 'agy-1' });
-    await session.setSandbox('read-only');
+    expect(fake(1).paramsOf('session/set_mode')).toEqual([]);
+    expect(events.filter((event) => event.type === 'settings').at(-1)).toEqual({
+      type: 'settings',
+      sandbox: 'full-access',
+    });
+    await session.setMode('auto');
     expect(fakes).toHaveLength(3);
     expect(fake(2).args).toEqual(['acp', '--process-per-session', '--sandbox']);
-    // Read-only runs Antigravity's default mode; workspace-write its auto mode, in place.
-    await session.setSandbox('workspace-write');
-    expect(fakes).toHaveLength(3);
     expect(
       fake(2)
         .paramsOf('session/set_mode')
         .map((params) => params.modeId),
     ).toEqual(['auto']);
+    await expect(session.setSandbox('read-only')).rejects.toThrow('takes no sandbox level');
+    expect(fakes).toHaveLength(3);
+  });
+
+  it('moves once the turn ends when asked for during one', async () => {
+    const { session, until } = await open((onEvent) => provider.start({ cwd: '/work' }, onEvent));
+    await session.send('Go on', []);
+    await fake().prompted();
+    await session.setMode('yolo');
+    expect(fakes).toHaveLength(1);
+    fake().endPrompt('end_turn');
+    await until(() => fakes.length === 2 && fake(1).methods().includes('session/resume'));
+    expect(fake(1).args).toContain('--dangerously-skip-permissions');
   });
 });
 
 describe('a failed switch', () => {
-  it('goes back to the level the session’s process served, and keeps every model’s thinking levels', async () => {
-    failResumeUnsandboxed = true;
-    const { session, events } = await open((onEvent) =>
-      provider.start({ cwd: '/work', sandbox: 'read-only' }, onEvent),
-    );
-    await expect(session.setSandbox('full-access')).rejects.toThrow('could not resume');
-    // The new process failed; the session runs again at read-only, under the sandbox.
+  it('goes back to the mode the session’s process served, and keeps every model’s thinking levels', async () => {
+    failResumeInYolo = true;
+    const { session, events } = await open((onEvent) => provider.start({ cwd: '/work' }, onEvent));
+    await expect(session.setMode('yolo')).rejects.toThrow('could not resume');
+    // The new process failed; the session runs again in auto, under the sandbox.
     expect(fakes).toHaveLength(3);
     expect(fake(2).args).toContain('--sandbox');
+    expect(events.filter((event) => event.type === 'mode').at(-1)).toEqual({
+      type: 'mode',
+      mode: 'auto',
+    });
     expect(events.filter((event) => event.type === 'settings').at(-1)).toEqual({
       type: 'settings',
-      sandbox: 'read-only',
+      sandbox: 'workspace-write',
     });
     const models = events.filter((event) => event.type === 'models').at(-1);
     expect(models).toMatchObject({

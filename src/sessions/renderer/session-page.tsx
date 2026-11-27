@@ -18,6 +18,7 @@ import {
   type RenderToolCall,
   type RenderToolExtra,
 } from './timeline';
+import { takesSandboxLevel } from '../shared/levels';
 import { TimelineActionsContext, timelineActions } from './timeline-actions';
 import { rememberChoice, useOffers, useProviders, useRemembered } from './use-offers';
 import { useSession } from './use-session';
@@ -192,6 +193,11 @@ export function SessionPage({
     chosen?.provider ??
     starting?.settings.provider ??
     (sessionId === null ? startsWith : (remembered?.provider ?? firstChoice.provider));
+  // A provider with one setting of its own takes no sandbox level, so its sessions leave the level the
+  // folder remembers as it was (ADR-0043).
+  const ownSetting = !takesSandboxLevel(provider);
+  const levelToKeep = (level: SandboxLevel): SandboxLevel =>
+    ownSetting ? (remembered?.sandbox ?? firstChoice.sandbox) : level;
   // The session's own settings: those it runs with, or those it last had.
   const own: Choice = {
     provider,
@@ -333,7 +339,7 @@ export function SessionPage({
             gateway,
             model: startModel,
             effort,
-            sandbox,
+            sandbox: levelToKeep(sandbox),
           });
           onStarted(id);
         },
@@ -359,7 +365,7 @@ export function SessionPage({
             gateway,
             model: chosenModel,
             effort: chosenEffort,
-            sandbox,
+            sandbox: levelToKeep(sandbox),
           });
         },
         (error: unknown) => {
@@ -389,7 +395,7 @@ export function SessionPage({
       gateway,
       model: inUse,
       effort: level,
-      sandbox,
+      sandbox: levelToKeep(sandbox),
       ...next,
     });
   };
@@ -418,7 +424,7 @@ export function SessionPage({
       if (!choosing) {
         bridge.setMode(sessionId, mode).catch(report);
       } else if (mode === 'yolo') {
-        bridge.confirmYolo().then((confirmed) => {
+        bridge.confirmYolo(provider).then((confirmed) => {
           if (confirmed) change({ mode });
         }, report);
       } else {
@@ -517,16 +523,35 @@ export function SessionPage({
       label: t('sessions.page.mode'),
       summary: true,
       value: settings.mode,
-      options: modes.map((mode) => ({ value: mode, label: t(`sessions.mode.${mode}`) })),
+      // A provider with one setting of its own says in its list what each mode does there (ADR-0043).
+      options: modes.map((mode) =>
+        ownSetting
+          ? {
+              value: mode,
+              label: t(mode === 'auto' ? 'sessions.mode.ownAuto' : 'sessions.mode.ownYolo', {
+                provider: providerName,
+              }),
+              short: t(`sessions.mode.${mode}`),
+            }
+          : { value: mode, label: t(`sessions.mode.${mode}`) },
+      ),
       onChange: switchTo.mode,
     },
-    {
-      label: t('sessions.page.sandbox'),
-      summary: true,
-      value: settings.sandbox,
-      options: sandboxes.map((level) => ({ value: level, label: t(`sessions.sandbox.${level}`) })),
-      onChange: switchTo.sandbox,
-    },
+    // A provider with one setting of its own takes no sandbox level (ADR-0043).
+    ...(ownSetting
+      ? []
+      : [
+          {
+            label: t('sessions.page.sandbox'),
+            summary: true,
+            value: settings.sandbox,
+            options: sandboxes.map((level) => ({
+              value: level,
+              label: t(`sessions.sandbox.${level}`),
+            })),
+            onChange: switchTo.sandbox,
+          },
+        ]),
   ];
 
   const notice = accounts?.notice(provider) ?? null;

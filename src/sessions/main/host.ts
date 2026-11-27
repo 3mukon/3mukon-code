@@ -45,6 +45,7 @@ import type {
   StartOptions,
 } from './provider';
 import { CHILD_LIMIT, MESSAGE_LIMITS, type InboxNotice, type InboxReport } from '../shared/inbox';
+import { countedLevel, takesSandboxLevel, wider } from '../shared/levels';
 import { memoryInboxStorage, SessionInboxes, type InboxMessage } from './inbox';
 import type { SessionRecord, SessionRecords } from './records';
 import { cleanTitle, ranAWhile, TITLE_ATTEMPTS, titlePrompt, type TurnProgress } from './titles';
@@ -55,9 +56,6 @@ import { matchOf, memoryTextStorage, textOf, type TextStorage } from './texts';
 // How long a child that ends itself waits before it closes, so that the result of its call reaches
 // it.
 const SELF_END_MS = 1_000;
-
-// The sandbox levels from the narrowest to the widest.
-const SANDBOX_ORDER: readonly SandboxLevel[] = ['read-only', 'workspace-write', 'full-access'];
 
 // How long a provider has to list its models before the list fails.
 const MODELS_TIMEOUT_MS = 60_000;
@@ -279,7 +277,12 @@ export class SessionHost {
         gateway: options.gateway ?? null,
         model: options.model ?? null,
         effort: options.effort ?? null,
-        sandbox: options.sandbox ?? 'workspace-write',
+        // A provider with one setting of its own counts as the level its mode gives (ADR-0043).
+        sandbox: countedLevel(
+          providerId,
+          options.mode ?? 'auto',
+          options.sandbox ?? 'workspace-write',
+        ),
       },
       state: initialSessionState(),
       seq: 0,
@@ -302,7 +305,11 @@ export class SessionHost {
       this.followWaiting(hosted);
       if (this.isClosing()) throw new Error('The app is closing.');
       hosted.session = await provider.start(
-        { ...options, ...(hosted.automation ? { toolset: hosted.automation.toolset } : {}) },
+        {
+          ...options,
+          sandbox: hosted.chosen.sandbox,
+          ...(hosted.automation ? { toolset: hosted.automation.toolset } : {}),
+        },
         this.listener(hosted, false),
       );
       if (this.isClosing()) {
@@ -385,6 +392,11 @@ export class SessionHost {
     return this.sessions.has(id);
   }
 
+  // The session's provider, or undefined for a session the host does not have.
+  providerOf(id: string): ProviderId | undefined {
+    return this.sessions.get(id)?.provider;
+  }
+
   title(id: string): string | undefined {
     const hosted = this.sessions.get(id);
     return hosted && (this.titleOf(hosted) ?? hosted.summary?.title);
@@ -435,10 +447,14 @@ export class SessionHost {
     this.recordAnswer(id, requestId, answer);
   }
 
+  // A provider with one setting of its own takes the level its new mode counts as (ADR-0043).
   async setMode(id: string, mode: PermissionMode): Promise<void> {
     const hosted = this.sessions.get(id);
     const before = hosted && this.policy(hosted);
-    if (hosted && before) hosted.automation?.setPolicy({ ...before, mode });
+    if (hosted && before) {
+      const sandbox = countedLevel(hosted.provider, mode, before.sandbox);
+      hosted.automation?.setPolicy({ mode, sandbox });
+    }
     try {
       await this.session(id).setMode(mode);
     } catch (error) {
@@ -459,8 +475,12 @@ export class SessionHost {
     return this.session(id).setEffort(effort);
   }
 
+  // A provider with one setting of its own takes no level (ADR-0043).
   async setSandbox(id: string, sandbox: SandboxLevel): Promise<void> {
     const hosted = this.sessions.get(id);
+    if (hosted !== undefined && !takesSandboxLevel(hosted.provider)) {
+      throw new Error('This session’s provider takes no sandbox level: its mode decides.');
+    }
     const before = hosted && this.policy(hosted);
     if (hosted && before) hosted.automation?.setPolicy({ ...before, sandbox });
     try {
@@ -961,10 +981,8 @@ export class SessionHost {
   }
 
   private policy(hosted: Hosted): { mode: PermissionMode; sandbox: SandboxLevel } {
-    return {
-      mode: hosted.state.mode ?? hosted.chosen.mode,
-      sandbox: hosted.state.sandbox ?? hosted.chosen.sandbox,
-    };
+    const { mode, sandbox } = this.settingsOf(hosted);
+    return { mode, sandbox };
   }
 
   // What the toolset's session tools reach of the sessions (ADR-0036), for the session each call
@@ -1122,11 +1140,8 @@ export class SessionHost {
     const prompt = request.prompt.trim();
     if (prompt === '') throw new Error('A child needs a first message that says its task.');
     const own = this.settingsOf(parent);
-    const sandbox = request.sandbox ?? own.sandbox;
-    if (SANDBOX_ORDER.indexOf(sandbox) > SANDBOX_ORDER.indexOf(own.sandbox)) {
-      throw new Error(`A child cannot have a wider sandbox than its parent’s, ${own.sandbox}.`);
-    }
     const providerId = request.provider ?? parent.provider;
+    const sandbox = childLevel(providerId, request.sandbox, own.sandbox);
     const same = providerId === parent.provider;
     const gateway = same ? own.gateway : null;
     const model = request.model ?? (same ? own.model : null);
@@ -1285,15 +1300,17 @@ export class SessionHost {
     );
   }
 
-  // The settings the session has: those it reported, or else those it started or resumed with.
+  // The settings the session has: those it reported, or else those it started or resumed with, its
+  // level the one it counts as (ADR-0043).
   private settingsOf(hosted: Hosted): SessionSettings {
     const { state, chosen } = hosted;
+    const mode = state.mode ?? chosen.mode;
     return {
-      mode: state.mode ?? chosen.mode,
+      mode,
       gateway: state.gateway === undefined ? chosen.gateway : state.gateway,
       model: state.model === undefined ? chosen.model : state.model,
       effort: state.effort === undefined ? chosen.effort : state.effort,
-      sandbox: state.sandbox ?? chosen.sandbox,
+      sandbox: countedLevel(hosted.provider, mode, state.sandbox ?? chosen.sandbox),
     };
   }
 
@@ -1581,6 +1598,35 @@ function withoutSecrets(
 }
 
 // A session as the session tools list it.
+// The level a child starts at: the one its parent asks for, or else the parent's own, never wider than
+// the parent's (ADR-0036). A child on a provider with one setting of its own runs in auto, and so at the
+// level its auto counts as, which its parent can neither choose nor narrow (ADR-0043).
+function childLevel(
+  provider: ProviderId,
+  asked: SandboxLevel | undefined,
+  parents: SandboxLevel,
+): SandboxLevel {
+  if (!takesSandboxLevel(provider)) {
+    const level = countedLevel(provider, 'auto', parents);
+    if (asked !== undefined && asked !== level) {
+      throw new Error(
+        `A child on ${provider} takes no sandbox level: it runs ${provider}’s own auto mode, which counts as ${level}.`,
+      );
+    }
+    if (wider(level, parents)) {
+      throw new Error(
+        `A child on ${provider} counts as ${level}, wider than your sandbox level, ${parents}, so you cannot start one.`,
+      );
+    }
+    return level;
+  }
+  const level = asked ?? parents;
+  if (wider(level, parents)) {
+    throw new Error(`A child cannot have a wider sandbox than its parent’s, ${parents}.`);
+  }
+  return level;
+}
+
 function coordinated(summary: SessionSummary): CoordinatedSession {
   return {
     id: summary.id,

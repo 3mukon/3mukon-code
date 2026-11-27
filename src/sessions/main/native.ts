@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import { app, clipboard, ClipboardItem, dialog, type BrowserWindow } from 'electron';
 import type { Translate } from '../../i18n/main/i18n';
 import type { Prompts } from '../../ui/shared/prompts';
-import type { MessageImage } from '../shared/events';
+import type { MessageImage, ProviderId } from '../shared/events';
 import { imageExtension } from '../shared/images';
+import { takesSandboxLevel } from '../shared/levels';
 import type { ImageAction, SessionAction, SessionSummary } from '../shared/sessions';
 import type { SessionsMenuUi } from './host';
 
@@ -12,7 +13,8 @@ import type { SessionsMenuUi } from './host';
 // what the timeline offers for an image; and a session's menu, with what it asks before archiving a
 // session that is working or removing one.
 export interface SessionsUi extends SessionsMenuUi {
-  confirmYolo(): Promise<boolean>;
+  // The provider's words where it has one setting of its own (ADR-0043).
+  confirmYolo(provider?: ProviderId): Promise<boolean>;
   // Copy Image and Save Image As… in a menu at the pointer; resolves with the choice, or null.
   imageMenu(): Promise<ImageAction | null>;
   // Saves the image where the user chooses in a sheet, Downloads at first; resolves with whether they
@@ -46,8 +48,14 @@ export function windowSessionsUi(
       ? t(`providers.${session.provider}`)
       : session.title;
   return {
-    confirmYolo: () =>
-      confirm(t('sessions.yolo.message'), t('sessions.yolo.detail'), t('sessions.yolo.confirm')),
+    confirmYolo: (provider) =>
+      confirm(
+        t('sessions.yolo.message'),
+        provider === undefined || takesSandboxLevel(provider)
+          ? t('sessions.yolo.detail')
+          : t('sessions.yolo.ownDetail', { provider: t(`providers.${provider}`) }),
+        t('sessions.yolo.confirm'),
+      ),
     sessionMenu: async (session) =>
       oneOf<SessionAction>(
         await prompts.menu([

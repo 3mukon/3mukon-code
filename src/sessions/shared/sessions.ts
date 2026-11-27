@@ -165,9 +165,9 @@ export interface SessionsBridge {
   // Remembers the settings a session in the folder started with or switched to, for all the day
   // folders when it is one.
   rememberChoice(folder: string, choice: RememberedChoice): Promise<void>;
-  // Asks the user to confirm yolo for a session page whose session has not started; resolves with
-  // whether they did.
-  confirmYolo(): Promise<boolean>;
+  // Asks the user to confirm yolo for a session page whose session has not started, on the provider
+  // chosen; resolves with whether they did.
+  confirmYolo(provider: ProviderId): Promise<boolean>;
   // Starts a session with its first message, and resolves with the app's id for it.
   start(request: StartRequest): Promise<string>;
   // Sends a running session a message and its images, which start a turn, or go to the running one.

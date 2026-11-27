@@ -62,6 +62,7 @@
     "yolo": {
       "message": "Run this session in yolo mode?",
       "detail": "In yolo mode the agent carries out every action without asking, and nothing reviews it first. Its sandbox still applies.",
+      "ownDetail": "In yolo mode {{provider}} carries out every action without asking, and nothing reviews it first. No sandbox applies: its commands reach everything you can.",
       "confirm": "Use Yolo"
     },
     "menu": {
@@ -86,7 +87,9 @@
     },
     "mode": {
       "auto": "Auto",
-      "yolo": "Yolo"
+      "yolo": "Yolo",
+      "ownAuto": "Auto: {{provider}}’s own review decides each action, and may run a command outside its sandbox",
+      "ownYolo": "Yolo: {{provider}} runs every action without asking, and without a sandbox"
     },
     "page": {
       "message": "Message",

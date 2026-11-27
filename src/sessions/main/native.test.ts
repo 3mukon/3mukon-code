@@ -92,6 +92,18 @@ describe('windowSessionsUi', () => {
     expect(await windowSessionsUi(window, fakePrompts(null).prompts, t).confirmYolo()).toBe(false);
   });
 
+  it('says before yolo that a provider with one setting of its own runs without a sandbox, and that the others’ sandbox applies (ADR-0043)', async () => {
+    const { prompts, questions } = fakePrompts(null, 'confirm');
+    const ui = windowSessionsUi(window, prompts, t);
+    await ui.confirmYolo('antigravity');
+    await ui.confirmYolo('codex-cli');
+    expect(questions.map((question) => question.detail)).toEqual([
+      expect.stringContaining('No sandbox applies') as string,
+      expect.stringContaining('Its sandbox still applies') as string,
+    ]);
+    expect(questions[0]?.detail).toContain('Antigravity');
+  });
+
   it('offers Copy Image and Save Image As… in an image’s menu', async () => {
     const { prompts, menus } = fakePrompts('save');
     expect(await windowSessionsUi(window, prompts, t).imageMenu()).toBe('save');

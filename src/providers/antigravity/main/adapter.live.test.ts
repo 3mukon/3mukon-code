@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
@@ -16,14 +16,16 @@ import { createAntigravityProvider } from './adapter';
 // four short turns. Only `corepack pnpm run test:live` runs it, never the check command: it needs
 // Antigravity signed in on an account Google serves, and it uses a little of the account's quota. It
 // runs the pinned build, which it downloads from Google's address once per version into node_modules'
-// cache. Antigravity's terminal sandbox lets commands write in temporary folders, so the session's
-// folder lies outside them, among the user's caches, and is removed afterwards.
+// cache. The session's folder lies in a folder of its own among the user's caches, outside the
+// temporary folders, beside which yolo writes a file; both are removed afterwards.
 
-const cwd = realpathSync(
+const root = realpathSync(
   mkdtempSync(join(homedir(), 'Library', 'Caches', '3mukon-code-antigravity-live-')),
 );
+const cwd = join(root, 'work');
+mkdirSync(cwd);
 afterAll(() => {
-  rmSync(cwd, { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true });
 });
 
 // Folds a session's events into its state, so that the test can wait for a condition on it.
@@ -71,7 +73,7 @@ function messages(state: SessionState, role: 'user' | 'agent'): string[] {
 const FIRST =
   'Use your question tool to ask me exactly one question, "Which color?", with the options Red and Blue. Then reply with one word: the color I chose.';
 
-it('asks its own question in yolo, refuses an edit at read-only in yolo, edits at workspace-write, resumes in a new process at full access, and replays', async () => {
+it('asks its own question in yolo, runs a command outside the folder there without asking, edits in auto in a new process, and replays (ADR-0043)', async () => {
   const provider = createAntigravityProvider({ install: pinnedInstall('antigravity') });
   expect(await provider.listGateways()).toEqual([]);
   expect((await provider.listModels(null)).length).toBeGreaterThan(0);
@@ -101,8 +103,9 @@ it('asks its own question in yolo, refuses an edit at read-only in yolo, edits a
       }
     },
   );
+  // Yolo counts as full access, whatever level was asked for.
   expect(live.state.mode).toBe('yolo');
-  expect(live.state.sandbox).toBe('read-only');
+  expect(live.state.sandbox).toBe('full-access');
 
   // Antigravity's question tool asks in yolo, and its answer reaches the agent.
   await session.send(FIRST);
@@ -110,23 +113,16 @@ it('asks its own question in yolo, refuses an edit at read-only in yolo, edits a
   expect(live.events.filter((event) => event.type === 'question-asked')).toHaveLength(1);
   expect(messages(live.state, 'agent').at(-1)?.toLowerCase()).toContain('blue');
 
-  // At read-only an edit is beyond the level, which yolo denies without asking (ADR-0040); Antigravity
-  // then ends the turn.
+  // Yolo runs a command that writes outside the session's folder, and asks nothing.
   await session.send(
-    'Use your file tools to create a file named blocked.txt that contains exactly: blocked. Do not try any other way.',
+    'Use your shell tool to run exactly `touch ../outside.txt`, then reply with one word: done',
   );
   await live.until((_, events) => turnsEnded(events) === 2);
-  expect(
-    live.events.some(
-      (event) => event.type === 'tool' && event.kind === 'edit' && event.status === 'failed',
-    ),
-  ).toBe(true);
+  expect(existsSync(join(root, 'outside.txt'))).toBe(true);
   expect(live.events.some((event) => event.type === 'approval-requested')).toBe(false);
-  expect(existsSync(join(cwd, 'blocked.txt'))).toBe(false);
 
-  // Workspace-write keeps the process, and in auto the edit goes through: Antigravity's auto mode
-  // approves it where the account has it, and otherwise the user, who allows it here.
-  await session.setSandbox('workspace-write');
+  // Auto moves the session to a new process, under the sandbox, and the edit goes through: Antigravity's
+  // auto mode approves it where the account has it, and otherwise the user, who allows it here.
   await session.setMode('auto');
   expect(live.state.sandbox).toBe('workspace-write');
   await session.send(
@@ -135,8 +131,7 @@ it('asks its own question in yolo, refuses an edit at read-only in yolo, edits a
   await live.until((_, events) => turnsEnded(events) === 3);
   expect(readFileSync(join(cwd, 'notes.txt'), 'utf8').trim()).toBe('ok');
 
-  // Full access moves the session to a new process, which resumes it with its conversation.
-  await session.setSandbox('full-access');
+  // The new process resumed the session with its conversation.
   await session.send('What one word did you reply with last? Answer with that word alone.');
   await live.until((_, events) => turnsEnded(events) === 4);
   expect(messages(live.state, 'agent').at(-1)?.toLowerCase()).toContain('done');

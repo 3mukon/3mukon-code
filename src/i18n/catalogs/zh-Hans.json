@@ -60,6 +60,7 @@
     "yolo": {
       "message": "以 yolo 模式运行此会话？",
       "detail": "在 yolo 模式下，代理执行每个操作都不会询问，也不会事先经过审查。沙盒仍然有效。",
+      "ownDetail": "在 yolo 模式下，{{provider}} 执行每个操作都不会询问，也不会事先经过审查。没有沙盒限制：它的命令能访问你能访问的一切。",
       "confirm": "使用 Yolo"
     },
     "menu": {
@@ -84,7 +85,9 @@
     },
     "mode": {
       "auto": "自动",
-      "yolo": "Yolo"
+      "yolo": "Yolo",
+      "ownAuto": "自动：由 {{provider}} 自己的审查决定每个操作，并可能在沙盒之外运行命令",
+      "ownYolo": "Yolo：{{provider}} 执行每个操作都不会询问，也不使用沙盒"
     },
     "page": {
       "message": "输入消息",

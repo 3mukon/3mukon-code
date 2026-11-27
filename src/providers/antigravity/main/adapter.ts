@@ -52,12 +52,12 @@ import {
   selectPresentationNotices,
 } from '../../../sessions/shared/host-context';
 import { inboxContext, INBOX_CONTEXT_URI } from '../../../sessions/shared/inbox';
+import { countedLevel } from '../../../sessions/shared/levels';
 import { registeredTool } from '../../../sessions/shared/toolset-result';
 import { isSignInError, readAntigravityAccount } from './account';
 import { spawnAgy, type AgyProcess, type StartAgy } from './process';
 import {
   approvalResult,
-  beyondLevel,
   cancelledForm,
   cancelledPermission,
   formQuestion,
@@ -74,16 +74,16 @@ import {
   Translator,
 } from './translate';
 
-// A session's process at each of the app's sandbox levels (ADR-0040): `agy acp`, serving the session
-// from a worker of its own, the only form in which it takes the app's toolset over HTTP, with its
-// terminal sandbox at read-only and workspace-write. The sandbox holds for the whole process, so a
-// switch to or from full access needs a new one.
-function sessionArgs(sandbox: SandboxLevel): string[] {
-  return ['acp', '--process-per-session', ...(sandboxed(sandbox) ? ['--sandbox'] : [])];
-}
-
-function sandboxed(sandbox: SandboxLevel): boolean {
-  return sandbox !== 'full-access';
+// A session's process in each of its modes (ADR-0043): `agy acp`, serving the session from a worker of
+// its own, the only form in which it takes the app's toolset over HTTP; in auto with the terminal
+// sandbox, which Antigravity's auto mode needs, and in yolo approving every request itself, without a
+// sandbox. The flags hold for the whole process, so a switch between the two needs a new one.
+function sessionArgs(mode: PermissionMode): string[] {
+  return [
+    'acp',
+    '--process-per-session',
+    ...(mode === 'yolo' ? ['--dangerously-skip-permissions'] : ['--sandbox']),
+  ];
 }
 
 // A probe's process, which starts no turn: `agy acp` alone.
@@ -96,17 +96,20 @@ export function launchEnv(binary: Binary): Record<string, string> {
   return binary.source === 'app' ? { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' } : {};
 }
 
-// Antigravity's own modes behind the app's (ADR-0040): in auto, its auto mode where the session's modes
-// offer it, except at read-only, where it would edit without asking; otherwise its default mode, which
-// asks before edits and commands.
+// Antigravity's own mode behind the session's (ADR-0043): in auto its auto mode, where the session's
+// modes offer it, and otherwise its default mode, which asks before edits and commands; in yolo its
+// default mode, whose requests the process approves itself.
 const AUTO = 'auto';
 const DEFAULT = 'default';
 
-function agyMode(mode: PermissionMode, sandbox: SandboxLevel, offered: readonly string[]): string {
-  return mode === 'auto' && sandbox !== 'read-only' && offered.includes(AUTO) ? AUTO : DEFAULT;
+function agyMode(mode: PermissionMode, offered: readonly string[]): string {
+  return mode === 'auto' && offered.includes(AUTO) ? AUTO : DEFAULT;
 }
 
 const NO_GATEWAYS = 'Antigravity has no gateways; its models are those of its own sign-in.';
+
+const NO_LEVELS =
+  'Antigravity takes no sandbox level: its mode, auto or yolo, decides what its commands reach.';
 
 // The effort levels the app knows, from the least to the most, in the order a model's are listed.
 const LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -145,15 +148,16 @@ interface Handlers {
   ): Promise<CreateElicitationResponse>;
 }
 
-// An Antigravity process with ACP started on it, and whether it runs the terminal sandbox.
+// An Antigravity process with ACP started on it, and whether it approves every request itself, as it
+// does in yolo.
 interface Agent {
   process: AgyProcess;
   connection: ClientConnection;
   initialize: InitializeResponse;
-  sandboxed: boolean;
+  yolo: boolean;
 }
 
-type Connect = (cwd: string, sandbox: SandboxLevel, handlers: Handlers) => Promise<Agent>;
+type Connect = (cwd: string, mode: PermissionMode, handlers: Handlers) => Promise<Agent>;
 type ProbeConnect = (cwd: string, handlers: Handlers) => Promise<Agent>;
 
 // How the sessions take part in Antigravity's account (ADR-0017): they pass on that a turn failed for
@@ -162,7 +166,7 @@ interface AccountLink {
   hear(news: AccountNews): void;
 }
 
-// Antigravity through `agy acp` (ADR-0040), on whatever sign-in Antigravity itself holds. Antigravity
+// Antigravity through `agy acp` (ADR-0043), on whatever sign-in Antigravity itself holds. Antigravity
 // asks its questions through its own question tool, as ACP form elicitations; the app's automation
 // tools use the session-bound HTTP toolset.
 export function createAntigravityProvider(
@@ -174,8 +178,8 @@ export function createAntigravityProvider(
   const sessionConnect = async (): Promise<Connect> => {
     const start =
       'startAgy' in options ? options.startAgy : fromBinary(await options.install.prepare());
-    return (cwd, sandbox, handlers) =>
-      connectAgy(start, cwd, sessionArgs(sandbox), sandboxed(sandbox), handlers, clientVersion);
+    return (cwd, mode, handlers) =>
+      connectAgy(start, cwd, sessionArgs(mode), mode === 'yolo', handlers, clientVersion);
   };
   // A probe runs the binary that runs now, kept from the moment it starts, so that closing ends one still
   // starting.
@@ -316,7 +320,7 @@ async function connectAgy(
   start: StartAgy,
   cwd: string,
   args: string[],
-  inSandbox: boolean,
+  yolo: boolean,
   handlers: Handlers,
   clientVersion: string,
 ): Promise<Agent> {
@@ -342,7 +346,7 @@ async function connectAgy(
       },
       clientInfo: { name: '3mukon-code', title: '3mukon-code', version: clientVersion },
     });
-    return { process, connection, initialize, sandboxed: inSandbox };
+    return { process, connection, initialize, yolo };
   } catch (error) {
     await stopAgent({ process, connection });
     throw error;
@@ -516,14 +520,16 @@ interface SessionSettings {
   sandbox: SandboxLevel;
 }
 
+// The settings a session starts with, its level the one its mode counts as (ADR-0043).
 function sessionSettings(options: StartOptions): SessionSettings {
   if (options.gateway !== undefined) throw new Error(NO_GATEWAYS);
+  const mode = options.mode ?? 'auto';
   return {
     cwd: options.cwd,
-    mode: options.mode ?? 'auto',
+    mode,
     model: options.model ?? null,
     effort: options.effort ?? null,
-    sandbox: options.sandbox ?? 'workspace-write',
+    sandbox: countedLevel('antigravity', mode, options.sandbox ?? 'workspace-write'),
     ...(options.toolset ? { toolset: options.toolset } : {}),
   };
 }
@@ -533,7 +539,8 @@ function sessionSettings(options: StartOptions): SessionSettings {
 // given for the session.
 interface Attached {
   agent: Agent;
-  level: SandboxLevel;
+  // The session's mode the process serves.
+  served: PermissionMode;
   generation: number;
   sessionId: string;
   configOptions: SessionConfigOption[];
@@ -547,7 +554,6 @@ type Pending =
   | {
       kind: 'approval';
       options: PermissionOption[];
-      beyond: boolean;
       resolve: (result: RequestPermissionResponse) => void;
     }
   | { kind: 'question'; fields: FormField[]; resolve: (result: CreateElicitationResponse) => void };
@@ -640,8 +646,8 @@ class AntigravitySession implements ProviderSession {
   private currentMode: string | undefined;
   // ACP's list of models from the last answer that gave one, which a resume's answer leaves out.
   private listed: unknown;
-  // The level the current process serves, to which a failed switch goes back.
-  private servedLevel: SandboxLevel = 'workspace-write';
+  // The mode the current process serves, to which a failed switch goes back.
+  private servedMode: PermissionMode = 'auto';
   private mcpServers: NewSessionRequest['mcpServers'] = [];
   private readonly pending = new Map<string, Pending>();
   // While Antigravity replays a session it loads, the user's own messages come from it; otherwise from
@@ -654,8 +660,9 @@ class AntigravitySession implements ProviderSession {
   private prompts = 0;
   private closing = false;
   private closed = false;
-  // A sandbox level asked for during a turn, which needs a new process once the turn ends.
-  private sandboxPending = false;
+  // A mode asked for during a turn that the current process does not serve, which needs a new process
+  // once the turn ends.
+  private modePending = false;
   // The process switch under way, which a message waits for; it never rejects.
   private switching: Promise<void> | null = null;
 
@@ -821,20 +828,34 @@ class AntigravitySession implements ProviderSession {
     return Promise.resolve();
   }
 
-  // The mode takes effect at once. Approvals already waiting when the session enters yolo are answered
-  // as yolo answers them: allowed within the session's level, denied beyond it.
+  // Auto and yolo run in processes of their own (ADR-0043), so a switch between them moves the session
+  // to a new process, between turns: at once when no turn runs, and otherwise once the turn ends. The
+  // session's level follows its mode. Entering yolo allows the approvals already waiting, and until the
+  // move the adapter allows those that come, as yolo allows every request.
   async setMode(mode: PermissionMode): Promise<void> {
     await this.ready();
     this.settings.mode = mode;
-    await this.applyMode();
+    this.settings.sandbox = countedLevel('antigravity', mode, this.settings.sandbox);
     this.onEvent({ type: 'mode', mode });
-    if (mode !== 'yolo') return;
+    this.onEvent({ type: 'settings', sandbox: this.settings.sandbox });
+    if (mode === 'yolo') this.allowWaiting();
+    if ((mode === 'yolo') === this.agent.yolo) {
+      await this.applyMode();
+      return;
+    }
+    if (this.turnRunning) {
+      this.modePending = true;
+      return;
+    }
+    await this.switchProcess();
+  }
+
+  // The approvals waiting as the session enters yolo, allowed as yolo allows every request.
+  private allowWaiting(): void {
     for (const [requestId, pending] of this.pending) {
       if (pending.kind !== 'approval') continue;
       this.pending.delete(requestId);
-      pending.resolve(
-        approvalResult(pending.options, { decision: pending.beyond ? 'deny' : 'allow-once' }),
-      );
+      pending.resolve(approvalResult(pending.options, { decision: 'allow-once' }));
       this.onEvent({ type: 'request-resolved', requestId, outcome: 'answered' });
     }
   }
@@ -859,25 +880,9 @@ class AntigravitySession implements ProviderSession {
     this.onEvent({ type: 'settings', effort });
   }
 
-  // The terminal sandbox holds for a whole process, so a switch to or from full access moves the
-  // session to a new process, between turns: at once when no turn runs, and otherwise once the turn
-  // ends. A switch between read-only and workspace-write changes only Antigravity's mode and the
-  // adapter's answers (ADR-0040), at once.
-  async setSandbox(sandbox: SandboxLevel): Promise<void> {
-    if (this.closed) throw new Error('The session is closed.');
-    this.settings.sandbox = sandbox;
-    this.onEvent({ type: 'settings', sandbox });
-    if (sandboxed(sandbox) === this.agent.sandboxed) {
-      await this.ready();
-      await this.applyMode();
-      this.servedLevel = sandbox;
-      return;
-    }
-    if (this.turnRunning) {
-      this.sandboxPending = true;
-      return;
-    }
-    await this.switchSandbox();
+  // Antigravity takes no sandbox level (ADR-0043): its mode decides what its commands reach.
+  setSandbox(): Promise<void> {
+    return Promise.reject(new Error(NO_LEVELS));
   }
 
   setGateway(gateway: string | null): Promise<void> {
@@ -904,12 +909,12 @@ class AntigravitySession implements ProviderSession {
     await stopAgent(this.agent);
   }
 
-  // Starts a process at the level and creates the session on it, or loads or resumes it there: loading
+  // Starts a process for the mode and creates the session on it, or loads or resumes it there: loading
   // replays the session's history, resuming replays nothing. The process's handlers act from the start,
   // so that a replay reaches the session.
   private async attach(
     existing: { load: boolean; resumeId: string } | null,
-    sandbox: SandboxLevel = this.settings.sandbox,
+    mode: PermissionMode = this.settings.mode,
   ): Promise<Attached> {
     const generation = ++this.generations;
     this.generation = generation;
@@ -918,7 +923,7 @@ class AntigravitySession implements ProviderSession {
     this.access = access;
     this.hostEnabled = false;
     if (existing !== null) this.sessionId = existing.resumeId;
-    const agent = await this.connect(this.settings.cwd, sandbox, this.handlers(generation)).catch(
+    const agent = await this.connect(this.settings.cwd, mode, this.handlers(generation)).catch(
       (error: unknown) => {
         access?.close();
         throw error;
@@ -963,7 +968,7 @@ class AntigravitySession implements ProviderSession {
         const response = await agent.connection.agent.request('session/new', params);
         return {
           agent,
-          level: sandbox,
+          served: mode,
           generation,
           sessionId: response.sessionId,
           configOptions: response.configOptions ?? [],
@@ -979,7 +984,7 @@ class AntigravitySession implements ProviderSession {
         : await agent.connection.agent.request('session/resume', { ...params, sessionId });
       return {
         agent,
-        level: sandbox,
+        served: mode,
         generation,
         sessionId,
         configOptions: response.configOptions ?? [],
@@ -1008,7 +1013,7 @@ class AntigravitySession implements ProviderSession {
     this.modes = modes;
     this.currentMode = currentMode;
     this.mcpServers = attached.mcpServers;
-    this.servedLevel = attached.level;
+    this.servedMode = attached.served;
     if (listed !== undefined) this.listed = listed;
     this.catalog = catalogOf(configOptions, this.listed);
     void agent.process.ended.then((error) => {
@@ -1055,10 +1060,10 @@ class AntigravitySession implements ProviderSession {
     await this.applyMode();
   }
 
-  // Antigravity's mode behind the session's mode and level (ADR-0040), set where it differs. Should
-  // Antigravity refuse its auto mode after all, its default mode runs.
+  // Antigravity's mode behind the session's (ADR-0043), set where it differs. Should Antigravity refuse
+  // its auto mode after all, its default mode runs.
   private async applyMode(): Promise<void> {
-    const wanted = agyMode(this.settings.mode, this.settings.sandbox, this.modes);
+    const wanted = agyMode(this.settings.mode, this.modes);
     if (wanted === this.currentMode) return;
     try {
       await this.setAgyMode(wanted);
@@ -1099,8 +1104,8 @@ class AntigravitySession implements ProviderSession {
     if (this.closed) throw new Error('The session is closed.');
   }
 
-  // Sandbox switches run one after another, between turns.
-  private switchSandbox(): Promise<void> {
+  // Process switches run one after another, between turns.
+  private switchProcess(): Promise<void> {
     const switched = (this.switching ?? Promise.resolve()).then(() => this.restart());
     const settled = switched.then(
       () => undefined,
@@ -1113,14 +1118,14 @@ class AntigravitySession implements ProviderSession {
     return switched;
   }
 
-  // Moves the session to a process at its level, which resumes it, so that the session keeps its id and
+  // Moves the session to a process for its mode, which resumes it, so that the session keeps its id and
   // its history. The current process ends first, and its end does not end the session. Should the new
-  // process fail, the session goes back to one at its earlier level. A close asked for during the switch
+  // process fail, the session goes back to one for its earlier mode. A close asked for during the switch
   // ends the session once the new process is up.
   private async restart(): Promise<void> {
-    const target = this.settings.sandbox;
+    const target = this.settings.mode;
     const previous = this.agent;
-    if (this.closed || sandboxed(target) === previous.sandboxed) return;
+    if (this.closed || (target === 'yolo') === previous.yolo) return;
     const existing = { load: false, resumeId: this.sessionId };
     this.generation = 0;
     await stopAgent(previous);
@@ -1128,9 +1133,11 @@ class AntigravitySession implements ProviderSession {
     try {
       attached = await this.attach(existing, target);
     } catch (error) {
-      const earlier = this.servedLevel;
-      this.settings.sandbox = earlier;
-      this.onEvent({ type: 'settings', sandbox: earlier });
+      const earlier = this.servedMode;
+      this.settings.mode = earlier;
+      this.settings.sandbox = countedLevel('antigravity', earlier, this.settings.sandbox);
+      this.onEvent({ type: 'mode', mode: earlier });
+      this.onEvent({ type: 'settings', sandbox: this.settings.sandbox });
       try {
         this.use(await this.attach(existing, earlier));
         await this.applySettings();
@@ -1152,29 +1159,22 @@ class AntigravitySession implements ProviderSession {
   }
 
   // A call of one of the app's own tools is the broker's to authorize, which enforces its own grants
-  // (ADR-0023), so it is allowed here; any other request waits for the user, or in yolo is answered
-  // at once: allowed within the session's level, denied beyond it (ADR-0040).
+  // (ADR-0023), so it is allowed here. In yolo, whose process approves every request itself, one that
+  // still comes, as before the session has moved to that process, is allowed at once; in auto, any
+  // other request waits for the user (ADR-0043).
   private askApproval(
     params: RequestPermissionRequest,
     signal: AbortSignal,
   ): Promise<RequestPermissionResponse> {
-    if (params.sessionId === this.sessionId && this.hostTool(params.toolCall) !== undefined) {
+    const ours =
+      params.sessionId === this.sessionId && this.hostTool(params.toolCall) !== undefined;
+    if (ours || this.settings.mode === 'yolo') {
       return Promise.resolve(approvalResult(params.options, { decision: 'allow-once' }));
     }
     const known = this.translator.callOf(params.toolCall.toolCallId);
-    const beyond = beyondLevel(params.toolCall, this.settings.sandbox, this.settings.cwd, known);
-    const { request, options } = permissionApproval(
-      randomUUID(),
-      params,
-      this.context(),
-      known,
-      beyond,
-    );
-    if (this.settings.mode === 'yolo') {
-      return Promise.resolve(approvalResult(options, { decision: beyond ? 'deny' : 'allow-once' }));
-    }
+    const { request, options } = permissionApproval(randomUUID(), params, this.context(), known);
     return new Promise((resolve) => {
-      this.pending.set(request.id, { kind: 'approval', options, beyond, resolve });
+      this.pending.set(request.id, { kind: 'approval', options, resolve });
       this.whenAborted(signal, request.id);
       this.onEvent({ type: 'approval-requested', request });
     });
@@ -1238,8 +1238,8 @@ class AntigravitySession implements ProviderSession {
     for (const requestId of [...this.pending.keys()]) this.withdraw(requestId);
   }
 
-  // The turn has ended: what Antigravity left open is cancelled, and a level asked for during the turn
-  // takes over.
+  // The turn has ended: what Antigravity left open is cancelled, and a mode asked for during the turn
+  // takes over in its own process.
   private endTurn(event: TurnEnded): void {
     if (this.closed || this.closing || !this.turnRunning) return;
     this.turnRunning = false;
@@ -1247,9 +1247,9 @@ class AntigravitySession implements ProviderSession {
     this.withdrawAll();
     this.translator.endMessage();
     this.onEvent(event);
-    if (this.sandboxPending) {
-      this.sandboxPending = false;
-      this.switchSandbox().catch((error: unknown) => {
+    if (this.modePending) {
+      this.modePending = false;
+      this.switchProcess().catch((error: unknown) => {
         this.onEvent({ type: 'error', message: errorMessage(error) });
       });
     }

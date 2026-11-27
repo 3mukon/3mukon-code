@@ -1,6 +1,3 @@
-import { realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { isAbsolute, relative, resolve } from 'node:path';
 import type {
   CreateElicitationRequest,
   CreateElicitationResponse,
@@ -14,48 +11,13 @@ import type {
   ApprovalRequest,
   QuestionAnswer,
   QuestionRequest,
-  SandboxLevel,
 } from '../../../sessions/shared/events';
 import { fileChange } from './patch';
-import {
-  commandOf,
-  isDiff,
-  namedPaths,
-  pathsOf,
-  record,
-  toolNameOf,
-  type ToolCallInfo,
-} from './translate';
+import { commandOf, isDiff, pathsOf, record, toolNameOf, type ToolCallInfo } from './translate';
 
 interface Context {
   cwd: string;
   now: number;
-}
-
-// The folders a session at workspace-write may write in besides its own: the temporary folders, by
-// the names macOS gives them.
-const TEMPORARY = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
-
-// Whether a permission request lies beyond the session's sandbox level (ADR-0040): at read-only, an
-// edit, or a command that asks to run outside the terminal sandbox; at workspace-write, such a command,
-// or an edit of a file outside the session's folder and the temporary folders; at full access, nothing.
-// Antigravity's run_command asks to leave its sandbox with BypassSandbox in its input.
-export function beyondLevel(
-  call: ToolCallUpdate,
-  sandbox: SandboxLevel,
-  cwd: string,
-  known?: ToolCallInfo,
-): boolean {
-  if (sandbox === 'full-access') return false;
-  if (leavesSandbox(call)) return true;
-  const kind = call.kind ?? known?.kind;
-  if (kind !== 'edit' && kind !== 'delete' && kind !== 'move') return false;
-  if (sandbox === 'read-only') return true;
-  const paths = [...namedPaths(call), ...(known?.paths ?? [])].map((path) => resolve(cwd, path));
-  const folders = [cwd, real(cwd), tmpdir(), real(tmpdir()), ...TEMPORARY];
-  return (
-    paths.length === 0 || paths.some((path) => !folders.some((folder) => within(path, folder)))
-  );
 }
 
 // Whether a call asks to run outside Antigravity's terminal sandbox.
@@ -63,28 +25,15 @@ export function leavesSandbox(call: ToolCallUpdate): boolean {
   return record(call.rawInput)?.BypassSandbox === true;
 }
 
-function within(path: string, folder: string): boolean {
-  const inside = relative(folder, path);
-  return inside === '' || (!inside.startsWith('..') && !isAbsolute(inside));
-}
-
-function real(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
-
 // A tool call Antigravity asks to run, with the answers it offers: allowing and denying once. Its
 // request may show less than the call's own updates did, such as an edit's file and diff, which known
-// then supplies. One beyond the session's level is asked with denial preselected.
+// then supplies. A command that asks to run outside the terminal sandbox is asked with denial
+// preselected (ADR-0043).
 export function permissionApproval(
   id: string,
   params: RequestPermissionRequest,
   context: Context,
   known: ToolCallInfo | undefined,
-  beyond: boolean,
 ): { request: ApprovalRequest; options: PermissionOption[] } {
   const call = params.toolCall;
   const command = commandOf(call.rawInput);
@@ -115,7 +64,7 @@ export function permissionApproval(
       ...(diff === '' ? {} : { diff }),
       ...(action === 'tool' ? { toolName: toolNameOf(call) ?? call.title ?? 'tool' } : {}),
       canAllowForSession: false,
-      denyByDefault: beyond,
+      denyByDefault: leavesSandbox(call),
       requestedAt: context.now,
     },
   };

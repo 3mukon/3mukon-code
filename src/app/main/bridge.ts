@@ -540,7 +540,9 @@ export function serveBridge({
       choices.remember(folder, remembered);
     },
   );
-  handle(channels.sessions.confirmYolo, z.tuple([]), (window) => sessionsUi(window).confirmYolo());
+  handle(channels.sessions.confirmYolo, z.tuple([provider]), (window, chosen) =>
+    sessionsUi(window).confirmYolo(chosen),
+  );
   handle(channels.sessions.copyText, z.tuple([text]), (_window, value) => copyText(value));
   handle(channels.sessions.copyImage, z.tuple([pngImage]), (_window, image) => copyImage(image));
   handle(channels.sessions.saveImage, z.tuple([shownImage]), (window, image) =>
@@ -589,7 +591,8 @@ export function serveBridge({
     sessions.interrupt(session),
   );
   handle(channels.sessions.setMode, z.tuple([id, mode]), async (window, session, next) => {
-    if (next === 'yolo' && !(await sessionsUi(window).confirmYolo())) return false;
+    if (next === 'yolo' && !(await sessionsUi(window).confirmYolo(sessions.providerOf(session))))
+      return false;
     await sessions.setMode(session, next);
     return true;
   });

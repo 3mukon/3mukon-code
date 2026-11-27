@@ -1,14 +1,6 @@
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { CreateElicitationRequest, RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import { describe, expect, it } from 'vitest';
-import {
-  approvalResult,
-  beyondLevel,
-  formQuestion,
-  formResult,
-  permissionApproval,
-} from './requests';
+import { approvalResult, formQuestion, formResult, permissionApproval } from './requests';
 
 const OPTIONS: RequestPermissionRequest['options'] = [
   { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
@@ -17,47 +9,8 @@ const OPTIONS: RequestPermissionRequest['options'] = [
 
 const context = { cwd: '/work', now: 1 };
 
-describe('what lies beyond a sandbox level (ADR-0040)', () => {
-  const edit = (path: string) => ({
-    toolCallId: 'e',
-    kind: 'edit' as const,
-    locations: [{ path }],
-  });
-  const command = (bypass: boolean) => ({
-    toolCallId: 'c',
-    kind: 'execute' as const,
-    rawInput: { CommandLine: 'npm install', ...(bypass ? { BypassSandbox: true } : {}) },
-  });
-
-  it('holds nothing at full access', () => {
-    expect(beyondLevel(command(true), 'full-access', '/work')).toBe(false);
-    expect(beyondLevel(edit('/etc/hosts'), 'full-access', '/work')).toBe(false);
-  });
-
-  it('holds edits and commands outside the sandbox at read-only, and nothing else', () => {
-    expect(beyondLevel(edit('/work/a.md'), 'read-only', '/work')).toBe(true);
-    expect(beyondLevel(command(true), 'read-only', '/work')).toBe(true);
-    expect(beyondLevel(command(false), 'read-only', '/work')).toBe(false);
-    expect(beyondLevel({ toolCallId: 'r', kind: 'read' }, 'read-only', '/work')).toBe(false);
-  });
-
-  it('holds commands outside the sandbox and edits outside the folder and the temporary folders at workspace-write', () => {
-    expect(beyondLevel(command(true), 'workspace-write', '/work')).toBe(true);
-    expect(beyondLevel(command(false), 'workspace-write', '/work')).toBe(false);
-    expect(beyondLevel(edit('/work/src/a.ts'), 'workspace-write', '/work')).toBe(false);
-    expect(beyondLevel(edit('src/a.ts'), 'workspace-write', '/work')).toBe(false);
-    expect(beyondLevel(edit(join(tmpdir(), 'scratch.txt')), 'workspace-write', '/work')).toBe(
-      false,
-    );
-    expect(beyondLevel(edit('/Users/me/.zshrc'), 'workspace-write', '/work')).toBe(true);
-    expect(beyondLevel(edit('/work-other/a.ts'), 'workspace-write', '/work')).toBe(true);
-    // An edit that names no file cannot be shown to stay inside.
-    expect(beyondLevel({ toolCallId: 'e', kind: 'edit' }, 'workspace-write', '/work')).toBe(true);
-  });
-});
-
 describe('an approval', () => {
-  it('shows a command by its command line, offers allowing and denying once, and preselects denial beyond the level', () => {
+  it('shows a command by its command line, offers allowing and denying once, and preselects denial for leaving the sandbox (ADR-0043)', () => {
     const params: RequestPermissionRequest = {
       sessionId: 's',
       toolCall: {
@@ -68,7 +21,7 @@ describe('an approval', () => {
       },
       options: OPTIONS,
     };
-    const within = permissionApproval('r1', params, context, undefined, false);
+    const within = permissionApproval('r1', params, context, undefined);
     expect(within.request).toMatchObject({
       id: 'r1',
       action: 'command',
@@ -76,9 +29,6 @@ describe('an approval', () => {
       canAllowForSession: false,
       denyByDefault: false,
     });
-    expect(permissionApproval('r2', params, context, undefined, true).request.denyByDefault).toBe(
-      true,
-    );
     expect(within.request.title).toBe('echo probe-123');
     // A command that would leave the sandbox says so, as it otherwise looks like the same command.
     const leaving: RequestPermissionRequest = {
@@ -88,7 +38,7 @@ describe('an approval', () => {
         rawInput: { CommandLine: 'echo probe-123', BypassSandbox: true },
       },
     };
-    expect(permissionApproval('r3', leaving, context, undefined, true).request).toMatchObject({
+    expect(permissionApproval('r3', leaving, context, undefined).request).toMatchObject({
       title: 'Antigravity asks to run this command outside its sandbox',
       command: 'echo probe-123',
       denyByDefault: true,
@@ -115,7 +65,7 @@ describe('an approval', () => {
       },
       options: OPTIONS,
     };
-    expect(permissionApproval('r', params, context, undefined, false).request).toMatchObject({
+    expect(permissionApproval('r', params, context, undefined).request).toMatchObject({
       action: 'tool',
       toolName: 'mcp_github_create_issue',
     });

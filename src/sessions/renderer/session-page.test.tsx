@@ -43,7 +43,9 @@ function fakeBridge(state: SessionState | null = null) {
     showMenu: vi.fn<SessionsBridge['showMenu']>(() => Promise.resolve(null)),
     act: vi.fn<SessionsBridge['act']>(() => Promise.resolve(null)),
     search: vi.fn<SessionsBridge['search']>(() => Promise.resolve({ matches: [], unread: 0 })),
-    providers: () => Promise.resolve(['claude-code' as const, 'codex-cli' as const]),
+    providers: vi.fn<SessionsBridge['providers']>(() =>
+      Promise.resolve(['claude-code', 'codex-cli']),
+    ),
     dayFolder: () => Promise.resolve('/Users/me/3mukon-code/2026-10-28'),
     gateways: vi.fn<SessionsBridge['gateways']>((provider) =>
       Promise.resolve(provider === 'claude-code' ? ['work'] : []),
@@ -629,6 +631,27 @@ describe('SessionPage', () => {
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Permission mode' }).value).toBe(
       'yolo',
     );
+  });
+
+  it('shows Antigravity one setting, which says what each mode does there, and no sandbox level, and asks before yolo in its words (ADR-0043)', async () => {
+    const { bridge } = fakeBridge();
+    bridge.providers.mockResolvedValue(['claude-code', 'antigravity']);
+    render(page(bridge));
+    await settle();
+    expect(chooser('Sandbox')).toBeDefined();
+    choose('Provider', 'antigravity');
+    await settle();
+    expect(screen.queryByRole('combobox', { name: 'Sandbox' })).toBeNull();
+    expect(options('Permission mode')).toEqual([
+      [
+        'auto',
+        'Auto: Antigravity’s own review decides each action, and may run a command outside its sandbox',
+      ],
+      ['yolo', 'Yolo: Antigravity runs every action without asking, and without a sandbox'],
+    ]);
+    choose('Permission mode', 'yolo');
+    await settle();
+    expect(bridge.confirmYolo).toHaveBeenCalledWith('antigravity');
   });
 
   it('sends the images pasted into the composer or dropped on it, each of which it can take out', async () => {

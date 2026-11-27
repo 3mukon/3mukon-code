@@ -52,7 +52,7 @@ export function currentChoices(options: readonly SessionConfigOption[]): {
 // session events. ACP streams messages in chunks without ids, so a message lasts until something else
 // comes between its chunks; a replay gives each message whole. A tool call's file changes are reported
 // once it completes, from the diffs it showed. Antigravity's own modes stay out: the session's
-// permission mode is the app's (ADR-0040).
+// permission mode is the app's (ADR-0043).
 export class Translator {
   private message: { id: string; role: MessageRole } | null = null;
   private readonly calls = new Map<string, ToolCallInfo>();

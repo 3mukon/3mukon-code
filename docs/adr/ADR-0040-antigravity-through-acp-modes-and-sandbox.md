@@ -2,14 +2,14 @@
 id: ADR-0040
 type: adr
 title: Drive Antigravity through `agy acp` with a process per session, and map the app's modes and sandbox levels onto its modes and terminal sandbox
-status: accepted
+status: superseded
 visibility: public
 date: 2026-11-26
 summary: Each Antigravity session runs `agy acp --process-per-session`, the only form that takes the app's toolset over HTTP; the process runs the terminal sandbox at read-only and workspace-write and none at full access, auto is Antigravity's auto mode where offered except at read-only, where its default mode runs, and a request beyond the level is asked in auto and denied in yolo, as Codex's escalations are; the headless mode, the SDK, a shared process, plan mode, `--dangerously-skip-permissions` and auto mode at read-only were rejected
 scope: ["src/providers/antigravity/**"]
 tags: []
 supersedes: []
-superseded_by:
+superseded_by: ADR-0043
 ---
 
 ## Context

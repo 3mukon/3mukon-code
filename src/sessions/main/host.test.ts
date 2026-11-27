@@ -838,6 +838,65 @@ describe('SessionHost coordination', () => {
     ).rejects.toThrow('wider sandbox');
   });
 
+  // A host with Claude Code and Antigravity, whose sessions have one setting of their own (ADR-0043).
+  const withAntigravity = () => {
+    const claude = fakeProvider('claude-code', false, true);
+    const agy = fakeProvider('antigravity', false, true);
+    const host = new SessionHost(
+      [claude.provider, agy.provider],
+      memoryRecords().records,
+      memoryTextStorage(),
+      undefined,
+      new SessionInboxes(memoryInboxStorage()),
+    );
+    return { host, claude, agy, coordinator: host.coordinator() };
+  };
+
+  it('starts an Antigravity child at the level its auto counts as, takes no level for it, and refuses one to a parent at read-only (ADR-0043)', async () => {
+    const { host, claude, agy, coordinator } = withAntigravity();
+    const start = vi.spyOn(agy.provider, 'start');
+    const parent = await host.start('claude-code', { cwd: folder('web') }, { text: 'Lead' });
+    const child = await coordinator.start(parent, {
+      prompt: 'Use Gemini',
+      provider: 'antigravity',
+    });
+    expect(child.provider).toBe('antigravity');
+    expect(start.mock.calls[0]?.[0]).toMatchObject({ mode: 'auto', sandbox: 'workspace-write' });
+    await expect(
+      coordinator.start(parent, { prompt: 'x', provider: 'antigravity', sandbox: 'read-only' }),
+    ).rejects.toThrow('takes no sandbox level');
+    const reader = await host.start(
+      'claude-code',
+      { cwd: folder('web'), sandbox: 'read-only' },
+      { text: 'Read' },
+    );
+    claude.listeners[1]?.({ type: 'settings', sandbox: 'read-only' });
+    await expect(
+      coordinator.start(reader, { prompt: 'x', provider: 'antigravity' }),
+    ).rejects.toThrow('wider than your sandbox level, read-only');
+  });
+
+  it('counts an Antigravity session as workspace-write in auto and full access in yolo, and takes no level switch for it (ADR-0043)', async () => {
+    const { host, agy, coordinator } = withAntigravity();
+    const parent = await host.start(
+      'antigravity',
+      { cwd: folder('web'), sandbox: 'read-only' },
+      { text: 'Lead' },
+    );
+    await expect(
+      coordinator.start(parent, { prompt: 'x', provider: 'claude-code', sandbox: 'full-access' }),
+    ).rejects.toThrow('wider sandbox than its parent’s, workspace-write');
+    agy.listeners[0]?.({ type: 'mode', mode: 'yolo' });
+    const child = await coordinator.start(parent, {
+      prompt: 'Click through the app',
+      provider: 'claude-code',
+      sandbox: 'full-access',
+    });
+    expect(child.provider).toBe('claude-code');
+    await expect(host.setSandbox(parent, 'read-only')).rejects.toThrow('takes no sandbox level');
+    expect(host.providerOf(parent)).toBe('antigravity');
+  });
+
   // Models as the fake providers list them.
   const OPUS: ModelOption = { id: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high'] };
   const SONNET: ModelOption = { id: 'sonnet', label: 'Sonnet', efforts: ['low', 'high'] };

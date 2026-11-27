@@ -220,7 +220,8 @@ export function createBridge(
       choices: () => invoke(channels.sessions.choices) as Promise<FolderChoices>,
       rememberChoice: (folder, choice) =>
         invoke(channels.sessions.rememberChoice, folder, choice) as Promise<void>,
-      confirmYolo: () => invoke(channels.sessions.confirmYolo) as Promise<boolean>,
+      confirmYolo: (provider) =>
+        invoke(channels.sessions.confirmYolo, provider) as Promise<boolean>,
       start: (request) => invoke(channels.sessions.start, request) as Promise<string>,
       send: (id, text, images) => invoke(channels.sessions.send, id, text, images) as Promise<void>,
       interrupt: (id) => invoke(channels.sessions.interrupt, id) as Promise<void>,

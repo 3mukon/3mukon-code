@@ -81,7 +81,9 @@ export function sessionTools(): SessionTool[] {
       sandbox: z
         .enum(['read-only', 'workspace-write', 'full-access'])
         .optional()
-        .describe('A sandbox level no wider than yours; yours when left out.'),
+        .describe(
+          'A sandbox level no wider than yours; yours when left out. Leave it out for an antigravity child, which takes none.',
+        ),
       title: z
         .string()
         .trim()
@@ -151,7 +153,7 @@ export function sessionTools(): SessionTool[] {
     },
     {
       name: 'session_start',
-      description: `Start a child session that works beside you, in your folder, on the task its first message gives it; it starts once it has taken that message. It runs in auto mode with your sandbox level or a narrower one, its approvals go to the user, and it uses your provider, model and effort unless you choose others. A child can run on any provider, not only yours, and its provider decides which models it can use: to have a particular model do the work, choose the provider that offers it, which provider_list shows with the ids to give. It can message you with message_send, and you it. A child starts no sessions of its own, and at most ${String(CHILD_LIMIT)} of your children run at once. End a child with session_end once its work is done.`,
+      description: `Start a child session that works beside you, in your folder, on the task its first message gives it; it starts once it has taken that message. It runs in auto mode with your sandbox level or a narrower one, its approvals go to the user, and it uses your provider, model and effort unless you choose others. Antigravity takes no sandbox level: its sessions run its own modes, and count as workspace-write in auto and as full access in yolo, so an antigravity child counts as workspace-write and a parent at read-only cannot start one. A child can run on any provider, not only yours, and its provider decides which models it can use: to have a particular model do the work, choose the provider that offers it, which provider_list shows with the ids to give. It can message you with message_send, and you it. A child starts no sessions of its own, and at most ${String(CHILD_LIMIT)} of your children run at once. End a child with session_end once its work is done.`,
       inputSchema: start,
       offered: (coordinator, owner) => coordinator.mayStart(owner),
       call: async (coordinator, owner, args) => {
