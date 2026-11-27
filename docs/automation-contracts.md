@@ -2,7 +2,7 @@
 id: DOC-automation-contracts
 type: doc
 title: Proposed automation contracts and change boundaries
-status: draft
+status: archived
 visibility: public
 date: 2026-11-14
 summary: Proposed session-owned automation, per-call activity, app-drawn controls and acknowledged panels, with module boundaries, retained target summaries and explicit unavailable or indeterminate outcomes
@@ -13,6 +13,8 @@ superseded_by:
 ---
 
 ## Proposal status
+
+Archived on 2026-11-27. The code and the module READMEs named below describe these contracts as they are, and ADR-0023 to ADR-0027 record the decisions. This document stays as the proposal those ADRs link to, and is no longer kept in step with the code.
 
 These are the contracts for ADR-0023 to ADR-0027. Parts have landed, and the code and module READMEs win where this draft differs: the session automation facts and their event fold in `src/sessions/shared/`; the broker, activity, icon store, policy, scheduler and the five panel tools in `src/toolset/main/`; the UI ports and their fakes in `src/toolset/shared/`; the presentation contract, the window's rules and a fake window in `src/panels/shared/`, with the panel host in `src/panels/main/` and the window's side in `src/panels/renderer/`; each provider adapter's connection to the toolset and its delivery of presentation notices; `AutomationBridge` over the broker in `src/app/main/automation-ui.ts`; the presentation and automation members of the preload bridge, which the window's activity uses for its presentations' Show; the embedded browser's tools, contexts, tab and view ports in `src/browser/`, and the native helper, targets, observations, actions and control leases in `src/computer/`, whose isolated runtime checks remain; the window's entries for browser and computer calls and the line above a session's composer in `src/sessions/renderer/`; the browser panel with the tab's live page, the window's covers and its dimming in `src/browser/renderer/` and `src/ui/renderer/cover.ts`; the computer preview panel and the floating control's words in `src/computer/renderer/`; and the settings' Browser use and Computer use and the sessions' setup notices, through the setup host in `src/app/main/user-setup.ts` and the setup member of the preload bridge. ADR-0030 describes the Chrome connector. ADR-0031 defines the external browser scope. Runtime consumers build on the fakes first.
 
