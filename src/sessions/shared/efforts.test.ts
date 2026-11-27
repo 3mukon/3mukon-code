@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { effortInUse, effortToSet, modelInUse, startingEffort, titleEffort } from './efforts';
+import {
+  effortInUse,
+  effortToSet,
+  modelInUse,
+  orderedEfforts,
+  startingEffort,
+  titleEffort,
+} from './efforts';
 import type { ModelOption } from './events';
 
 const model = (efforts: string[], defaultEffort?: string): ModelOption => ({
@@ -79,5 +86,19 @@ describe('titleEffort', () => {
     expect(titleEffort(model(['turbo', 'deep']))).toBe('turbo');
     expect(titleEffort(model([]))).toBeNull();
     expect(titleEffort(undefined)).toBeNull();
+  });
+});
+
+describe('a model’s effort levels in order', () => {
+  it('lists them from the least to the most whatever order the provider gives, any the app does not know last, in the provider’s order', () => {
+    expect(orderedEfforts(['high', 'medium', 'low'])).toEqual(['low', 'medium', 'high']);
+    expect(orderedEfforts(['max', 'xhigh', 'minimal'])).toEqual(['minimal', 'xhigh', 'max']);
+    expect(orderedEfforts(['deep', 'high', 'quick', 'low'])).toEqual([
+      'low',
+      'high',
+      'deep',
+      'quick',
+    ]);
+    expect(orderedEfforts([])).toEqual([]);
   });
 });

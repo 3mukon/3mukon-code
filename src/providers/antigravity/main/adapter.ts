@@ -46,6 +46,7 @@ import type {
   SandboxLevel,
   SessionEvent,
 } from '../../../sessions/shared/events';
+import { EFFORT_LEVELS, orderedEfforts } from '../../../sessions/shared/efforts';
 import {
   presentationContext,
   PRESENTATION_CONTEXT_URI,
@@ -110,9 +111,6 @@ const NO_GATEWAYS = 'Antigravity has no gateways; its models are those of its ow
 
 const NO_LEVELS =
   'Antigravity takes no sandbox level: its mode, auto or yolo, decides what its commands reach.';
-
-// The effort levels the app knows, from the least to the most, in the order a model's are listed.
-const LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 // The folders of the probes still running, removed as the app's process exits, should it quit during a
 // probe, so that quitting leaves none behind.
@@ -416,7 +414,7 @@ function catalogOf(options: readonly SessionConfigOption[], listed: unknown): Ca
         return typeof id === 'string' ? [id] : [];
       })
     : [];
-  const known = new Set([...LEVELS, ...levels]);
+  const known = new Set([...EFFORT_LEVELS, ...levels]);
   const models = (modelOption === undefined ? [] : selectValues(modelOption)).map(
     ({ value, name }): ModelOption => {
       const efforts =
@@ -426,13 +424,10 @@ function catalogOf(options: readonly SessionConfigOption[], listed: unknown): Ca
               const level = id.startsWith(`${value}-`) ? id.slice(value.length + 1) : '';
               return known.has(level) ? [level] : [];
             });
-      const ordered = [...new Set(efforts)].sort(
-        (left, right) => rank(left) - rank(right) || left.localeCompare(right),
-      );
       return {
         id: value,
         label: name,
-        efforts: ordered,
+        efforts: orderedEfforts([...new Set(efforts)]),
         ...(value === current.model ? { default: true } : {}),
         ...(value === current.model && current.effort !== undefined
           ? { defaultEffort: current.effort }
@@ -445,11 +440,6 @@ function catalogOf(options: readonly SessionConfigOption[], listed: unknown): Ca
     defaultEfforts.set(current.model, current.effort);
   }
   return { models, defaultModel: current.model, defaultEfforts };
-}
-
-function rank(level: string): number {
-  const index = LEVELS.indexOf(level);
-  return index === -1 ? LEVELS.length : index;
 }
 
 // A select option's values, flat or in groups.

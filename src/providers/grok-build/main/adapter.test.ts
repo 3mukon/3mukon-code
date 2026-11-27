@@ -951,7 +951,8 @@ describe('starting a session', () => {
             id: 'grok-default',
             label: 'Grok Default',
             description: 'The usual one',
-            efforts: ['high', 'low'],
+            // Listed from the least to the most, as every provider's are, though Grok gives the most first.
+            efforts: ['low', 'high'],
             default: true,
             defaultEffort: 'high',
           },

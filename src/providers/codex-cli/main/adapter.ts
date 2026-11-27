@@ -26,6 +26,7 @@ import type {
   SandboxLevel,
   SessionEvent,
 } from '../../../sessions/shared/events';
+import { orderedEfforts } from '../../../sessions/shared/efforts';
 import { imageUrl } from '../../../sessions/shared/images';
 import type { AccountNews, AccountSource } from '../../../accounts/main/source';
 import type { ProviderInstall } from '../../../installs/main/install';
@@ -634,7 +635,9 @@ function modelOptions(models: Model[], defaults: Defaults): ModelOption[] {
     id: model.model,
     label: model.displayName,
     ...(model.description === '' ? {} : { description: model.description }),
-    efforts: model.supportedReasoningEfforts.map((option) => option.reasoningEffort),
+    efforts: orderedEfforts(
+      model.supportedReasoningEfforts.map((option) => option.reasoningEffort),
+    ),
     ...(model.model === selected ? { default: true } : {}),
     defaultEffort: defaults.effort ?? model.defaultReasoningEffort,
   }));

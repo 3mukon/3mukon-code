@@ -54,6 +54,7 @@ import type {
   SandboxLevel,
   SessionEvent,
 } from '../../../sessions/shared/events';
+import { orderedEfforts } from '../../../sessions/shared/efforts';
 import type { SendableImageType } from '../../../sessions/shared/images';
 import type { AccountNews, AccountSource } from '../../../accounts/main/source';
 import type { Binary, ProviderInstall } from '../../../installs/main/install';
@@ -485,7 +486,7 @@ function modelOptions(models: ModelInfo[], current: string | undefined): ModelOp
         id: model.value,
         label: model.displayName,
         ...(model.description === '' ? {} : { description: model.description }),
-        efforts: model.supportedEffortLevels ?? [],
+        efforts: orderedEfforts(model.supportedEffortLevels ?? []),
         ...(marked ? { default: true } : {}),
       },
     ];

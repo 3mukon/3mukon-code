@@ -50,6 +50,7 @@ import type {
   SandboxLevel,
   SessionEvent,
 } from '../../../sessions/shared/events';
+import { orderedEfforts } from '../../../sessions/shared/efforts';
 import type { AccountNews, AccountSource } from '../../../accounts/main/source';
 import type { ProviderInstall } from '../../../installs/main/install';
 import { isSignInError, readGrokAccount } from './account';
@@ -574,7 +575,10 @@ function catalogOf(modelState: unknown): Catalog {
       id,
       label: text(model.name) ?? id,
       ...(description === undefined ? {} : { description }),
-      efforts: efforts.flatMap((effort) => text(effort.value) ?? text(effort.id) ?? []),
+      // Grok lists them from the most to the least; the app lists every provider's the other way.
+      efforts: orderedEfforts(
+        efforts.flatMap((effort) => text(effort.value) ?? text(effort.id) ?? []),
+      ),
     });
   }
   // The model Grok uses when a session chooses none, and each model's own effort, marked on the list.

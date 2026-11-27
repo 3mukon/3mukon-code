@@ -28,7 +28,8 @@ export interface ModelOption {
   id: string;
   label: string;
   description?: string;
-  // The reasoning effort levels the model takes; empty when it takes none.
+  // The reasoning effort levels the model takes, from the least to the most (orderedEfforts in
+  // efforts.ts); empty when it takes none.
   efforts: ReasoningEffort[];
   // The model a session uses when it chooses none, as the provider resolves its own configuration.
   default?: boolean;
