@@ -1001,9 +1001,16 @@ export class SessionHost {
       start: (owner, request) => this.startChild(owner, request),
       end: (owner, id) => this.endChild(owner, id),
       send: (owner, to, summary, body) => this.sendMessage(owner, to, summary, body),
+      // A listing names each message's sender and summary, as a notice would, so it tells the agent of
+      // those it had not been told of, and no notice repeats them.
       inbox: (owner) => {
         this.caller(owner);
-        return this.inboxes.list(owner).map(entryOf);
+        const messages = this.inboxes.list(owner);
+        this.inboxes.told(
+          owner,
+          messages.filter((message) => message.toldAt === undefined).map((message) => message.id),
+        );
+        return messages.map(entryOf);
       },
       read: (owner, id) => {
         this.caller(owner);

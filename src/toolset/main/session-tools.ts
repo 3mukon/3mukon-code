@@ -132,7 +132,7 @@ export function sessionTools(): SessionTool[] {
       name: 'session_list',
       annotations: { readOnlyHint: true, openWorldHint: false },
       description:
-        'List the sessions of the user’s Sessions list, each an agent you can message: each one’s sessionId, title, provider, folder and status, and its parent’s sessionId for a child. Your own session, your parent and your children are marked.',
+        'List the sessions of the user’s Sessions list, each an agent you can message: each one’s sessionId, title, provider, folder and status, and its parent’s sessionId for a child. Your own session, your parent and your children are marked. A child’s messages and the app’s reports on it reach you by themselves, so there is no need to list the sessions to follow one.',
       inputSchema: z.object({}).strict(),
       call: (coordinator, owner) => {
         const sessions = coordinator.list(owner);
@@ -158,7 +158,7 @@ export function sessionTools(): SessionTool[] {
     {
       name: 'session_start',
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-      description: `Start a child session: another agent, on any provider and model, such as Claude, GPT, Gemini or Grok, to delegate a task to. It works beside you in your folder and in the user’s Sessions list, and starts once it has taken its first message, which is its task. Use it rather than a subagent of your own when the work needs another provider’s model, or a session the user can see and steer. Its provider decides which models it can use: to have a particular model do the work, choose the provider that offers it, which provider_list shows with the ids to give. It runs in auto mode with your sandbox level or a narrower one, its approvals go to the user, and it uses your provider, model and effort unless you choose others. Antigravity takes no sandbox level: its sessions run its own modes, and count as workspace-write in auto and as full access in yolo, so an antigravity child counts as workspace-write and a parent at read-only cannot start one. It can message you with message_send, and you it. A child starts no sessions of its own, and at most ${String(CHILD_LIMIT)} of your children run at once. End a child with session_end once its work is done.`,
+      description: `Start a child session: another agent, on any provider and model, such as Claude, GPT, Gemini or Grok, to delegate a task to. It works beside you in your folder and in the user’s Sessions list, and starts once it has taken its first message, which is its task. Use it rather than a subagent of your own when the work needs another provider’s model, or a session the user can see and steer. Its provider decides which models it can use: to have a particular model do the work, choose the provider that offers it, which provider_list shows with the ids to give. It runs in auto mode with your sandbox level or a narrower one, its approvals go to the user, and it uses your provider, model and effort unless you choose others. Antigravity takes no sandbox level: its sessions run its own modes, and count as workspace-write in auto and as full access in yolo, so an antigravity child counts as workspace-write and a parent at read-only cannot start one. It can message you with message_send, and you it: its messages, and the app’s report should it fail or stop, reach you by themselves, waking you when you are idle, so end your turn to wait for it rather than reading your inbox or listing sessions again and again. A child starts no sessions of its own, and at most ${String(CHILD_LIMIT)} of your children run at once. End a child with session_end once its work is done.`,
       inputSchema: start,
       offered: (coordinator, owner) => coordinator.mayStart(owner),
       call: async (coordinator, owner, args) => {
@@ -210,7 +210,7 @@ export function sessionTools(): SessionTool[] {
         openWorldHint: false,
       },
       description:
-        'Read your inbox. Without a messageId, list its messages, the newest first, each with its messageId, sender, summary, time and whether you read it. With a messageId, read that message’s body, which marks it read. New messages’ summaries also reach you by themselves. The inbox also holds the app’s own reports on your child sessions: a turn of one failed, the user interrupted one, or one stopped without you or itself ending it.',
+        'Read your inbox. Without a messageId, list its messages, the newest first, each with its messageId, sender, summary, time and whether you read it. With a messageId, read that message’s body, which marks it read. New messages’ summaries reach you by themselves, waking you when you are idle, so there is no need to check the inbox while you wait for one. The inbox also holds the app’s own reports on your child sessions: a turn of one failed, the user interrupted one, or one stopped without you or itself ending it.',
       inputSchema: read,
       call: (coordinator, owner, args) => {
         const { messageId } = read.parse(args);

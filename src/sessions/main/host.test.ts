@@ -1152,6 +1152,16 @@ describe('SessionHost coordination', () => {
     expect(last.coordinator.inbox(last.parent)).toEqual([]);
   });
 
+  it('takes a listing of the inbox as telling the agent of what it shows, so that no notice repeats it', async () => {
+    const { host, coordinator, parent } = await withParent();
+    const child = await coordinator.start(parent, { prompt: 'Write the tests' });
+    const message = coordinator.send(child.id, parent, 'Done', 'All green');
+    expect(coordinator.inbox(parent).map((entry) => entry.id)).toEqual([message.id]);
+    expect(coordinator.notices(parent)).toBeUndefined();
+    // Nothing shows in the activity as a notice, since the listing showed it.
+    expect(host.snapshot(parent)?.state.timeline.some((item) => item.type === 'inbox')).toBe(false);
+  });
+
   it('tells a session that is working with its next tool result, or beside the user’s next message', async () => {
     const { host, claude, coordinator, parent, emit } = await withParent();
     const child = await coordinator.start(parent, { prompt: 'Write the tests' });

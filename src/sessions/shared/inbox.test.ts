@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { inboxContext, inboxNoticesOf, senderWords, type InboxNotice } from './inbox';
+import {
+  INBOX_TEXT_HEAD,
+  inboxContext,
+  inboxNoticesOf,
+  senderWords,
+  withoutInboxText,
+  type InboxNotice,
+} from './inbox';
 
 const message: InboxNotice = {
   id: 'm1',
@@ -41,5 +48,14 @@ describe('senderWords', () => {
   it('names a message’s sender, and the child a report is on', () => {
     expect(senderWords(message)).toBe('from Write the tests (c1)');
     expect(senderWords(report)).toBe('the app’s report on your child Review (c2)');
+  });
+});
+
+describe('withoutInboxText', () => {
+  it('cuts the notices the toolset adds after a session tool’s text, and leaves other text as it is', () => {
+    expect(
+      withoutInboxText(`Your inbox is empty.\n\n${INBOX_TEXT_HEAD}\n- m1: from Grok: ok`),
+    ).toBe('Your inbox is empty.');
+    expect(withoutInboxText('Started the child session')).toBe('Started the child session');
   });
 });

@@ -35,6 +35,7 @@ import type { ToolItem } from '../shared/session-state';
 import { toolWords, type McpCall } from '../shared/tools';
 import { DiffView, linesChanged } from './diff-view';
 import { Images } from './images';
+import { withoutInboxText } from '../shared/inbox';
 
 const kindIcons: Record<ToolKind, typeof Pencil> = {
   read: FileText,
@@ -124,7 +125,10 @@ export function ToolCall({ item }: { item: ToolItem }) {
       <>
         {item.images !== undefined && <Images images={item.images} />}
         {(command !== undefined || item.output !== '') && (
-          <Output command={command} output={item.output} />
+          <Output
+            command={command}
+            output={item.mcp?.app === true ? withoutInboxText(item.output) : item.output}
+          />
         )}
       </>
     );

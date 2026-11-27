@@ -179,11 +179,22 @@ function inRun(item: TimelineItem): boolean {
 }
 
 // The activity's rows, from its items as they stand from the index given: two or more tool calls in a
-// row fold into one line once the agent's next message follows them, which says the work they did is
-// done. A run that nothing follows yet shows as its items, so that the work shows as it happens, and so
-// does one that anything else ends: the user's message, an approval or a question, the app's notices or
-// an error, each of which stays where it stands.
+// row fold into one line once the agent replies after them in the same turn, which says the work they
+// did is done. The user's message or an error ends a turn. A run with no reply after it yet shows as
+// its items, so that the work shows as it happens, and so does one whose turn ended without a reply.
+// The user's messages, approvals and questions, the app's notices and errors end a run, each staying
+// where it stands, so that a notice between calls splits them into runs that fold apart.
 export function foldRuns(items: readonly TimelineItem[], from = 0): Row[] {
+  // Whether the agent replies at or after each item within its turn.
+  const replied: boolean[] = [];
+  let ahead = false;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item === undefined) continue;
+    if (item.type === 'error' || (item.type === 'message' && item.role === 'user')) ahead = false;
+    else if (item.type === 'message' && item.role === 'agent') ahead = true;
+    replied[index] = ahead;
+  }
   const rows: Row[] = [];
   let run: Placed[] = [];
   const end = (folds: boolean) => {
@@ -202,7 +213,7 @@ export function foldRuns(items: readonly TimelineItem[], from = 0): Row[] {
       run.push(placed);
       return;
     }
-    end(item.type === 'message' && item.role === 'agent');
+    end(replied[offset] === true);
     rows.push({ type: 'item', ...placed });
   });
   end(false);

@@ -432,6 +432,29 @@ describe('folded tool calls', () => {
     );
   });
 
+  it('folds the calls before and after a notice apart, once the agent replies later in the turn', () => {
+    render(
+      <Timeline
+        state={state([
+          message('u', 'user', 'Have Grok reply ok'),
+          call('start'),
+          call('inbox'),
+          {
+            type: 'inbox',
+            notices: [{ id: 'n', from: 'grok', fromTitle: 'Grok', summary: 'ok', sentAt: 1 }],
+          },
+          call('read'),
+          call('end'),
+          message('a', 'agent', 'Grok replied ok'),
+        ])}
+        agent="Codex"
+      />,
+    );
+    expect(screen.getAllByRole('button', { name: /2 tool calls/ })).toHaveLength(2);
+    expect(screen.getByText('Grok')).toBeDefined();
+    expect(screen.queryByText('npm run start')).toBeNull();
+  });
+
   it('leaves a single call, a run that something else ends, and a run that nothing follows yet as they are', () => {
     render(
       <Timeline
