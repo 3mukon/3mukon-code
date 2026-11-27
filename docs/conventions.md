@@ -84,6 +84,7 @@ type is one of feat, fix, refactor, docs, test, chore. Technical reasons only; `
 - Claude Code: `CLAUDE.md` imports `AGENTS.md`. `.claude/settings.json` asks before protected files are edited, denies reading secret files and runs the bypass guard before every shell command with `onFailure: "block"`, so a missing or failing guard blocks the command; that needs Claude Code 2.1.295 or later. Ask rules cover Claude Code's file tools only, not shell commands that write files.
 - Codex: reads `AGENTS.md` natively. `.codex/hooks.json` runs the bypass guard before shell commands and the protected-path guard before patches. Codex hooks cannot ask, so the maintainer applies protected changes themselves. Codex loads project hooks only after the maintainer trusts them with `/hooks`, and again after every change to them. Gaps: Codex has no secret-file read denial; each hook command maps every failure to exit code 2, but whether a timed-out hook blocks is undocumented.
 - Other agent tools read `AGENTS.md` and get no guards; for them, only the maintainer's local hooks and CI apply.
+- Every agent tool: a session that works on this repository may itself run inside the running app, as one of its sessions. So an agent never quits, restarts or kills the running app or its processes without the maintainer's approval. To see the app run, it launches a separate copy with throwaway data, as the smoke tests do.
 
 ## Exemplars
 
