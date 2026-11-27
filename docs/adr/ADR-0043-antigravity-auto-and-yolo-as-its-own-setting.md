@@ -2,14 +2,14 @@
 id: ADR-0043
 type: adr
 title: Give an Antigravity session one setting of its own, auto as Antigravity's auto mode in its sandbox and yolo with every request approved and no sandbox, counted as workspace-write and full access
-status: accepted
+status: superseded
 visibility: public
 date: 2026-11-27
 summary: Each Antigravity session runs `agy acp --process-per-session`, in auto with `--sandbox` and Antigravity's auto mode, or its default mode where the account lacks auto mode, and in yolo with `--dangerously-skip-permissions` and no sandbox; the app's sandbox levels no longer apply to it, the host counts it as workspace-write in auto and as full access in yolo wherever levels are compared, and a switch between the two moves it to a new process; holding Antigravity to the app's levels, offering its other modes, and yolo inside its sandbox were rejected
 scope: ["src/providers/antigravity/**", "src/sessions/**", "src/toolset/**", "src/app/**"]
 tags: []
 supersedes: [ADR-0040]
-superseded_by:
+superseded_by: ADR-0044
 ---
 
 ## Context

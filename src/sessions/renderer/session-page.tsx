@@ -523,18 +523,7 @@ export function SessionPage({
       label: t('sessions.page.mode'),
       summary: true,
       value: settings.mode,
-      // A provider with one setting of its own says in its list what each mode does there (ADR-0043).
-      options: modes.map((mode) =>
-        ownSetting
-          ? {
-              value: mode,
-              label: t(mode === 'auto' ? 'sessions.mode.ownAuto' : 'sessions.mode.ownYolo', {
-                provider: providerName,
-              }),
-              short: t(`sessions.mode.${mode}`),
-            }
-          : { value: mode, label: t(`sessions.mode.${mode}`) },
-      ),
+      options: modes.map((mode) => ({ value: mode, label: t(`sessions.mode.${mode}`) })),
       onChange: switchTo.mode,
     },
     // A provider with one setting of its own takes no sandbox level (ADR-0043).

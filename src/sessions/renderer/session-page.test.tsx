@@ -633,7 +633,7 @@ describe('SessionPage', () => {
     );
   });
 
-  it('shows Antigravity one setting, which says what each mode does there, and no sandbox level, and asks before yolo in its words (ADR-0043)', async () => {
+  it('shows Antigravity one setting, named as every provider’s modes are, and no sandbox level, and asks before yolo in its words (ADR-0043, ADR-0044)', async () => {
     const { bridge } = fakeBridge();
     bridge.providers.mockResolvedValue(['claude-code', 'antigravity']);
     render(page(bridge));
@@ -642,12 +642,10 @@ describe('SessionPage', () => {
     choose('Provider', 'antigravity');
     await settle();
     expect(screen.queryByRole('combobox', { name: 'Sandbox' })).toBeNull();
+    // Its modes are named as every provider's are (ADR-0044).
     expect(options('Permission mode')).toEqual([
-      [
-        'auto',
-        'Auto: Antigravity’s own review decides each action, and may run a command outside its sandbox',
-      ],
-      ['yolo', 'Yolo: Antigravity runs every action without asking, and without a sandbox'],
+      ['auto', 'Auto'],
+      ['yolo', 'Yolo'],
     ]);
     choose('Permission mode', 'yolo');
     await settle();

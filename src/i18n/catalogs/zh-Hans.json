@@ -85,9 +85,7 @@
     },
     "mode": {
       "auto": "自动",
-      "yolo": "Yolo",
-      "ownAuto": "自动：由 {{provider}} 自己的审查决定每个操作，并可能在沙盒之外运行命令",
-      "ownYolo": "Yolo：{{provider}} 执行每个操作都不会询问，也不使用沙盒"
+      "yolo": "Yolo"
     },
     "page": {
       "message": "输入消息",

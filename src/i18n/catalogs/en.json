@@ -87,9 +87,7 @@
     },
     "mode": {
       "auto": "Auto",
-      "yolo": "Yolo",
-      "ownAuto": "Auto: {{provider}}’s own review decides each action, and may run a command outside its sandbox",
-      "ownYolo": "Yolo: {{provider}} runs every action without asking, and without a sandbox"
+      "yolo": "Yolo"
     },
     "page": {
       "message": "Message",
